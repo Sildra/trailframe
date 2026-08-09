@@ -1,0 +1,54 @@
+from gallery.models.photo import Photo
+from gallery.services.configuration_service import Node
+from gallery.services.database_service import DatabaseService
+from gallery.services.pipelines.pipeline import ForcedScan, Pipeline
+from gallery.services.scanners.exif_scanner import ExifScanner
+from gallery.services.scanners.file_scanner import FileScanner
+from gallery.services.scanners.thumbnail_scanner import ThumbnailScanner
+
+
+class CreationPipeline(Pipeline):
+    _scanners = [FileScanner(), ExifScanner(), ThumbnailScanner()]
+    _forced_scanners: list[str] | None = None
+
+    @classmethod
+    def _configure(cls, config: Node) -> None:
+        for scanner in cls._scanners:
+            scanner.configure(config)
+
+    @classmethod
+    def accepts(cls, item) -> bool:
+        if isinstance(item, ForcedScan):
+            return True
+
+        return isinstance(item, Photo) or super().accepts(item)
+
+    @classmethod
+    async def _process_item(cls, item) -> bool:
+        if isinstance(item, ForcedScan):
+            cls._forced_scanners = item.scanners or None
+            cls._log(f"forced scan {'-> '.join(item.scanners) if item.scanners else 'off'}")
+            return True
+
+        executor = cls.get_executor()
+        updated = False
+
+        if cls._forced_scanners is not None:
+            name_set = set(cls._forced_scanners)
+
+            for scanner in cls._scanners:
+                if scanner.name in name_set:
+                    updated = True
+                    await scanner.execute(item, executor, force=True)
+        else:
+            for scanner in cls._scanners:
+                if scanner.accept(item):
+                    updated = True
+                    await scanner.execute(item, executor)
+
+        if updated:
+            async with DatabaseService.create_session() as session:
+                await session.merge(item)
+                await session.commit()
+
+        return True

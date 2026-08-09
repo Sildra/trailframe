@@ -1,0 +1,17 @@
+__pycache__
+*.pyc
+.ruff_cache
+
+node_modules/
+dist/
+
+# Backend runtime artifacts (CWD when launched)
+custom_component/trailframe/backend/config.yaml
+custom_component/trailframe/backend/gallery.db
+custom_component/trailframe/backend/photos/
+custom_component/trailframe/backend/thumbnails/
+custom_component/trailframe/backend/trash/
+custom_component/trailframe/backend/maps/
+custom_component/trailframe/backend/activities/
+custom_component/trailframe/backend/tiles/
+custom_component/trailframe/backend/models/
