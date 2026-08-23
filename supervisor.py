@@ -13,7 +13,7 @@ import sys
 import time
 from pathlib import Path
 
-BACKEND_DIR = Path(__file__).resolve().parent / "custom_component" / "trailframe" / "backend"
+BACKEND_DIR = Path(__file__).resolve().parent
 
 
 def main() -> int:
@@ -52,7 +52,7 @@ def main() -> int:
     while not stop:
         print("[launcher] starting backend...", flush=True)
         backend = subprocess.Popen(
-            [sys.executable, "-m", "gallery.main", *sys.argv[1:]],
+            [sys.executable, "-m", "trailframe.main", *sys.argv[1:]],
             cwd=BACKEND_DIR,
         )
 

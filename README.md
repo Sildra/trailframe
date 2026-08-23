@@ -3,7 +3,6 @@
 [![GitHub Release](https://img.shields.io/github/release/sildra/trailframe.svg?style=for-the-badge)](https://github.com/sildra/trailframe/releases)
 [![GitHub Activity](https://img.shields.io/github/commit-activity/y/sildra/trailframe.svg?style=for-the-badge)](https://github.com/sildra/trailframe/commits/main)
 [![License](https://img.shields.io/github/license/sildra/trailframe.svg?style=for-the-badge)](LICENSE)
-[![hacs](https://img.shields.io/badge/HACS-Custom-41BDF5.svg?style=for-the-badge)](https://github.com/custom-components/hacs)
 
 
 A self-hosted photo gallery for people who move: photos and GPS activities (Garmin Connect / GPX) live side by side, linked by time and place. One server hosts everything — a FastAPI backend that also serves its web UI.
@@ -66,12 +65,32 @@ Scanners can be force re-run individually from the Tools page — e.g. regenerat
 - Per-scanner throughput (items processed and speed).
 - Storage overview: database size plus disk usage of every data folder.
 
+## Install
+
+A wheel is attached to every [release](https://github.com/sildra/trailframe/releases/latest): download the latest `trailframe-…-py3-none-any.whl` and install it with pip (Python 3.12 or newer):
+
+```bash
+pip install trailframe-…-py3-none-any.whl
+```
+
+All Python dependencies are pulled in automatically; the web UI is bundled inside the wheel.
+
 ## Running
 
-Build the web UI once (`npm install && npm run build` inside `custom_component/trailframe/frontend`), then start the server from the repository root:
+Run the `trailframe` command from the folder where all data (database, thumbnails, caches, trash) should live:
+
+```bash
+trailframe --config path/to/config.yaml
+```
+
+(`python -m trailframe.main` is equivalent.) The server listens on port 8000 by default; open `http://localhost:8000`. On first start a default `config.yaml` is written to the current directory.
+
+### From source
+
+Build the web UI once (`npm install && npm run build` inside `frontend/`), then start the server from the repository root:
 
 ```bash
 python supervisor.py --config path/to/config.yaml
 ```
 
-The server listens on port 8000 by default; open `http://localhost:8000`. On first start a default `config.yaml` is written next to the backend, where all data (database, thumbnails, caches, trash) also lives.
+The supervisor restarts the server whenever it exits and forwards SIGTERM/SIGBREAK to it. To build a wheel yourself, build the web UI first, then run `pip wheel .`.

@@ -1,0 +1,74 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "trailframe"
+version = "0.1.0"
+authors = [
+    { name="Thibaut Fresnet", email="sildra.fr@gmail.com" },
+]
+description = "Photo gallery app with FastAPI backend and React frontend"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.12"
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+    "Natural Language :: English",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3"
+]
+dependencies = [
+    "fastapi",
+    "uvicorn",
+    "pyyaml",
+    "pillow",
+    "sqlmodel",
+    "sqlalchemy[asyncio]",
+    "aiosqlite",
+    "requests",
+    "shapely",
+    "numpy",
+    "s2sphere",
+    "py-staticmaps",
+    "garminconnect",
+    "ultralytics",
+    "opencv-python",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff",
+    "openapi-typescript",
+]
+
+[project.scripts]
+trailframe = "trailframe.main:main"
+
+[project.urls]
+Homepage = "https://github.com/Sildra/Trailframe"
+Issues = "https://github.com/Sildra/Trailframe/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["trailframe"]
+# frontend/dist is gitignored; re-include it when building from an extracted sdist
+artifacts = ["trailframe/frontend/dist"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"frontend/dist" = "trailframe/frontend/dist"
+
+# ship frontend/dist at its original location so the wheel built FROM this
+# sdist can still resolve its force-include source path
+[tool.hatch.build.targets.sdist]
+artifacts = ["frontend/dist"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+
+[tool.ruff.format]
+skip-magic-trailing-comma = true
+
+[tool.ruff.lint.isort]
+split-on-trailing-comma = false
