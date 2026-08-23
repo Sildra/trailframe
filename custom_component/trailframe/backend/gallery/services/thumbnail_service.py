@@ -5,6 +5,7 @@ from PIL import Image
 
 from gallery.models.photo import Photo
 from gallery.services.configuration_service import Node
+from gallery.services.folder_service import FolderService
 from gallery.services.service import Service
 
 _INVALID_FILENAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
@@ -60,7 +61,7 @@ class ThumbnailService(Service):
 
         thumbnail.parent.mkdir(parents=True, exist_ok=True)
 
-        with Image.open(photo.path) as image:
+        with Image.open(FolderService.resolve(photo.path)) as image:
             image.thumbnail((size, size))
             image.save(thumbnail, format="WEBP", quality=85)
 

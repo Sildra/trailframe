@@ -1,13 +1,12 @@
-from pathlib import Path
 import math
-from typing import Any
 from datetime import datetime
 
-from PIL import Image, ExifTags
-from PIL.ExifTags import TAGS, GPSTAGS
+from PIL import ExifTags, Image
+from PIL.ExifTags import GPSTAGS, TAGS
 
-from gallery.services.scanners.scanner import Scanner
 from gallery.models.photo import Photo
+from gallery.services.folder_service import FolderService
+from gallery.services.scanners.scanner import Scanner
 
 
 class ExifScanner(Scanner):
@@ -22,7 +21,7 @@ class ExifScanner(Scanner):
         return not photo.exif
 
     def scan(self, photo: Photo) -> None:
-        path = Path(photo.path)
+        path = FolderService.resolve(photo.path)
 
         with Image.open(path) as image:
             exif = image.getexif()

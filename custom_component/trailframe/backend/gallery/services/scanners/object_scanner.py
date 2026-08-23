@@ -3,6 +3,7 @@ from pathlib import Path
 
 from gallery.models.photo import Photo
 from gallery.services.configuration_service import Node
+from gallery.services.folder_service import FolderService
 from gallery.services.scanners.scanner import Scanner
 
 YOLO_MODELS = {
@@ -33,7 +34,7 @@ class ObjectScanner(Scanner):
 
     def scan(self, photo: Photo) -> None:
         model = self._get_model()
-        results = model(str(photo.path), verbose=False)
+        results = model(str(FolderService.resolve(photo.path)), verbose=False)
         detections = []
 
         for result in results:

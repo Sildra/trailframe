@@ -25,7 +25,7 @@ from gallery.services.gpx_service import GpxService
 from gallery.services.location_service import LocationService
 from gallery.services.map_service import MapService
 from gallery.services.pipeline_service import PipelineService
-from gallery.services.storage_service import StorageService
+from gallery.services.statistics_service import StatisticsService
 from gallery.services.thumbnail_service import ThumbnailService
 from gallery.services.tile_service import TileService
 
@@ -73,7 +73,7 @@ def create_app(args: argparse.Namespace) -> FastAPI:
         LocationService.configure(general_node)
         MapService.configure(general_node)
         TileService.configure(root_node)
-        StorageService.configure(general_node)
+        StatisticsService.configure(general_node)
         ConfigurationService.save()
 
         # Tables must exist before the pipelines consume items

@@ -1,7 +1,6 @@
 import mimetypes
 import random
 from datetime import date, datetime, time, timedelta
-from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
@@ -225,7 +224,7 @@ async def delete_photo(photo_id: int, session: AsyncSession = Depends(DatabaseSe
     if photo is None:
         raise HTTPException(404, f"Photo {photo_id} not found")
 
-    source = Path(photo.path)
+    source = FolderService.resolve(photo.path)
     FolderService.delete(source)
 
     for size in ThumbnailService.sizes():
@@ -292,8 +291,9 @@ async def get_image(photo_id: int, session: AsyncSession = Depends(DatabaseServi
     if photo_path is None:
         raise HTTPException(404, f"Photo {photo_id} not found")
 
-    media_type, _ = mimetypes.guess_type(photo_path)
-    return FileResponse(photo_path, media_type=media_type)
+    source = FolderService.resolve(photo_path)
+    media_type, _ = mimetypes.guess_type(source.name)
+    return FileResponse(source, media_type=media_type)
 
 
 @router.get("/{photo_id}/thumbnail")

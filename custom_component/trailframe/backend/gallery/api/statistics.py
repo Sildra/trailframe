@@ -4,8 +4,7 @@ from pydantic import BaseModel
 import psutil
 
 from gallery.models.scanner_stat import ScannerStatSummary
-from gallery.services.scanner_stats_service import ScannerStatsService
-from gallery.services.storage_service import StorageService
+from gallery.services.statistics_service import StatisticsService
 
 router = APIRouter(prefix="/api/statistics", tags=["statistics"])
 
@@ -27,14 +26,14 @@ class ProcessStats(BaseModel):
 
 @router.get("/scanners", response_model=list[ScannerStatSummary])
 async def list_scanner_statistics() -> list[ScannerStatSummary]:
-    return await ScannerStatsService.get_summary()
+    return await StatisticsService.get_scanner_summary()
 
 
 @router.get("/storage", response_model=StorageStats)
 async def get_storage_statistics() -> StorageStats:
     return StorageStats(
-        database_size=StorageService.get_database_size(),
-        filesystem=[FolderStat(**entry) for entry in StorageService.get_folder_sizes()],
+        database_size=StatisticsService.get_database_size(),
+        filesystem=[FolderStat(**entry) for entry in StatisticsService.get_folder_sizes()],
     )
 
 

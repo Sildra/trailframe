@@ -4,6 +4,7 @@ from pathlib import Path
 import cv2
 
 from gallery.models.photo import Photo
+from gallery.services.folder_service import FolderService
 from gallery.services.scanners.scanner import Scanner
 
 
@@ -20,7 +21,7 @@ class BrisqueScanner(Scanner):
 
     def scan(self, photo: Photo) -> None:
         return
-        image = cv2.imread(str(photo.path), cv2.IMREAD_COLOR)
+        image = cv2.imread(str(FolderService.resolve(photo.path)), cv2.IMREAD_COLOR)
         score = cv2.quality.QualityBRISQUE_compute(image, self._model, self._range)[0]
 
         if math.isfinite(score):

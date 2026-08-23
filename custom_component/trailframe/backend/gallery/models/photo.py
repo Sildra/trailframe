@@ -11,6 +11,7 @@ class Photo(SQLModel, table=True):
     filename: str | None = Field(index=True)
     file_size: int | None = Field(index=True)
     date: datetime | None = Field(index=True)
+    source: str | None = None
     is_favorite: bool = Field(default=False)
     latitude: float | None = None
     longitude: float | None = None
@@ -50,6 +51,7 @@ class PhotoDetail(BaseModel):
     filename: str | None = None
     file_size: int | None = None
     date: datetime | None = None
+    source: str | None = None
     is_favorite: bool = False
     latitude: float | None = None
     longitude: float | None = None
@@ -90,6 +92,7 @@ class PhotoDetail(BaseModel):
             filename=photo.filename,
             file_size=photo.file_size,
             date=photo.date,
+            source=photo.source,
             is_favorite=bool(photo.is_favorite),
             latitude=photo.latitude,
             longitude=photo.longitude,

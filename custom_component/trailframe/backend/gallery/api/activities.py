@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from gallery.models.activity import Activity, ActivitySummary, GarminActivitySummary, GpxActivitySummary
 from gallery.models.photo import Photo, PhotoDetail
 from gallery.services.activity_service import ActivityService
+from gallery.services.folder_service import FolderService
 from gallery.services.garmin_connect_service import GarminConnectService
 from gallery.services.gpx_service import GpxService
 from gallery.services.map_service import MapService
@@ -130,7 +131,7 @@ def _build_zip_response(activity: Activity, photos: list[Photo], overlay_path: P
 
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
         for photo in photos:
-            path = Path(photo.path)
+            path = FolderService.resolve(photo.path)
 
             if path.is_file():
                 archive.write(path, arcname=path.name)

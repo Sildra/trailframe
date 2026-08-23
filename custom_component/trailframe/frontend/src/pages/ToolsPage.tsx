@@ -342,10 +342,11 @@ function MapPane() {
                                         }}
                                     >
                                         <Popup>
-                                            <Box sx={{ fontSize: 13 }}>
+                                            {/* Leaflet's popup bubble is always white — pin colors instead of using theme tokens */}
+                                            <Box sx={{ fontSize: 13, color: "#333" }}>
                                                 <Box sx={{ fontWeight: 600, mb: 0.5 }}>{a.name ?? `Activity ${a.id}`}</Box>
                                                 {a.start_time && (
-                                                    <Box sx={{ color: "text.secondary" }}>{formatDateTime(a.start_time)}</Box>
+                                                    <Box sx={{ color: "#666" }}>{formatDateTime(a.start_time)}</Box>
                                                 )}
                                                 {(a.distance != null || a.duration != null) && (
                                                     <Box>

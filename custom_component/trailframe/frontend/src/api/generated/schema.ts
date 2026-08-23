@@ -832,6 +832,8 @@ export interface components {
             file_size?: number | null;
             /** Date */
             date?: string | null;
+            /** Source */
+            source?: string | null;
             /**
              * Is Favorite
              * @default false

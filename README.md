@@ -1,6 +1,14 @@
 # Trailframe
 
+[![GitHub Release](https://img.shields.io/github/release/sildra/trailframe.svg?style=for-the-badge)](https://github.com/sildra/trailframe/releases)
+[![GitHub Activity](https://img.shields.io/github/commit-activity/y/sildra/trailframe.svg?style=for-the-badge)](https://github.com/sildra/trailframe/commits/main)
+[![License](https://img.shields.io/github/license/sildra/trailframe.svg?style=for-the-badge)](LICENSE)
+[![hacs](https://img.shields.io/badge/HACS-Custom-41BDF5.svg?style=for-the-badge)](https://github.com/custom-components/hacs)
+
+
 A self-hosted photo gallery for people who move: photos and GPS activities (Garmin Connect / GPX) live side by side, linked by time and place. One server hosts everything — a FastAPI backend that also serves its web UI.
+
+![Gallery view](docs/img/gallery_fish_dog.jpg)
 
 ## Photo library
 
@@ -16,6 +24,8 @@ A self-hosted photo gallery for people who move: photos and GPS activities (Garm
 - Every activity gets a trace map; photos taken during the activity appear alongside it.
 - Interactive map with selectable traces and popups showing distance, duration, and time.
 
+![Garmin activities](docs/img/activities_garmin.png)
+
 ## Slideshows
 
 - Slideshow sources: an activity (photos + trace), a group, or a fully custom selection.
@@ -23,6 +33,9 @@ A self-hosted photo gallery for people who move: photos and GPS activities (Garm
 - **Thumbnail mode** renders slides from cached thumbnails instead of full images — smooth playback even for large libraries, with the size chosen automatically from the available screen space.
 - Standalone kiosk entry (`/slideshow.html`) with deep-linkable URLs for dedicated screens.
 - ZIP export of an activity's photos.
+
+![Slideshow with activity trace](docs/img/slideshow_activity_1.png)
+![Slideshow photo view](docs/img/slideshow_activity_2.jpg)
 
 ## Enrichment pipelines
 
@@ -45,6 +58,8 @@ Scanners can be force re-run individually from the Tools page — e.g. regenerat
 
 - Wireframe maps of your photo coverage and per-photo location maps.
 - Built-in tile cache/proxy: tiles are fetched once from the configured provider and served locally afterwards.
+
+![Tools map with activity traces](docs/img/tools_map.png)
 
 ## Statistics
 

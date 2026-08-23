@@ -1,4 +1,3 @@
-from pathlib import Path
 from typing import Any
 
 from sqlalchemy import select
@@ -33,27 +32,7 @@ class PipelineService(Service):
             await pipeline.stop()
 
     @classmethod
-    async def _resolve(cls, item: Any) -> Photo:
-        if isinstance(item, Photo):
-            return item
-
-        path = str(Path(item))
-
-        async with DatabaseService.create_session() as session:
-            existing = (
-                await session.execute(select(Photo).where(Photo.path == path))
-            ).scalar_one_or_none()
-
-            if existing is not None:
-                return existing
-
-        return Photo(path=path)
-
-    @classmethod
     async def next(cls, item: Any, pipeline: type[Pipeline] | None = None) -> None:
-        if isinstance(item, (str, Path)):
-            item = await cls._resolve(item)
-
         if pipeline is None:
             candidates = cls._pipelines
         else:

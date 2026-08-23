@@ -1,4 +1,5 @@
 from gallery.models.photo import Photo
+from gallery.services.folder_service import FolderService
 from gallery.services.scanners.scanner import Scanner
 
 
@@ -14,5 +15,5 @@ class PerceptualHashScanner(Scanner):
         import imagehash
         from PIL import Image
 
-        image = Image.open(photo.path)
+        image = Image.open(FolderService.resolve(photo.path))
         photo.phash = imagehash.phash(image).hash.flatten().tobytes()

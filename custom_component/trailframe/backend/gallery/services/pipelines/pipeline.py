@@ -164,9 +164,9 @@ class Pipeline(Service):
         if not stats:
             return
 
-        from gallery.services.scanner_stats_service import ScannerStatsService
+        from gallery.services.statistics_service import StatisticsService
 
-        await ScannerStatsService.record_run(stats)
+        await StatisticsService.record_run(stats)
 
     @classmethod
     @abstractmethod
