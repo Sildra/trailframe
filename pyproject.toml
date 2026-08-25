@@ -1,10 +1,13 @@
 [build-system]
-requires = ["hatchling"]
+requires = [
+    "hatchling",
+    "hatch-vcs"
+]
 build-backend = "hatchling.build"
 
 [project]
 name = "trailframe"
-version = "0.1.0"
+dynamic = ["version"]
 authors = [
     { name="Thibaut Fresnet", email="sildra.fr@gmail.com" },
 ]
@@ -21,6 +24,7 @@ classifiers = [
 ]
 dependencies = [
     "fastapi",
+    "python-multipart",
     "uvicorn",
     "pyyaml",
     "pillow",
@@ -50,18 +54,21 @@ trailframe = "trailframe.main:main"
 Homepage = "https://github.com/Sildra/Trailframe"
 Issues = "https://github.com/Sildra/Trailframe/issues"
 
+[tool.hatch.build.hooks.vcs]
+version-file = "trailframe/_version.py"
+
 [tool.hatch.build.targets.wheel]
 packages = ["trailframe"]
-# frontend/dist is gitignored; re-include it when building from an extracted sdist
 artifacts = ["trailframe/frontend/dist"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "frontend/dist" = "trailframe/frontend/dist"
 
-# ship frontend/dist at its original location so the wheel built FROM this
-# sdist can still resolve its force-include source path
 [tool.hatch.build.targets.sdist]
 artifacts = ["frontend/dist"]
+
+[tool.hatch.version]
+source = "vcs"
 
 [tool.ruff]
 target-version = "py312"
