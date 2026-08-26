@@ -9,12 +9,7 @@ from trailframe.services.pipeline_service import PipelineService
 
 router = APIRouter(prefix="/api/events", tags=["events"])
 
-_shutting_down = False
-
-
-def stop_streams(*args) -> None:
-    global _shutting_down
-    _shutting_down = True
+_server = None
 
 
 def _format_sse(event: str, data: dict[str, Any]) -> str:
@@ -25,7 +20,7 @@ def _format_sse(event: str, data: dict[str, Any]) -> str:
 async def _event_stream():
     last_message: dict[str, Any] | None = None
 
-    while not _shutting_down:
+    while not _server.should_exit:
         message = PipelineService.get_snapshot()
 
         if message != last_message:
@@ -33,7 +28,7 @@ async def _event_stream():
             last_message = message
 
         await asyncio.sleep(0.2)
-    yield _format_sse("pipeline", dict({"Text": "Server is shutting down"}))
+    yield _format_sse("pipeline", {"Text": "Server is shutting down"})
 
 
 @router.get("")

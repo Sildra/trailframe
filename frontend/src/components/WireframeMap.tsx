@@ -42,7 +42,7 @@ export default function WireframeMap({ photoId, wireframe, map, className }: Wir
     return (
         <Box className={className} sx={{ position: "relative", bgcolor: "#ffffff" }}>
             <img
-                src={`/api/photos/${display.photoId}/wireframe`}
+                src={`./api/photos/${display.photoId}/wireframe`}
                 alt="Location map"
                 onError={() => setFailed(display)}
                 style={{

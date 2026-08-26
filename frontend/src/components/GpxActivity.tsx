@@ -82,7 +82,7 @@ export default function GpxActivity() {
             const formData = new FormData();
             formData.append("file", file);
 
-            const response = await fetch("/api/activities/gpx/upload", {
+            const response = await fetch("./api/activities/gpx/upload", {
                 method: "POST",
                 body: formData,
             });

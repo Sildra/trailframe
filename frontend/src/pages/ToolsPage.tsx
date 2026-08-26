@@ -310,7 +310,7 @@ function MapPane() {
         <Box sx={{ display: "flex", flexDirection: "column", gap: 1, flex: 1, minHeight: 0 }}>
             <Box sx={{ flex: 1, minHeight: 0, borderRadius: 1, overflow: "hidden", border: 1, borderColor: "divider", position: "relative" }}>
                 <MapContainer center={center} zoom={2} style={{ height: "100%", width: "100%" }}>
-                    <TileLayer attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>' url="/api/tiles/{z}/{x}/{y}.png" />
+                    <TileLayer attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>' url="./api/tiles/{z}/{x}/{y}.png" />
                     <FitBounds photos={showPhotos ? data.photos : []} activities={showActivities ? data.activities : []} />
                     <Pane name="photos" style={{ zIndex: 400 }}>
                         {showPhotos &&
@@ -382,7 +382,7 @@ function MapPane() {
                         }}
                     >
                         <img
-                            src={`/api/photos/${selectedPhoto.id}/thumbnail?size=400`}
+                            src={`./api/photos/${selectedPhoto.id}/thumbnail?size=400`}
                             alt=""
                             style={{ width: 400, height: "auto", borderRadius: 4, boxShadow: "0 4px 20px rgba(0,0,0,0.5)" }}
                         />

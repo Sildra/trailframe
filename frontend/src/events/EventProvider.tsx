@@ -66,7 +66,7 @@ export function EventProvider({ children }: { children: ReactNode }) {
     );
 
     useEffect(() => {
-        const source = new EventSource("/api/events");
+        const source = new EventSource("./api/events");
 
         source.addEventListener("pipeline", (event) => {
             const data = JSON.parse((event as MessageEvent).data) as Record<string, string>;

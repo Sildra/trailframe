@@ -36,6 +36,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--folder", type=Path, default=None, help="Base folder where photos and thumbnails are stored")
     parser.add_argument("--database", type=Path, default=None, help="SQLite database")
     parser.add_argument("--port", type=int, default=None, help="API port")
+    parser.add_argument("--root-path", type=str, default="/", help="Root path prefix when behind a reverse proxy")
     parser.add_argument("--openapi", type=Path, default=None, metavar="FILE", help="Write OpenAPI schema to FILE and exit")
     return parser.parse_args()
 
@@ -80,7 +81,6 @@ def create_app(args: argparse.Namespace) -> FastAPI:
         await DatabaseService.start()
         await PipelineService.start()
         await FolderService.start()
-        # signal.signal(signal.SIGINT, stop_streams)
 
         yield
 
@@ -88,7 +88,9 @@ def create_app(args: argparse.Namespace) -> FastAPI:
         await PipelineService.stop()
         await DatabaseService.stop()
 
-    app = FastAPI(title="Trailframe", version="0.1.0", lifespan=lifespan)
+    root_path = args.root_path.rstrip("/") or "/"
+
+    app = FastAPI(title="Trailframe", version="0.1.0", lifespan=lifespan, root_path=root_path)
 
     app.include_router(about_router)
     app.include_router(photos_router)
@@ -120,12 +122,22 @@ def main() -> None:
         args.openapi.write_text(json.dumps(app.openapi(), indent=2))
         return
 
-    uvicorn.run(
+    from trailframe.api import events
+
+    config = uvicorn.Config(
         app,
         host="0.0.0.0",
         port=ConfigurationService.root().get_path_value("general.api_port"),
-        timeout_graceful_shutdown=5
+        timeout_graceful_shutdown=5,
     )
+    config.load_app()
+    server = uvicorn.Server(config)
+    events._server = server
+
+    try:
+        server.run()
+    except KeyboardInterrupt:
+        pass
 
 
 if __name__ == "__main__":

@@ -22,7 +22,7 @@ export type SlideshowSource =
     | { kind: "group"; name: string; photoIds: number[]; thumbnails?: boolean };
 
 function slideImageUrl(photoId: number, size?: number | null): string {
-    return size ? `/api/photos/${photoId}/thumbnail?size=${size}` : `/api/photos/${photoId}/image`;
+    return size ? `./api/photos/${photoId}/thumbnail?size=${size}` : `./api/photos/${photoId}/image`;
 }
 
 interface SlideshowPageProps {
@@ -495,7 +495,7 @@ export default function SlideshowPage({ source, onExit }: SlideshowPageProps) {
                     await new Promise<void>((resolve, reject) => {
                         mapImg.onload = () => resolve();
                         mapImg.onerror = () => reject(new Error("map image failed to load"));
-                        mapImg.src = `/api/activities/${activityId}/map`;
+                        mapImg.src = `./api/activities/${activityId}/map`;
                     });
 
                     ctx.drawImage(mapImg, 0, 0, mapWidth, mapHeight);
@@ -512,7 +512,7 @@ export default function SlideshowPage({ source, onExit }: SlideshowPageProps) {
                 form.append("overlay", overlay, "map.png");
             }
 
-            const response = await fetch(`/api/activities/${activityId}/zip`, { method: "POST", body: form });
+            const response = await fetch(`./api/activities/${activityId}/zip`, { method: "POST", body: form });
 
             if (!response.ok) {
                 throw new Error(`zip export failed: ${response.status}`);
@@ -607,7 +607,7 @@ export default function SlideshowPage({ source, onExit }: SlideshowPageProps) {
                 ) : slide.kind === "map" ? (
                     <MapContent
                         box={stageBox}
-                        mapUrl={`/api/activities/${activityId}/map`}
+                        mapUrl={`./api/activities/${activityId}/map`}
                         mapData={mapData}
                         photoDots={photoDots}
                         onError={() => setMapFailed(true)}

@@ -225,7 +225,7 @@ export default function GalleryPage() {
 
         for (const id of ids) {
             const img = new Image();
-            img.src = `/api/photos/${id}/image`;
+            img.src = `./api/photos/${id}/image`;
         }
     }, [selectedPhotoId, orderedPhotoIds]);
 

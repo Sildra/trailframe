@@ -25,7 +25,7 @@ export default function UploadButton() {
             const formData = new FormData();
             formData.append("file", file);
 
-            const response = await fetch("/api/photos/upload", {
+            const response = await fetch("./api/photos/upload", {
                 method: "POST",
                 body: formData,
             });
