@@ -47,6 +47,8 @@ const YOLO_MODELS: Record<string, string> = {
     "yolo26x.pt": "Extra Large",
 };
 
+const CONTROL_HEIGHT = 30;
+
 function ModelChooser({
     value,
     path,
@@ -93,7 +95,12 @@ function ModelChooser({
                 fullWidth
                 value={value}
                 onChange={(e) => onUpdate(path, e.target.value)}
-                sx={{ fontSize: 14 }}
+                sx={{
+                    fontSize: 14,
+                    height: CONTROL_HEIGHT,
+                    "& .MuiOutlinedInput-input": { padding: "0 14px", lineHeight: "20px" },
+                }}
+                slotProps={{ input: { sx: { fontSize: 14 } } }}
             >
                 {Object.entries(YOLO_MODELS).map(([file, label]) => (
                     <MenuItem key={file} value={file} sx={{ fontSize: 14 }}>
@@ -195,6 +202,7 @@ function ConfigLeafField({
                     size="small"
                     checked={node.value}
                     onChange={(e) => onUpdate(path, e.target.checked)}
+                    sx={{ height: CONTROL_HEIGHT, "& .MuiSwitch-switchBase": { top: 3 } }}
                 />
             </Box>
         );
@@ -204,11 +212,16 @@ function ConfigLeafField({
         <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
             <Typography sx={{ fontSize: 14, minWidth: 120 }}>{formatLabel(name)}</Typography>
             {node.description && (
-                <Typography sx={{ fontSize: 12, color: "text.secondary", flex: 1 }}>{node.description}</Typography>
+                <Typography sx={{ fontSize: 12, color: "text.secondary", flex: 1, minWidth: 0 }}>{node.description}</Typography>
             )}
             <TextField
                 size="small"
-                sx={{ minWidth: 200 }}
+                sx={{
+                    width: 320,
+                    flexShrink: 0,
+                    "& .MuiOutlinedInput-root": { height: CONTROL_HEIGHT },
+                    "& .MuiOutlinedInput-input": { padding: "0 14px", lineHeight: "20px" },
+                }}
                 defaultValue={node.value === null || node.value === undefined ? "" : String(node.value)}
                 onBlur={(e) => onUpdate(path, parseValue(e.target.value, node.value))}
                 slotProps={{ input: { sx: { fontSize: 14 } } }}
@@ -234,7 +247,16 @@ function ConfigChildRow({
     if (childrenCount > 0) {
         return (
             <Accordion disableGutters>
-                <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                <AccordionSummary
+                    expandIcon={<ExpandMoreIcon />}
+                    sx={{
+                        minHeight: 0,
+                        px: 1,
+                        "&.Mui-expanded": { minHeight: 0 },
+                        "& .MuiAccordionSummary-content": { margin: "6px 0" },
+                        "&.Mui-expanded .MuiAccordionSummary-content": { margin: "6px 0" },
+                    }}
+                >
                     <Box sx={{ display: "flex", alignItems: "center", gap: 1, width: "100%" }}>
                         <Typography sx={{ fontSize: 14, fontWeight: 500 }}>{formatLabel(name)}</Typography>
                         {node.description && (
