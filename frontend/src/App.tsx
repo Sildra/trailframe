@@ -8,7 +8,7 @@ import ParametersPage from "./pages/ConfigurationPage";
 import ToolsPage from "./pages/ToolsPage";
 import EventBar from "./components/EventBar";
 import { EventProvider } from "./events/EventProvider";
-import { orderedSearch, parseMenuSection, withMenuSection, type MenuSection } from "./lib/slideshowSections";
+import { parseMenuSection, type MenuSection } from "./lib/slideshowSections";
 import type { components } from "./api/generated/schema";
 
 type Page = "gallery" | "activities" | "slideshow" | "configuration" | "tools";
@@ -29,13 +29,6 @@ function initialPage(): Page {
     return PAGES.some(({ id }) => id === value) ? (value as Page) : "gallery";
 }
 
-function pageSearch(page: Page): string {
-    const params = new URLSearchParams(window.location.search);
-    params.set("page", page);
-
-    return `${window.location.pathname}${orderedSearch(params)}`;
-}
-
 export default function App() {
     const [initialParams] = useState(() => new URLSearchParams(window.location.search));
     const [page, setPage] = useState<Page>(initialPage);
@@ -47,8 +40,6 @@ export default function App() {
     const pageIndex = PAGES.findIndex(({ id }) => id === page);
 
     function changeSlideshowSection(section: MenuSection) {
-        const search = withMenuSection(new URLSearchParams(window.location.search), section);
-        window.history.replaceState(null, "", `${window.location.pathname}${search}`);
         setSlideshowSection(section);
     }
 
@@ -74,9 +65,7 @@ export default function App() {
                             <Tabs
                                 value={pageIndex}
                                 onChange={(_event, value) => {
-                                    const next = PAGES[value as number].id;
-                                    window.history.replaceState(null, "", pageSearch(next));
-                                    setPage(next);
+                                    setPage(PAGES[value as number].id);
                                 }}
                             >
                                 {PAGES.map(({ id, label }) => (

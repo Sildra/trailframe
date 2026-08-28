@@ -1,3 +1,6 @@
+import imagehash
+from PIL import Image
+
 from trailframe.models.photo import Photo
 from trailframe.services.folder_service import FolderService
 from trailframe.services.scanners.scanner import Scanner
@@ -12,8 +15,7 @@ class PerceptualHashScanner(Scanner):
         return photo.phash is None
 
     def scan(self, photo: Photo) -> None:
-        import imagehash
-        from PIL import Image
+
 
         image = Image.open(FolderService.resolve(photo.path))
         photo.phash = imagehash.phash(image).hash.flatten().tobytes()

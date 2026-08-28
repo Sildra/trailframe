@@ -3,14 +3,13 @@ from trailframe.services.configuration_service import Node
 from trailframe.services.database_service import DatabaseService
 from trailframe.services.pipelines.pipeline import ForcedScan, Pipeline
 from trailframe.services.scanners.activity_scanner import ActivityScanner
-from trailframe.services.scanners.brisque_scanner import BrisqueScanner
 from trailframe.services.scanners.location_scanner import LocationScanner
 from trailframe.services.scanners.object_scanner import ObjectScanner
 from trailframe.services.scanners.perceptual_hash_scanner import PerceptualHashScanner
 
 
 class BasicPipeline(Pipeline):
-    _scanners = [ActivityScanner(), BrisqueScanner(), LocationScanner(), ObjectScanner(), PerceptualHashScanner()]
+    _scanners = [ActivityScanner(), LocationScanner(), ObjectScanner(), PerceptualHashScanner()]
     _forced_scanners: list[str] | None = None
 
     @classmethod
