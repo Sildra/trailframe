@@ -1,12 +1,9 @@
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
-
 import allure
 import pytest
 
 from trailframe.models.photo import Photo
-from trailframe.services.pipelines.executor import create_executor
 from trailframe.services.pipelines.item import Item
 from trailframe.services.scanners.database_scanner import DatabaseScanner
 from trailframe.services.scanners.scanner import ForceFlag, Scanner, ScannerResult
@@ -23,27 +20,20 @@ class FakeScanner(Scanner):
     def accept_(self, item) -> bool:
         return self.accept_result
 
-    def executePhoto(self, item) -> bool:
+    async def executePhoto(self, item) -> bool:
         if self.fail:
             raise RuntimeError("boom")
         self.calls.append(item.photo)
         return self.changed
 
 
-@pytest.fixture()
-def executor() -> ThreadPoolExecutor:
-    ex = create_executor("test-scanner", 2)
-    yield ex
-    ex.shutdown(wait=False, cancel_futures=True)
-
-
 class TestScannerBase:
-    @allure.title("Runs a synchronous scan on the executor and records timing")
+    @allure.title("Runs a synchronous scan in the pipeline thread and records timing")
     @pytest.mark.asyncio
-    async def test_execute_runs_sync_scan(self, executor):
+    async def test_execute_runs_sync_scan(self):
         scanner = FakeScanner()
         item = Item(Photo(path="x.jpg"))
-        result = await scanner.execute(item, executor)
+        result = await scanner.execute(item)
         assert result is ScannerResult.SUCCESS
         assert scanner.calls == [item.photo]
         assert scanner._run_count == 1
@@ -51,44 +41,44 @@ class TestScannerBase:
 
     @allure.title("Skips a disabled scanner and reports success")
     @pytest.mark.asyncio
-    async def test_disabled_scanner_skips(self, executor):
+    async def test_disabled_scanner_skips(self):
         scanner = FakeScanner()
         scanner.enabled = False
         item = Item(Photo(path="x.jpg"))
-        result = await scanner.execute(item, executor)
+        result = await scanner.execute(item)
         assert result is ScannerResult.SUCCESS
         assert scanner.calls == []
         assert scanner._run_count == 0
 
     @allure.title("A disabled scanner is skipped even when forced")
     @pytest.mark.asyncio
-    async def test_disabled_scanner_skips_even_when_forced(self, executor):
+    async def test_disabled_scanner_skips_even_when_forced(self):
         scanner = FakeScanner()
         scanner.enabled = False
         scanner.accept(ForceFlag(["Fake"]))
         item = Item(Photo(path="x.jpg"))
-        await scanner.execute(item, executor)
+        await scanner.execute(item)
         assert scanner.calls == []
 
     @allure.title("Skips a scanner whose acceptance gate is false")
     @pytest.mark.asyncio
-    async def test_not_accepted_is_skipped(self, executor):
+    async def test_not_accepted_is_skipped(self):
         scanner = FakeScanner()
         scanner.accept_result = False
         item = Item(Photo(path="x.jpg"))
-        await scanner.execute(item, executor)
+        await scanner.execute(item)
         assert scanner.calls == []
         assert scanner._run_count == 0
 
     @allure.title("A forced scanner runs without the acceptance gate")
     @pytest.mark.asyncio
-    async def test_forced_scanner_runs_without_gate(self, executor):
+    async def test_forced_scanner_runs_without_gate(self):
         scanner = FakeScanner()
         scanner.accept_result = False
         assert scanner.accept(ForceFlag(["Fake"])) is False
         assert scanner._forced is True
         item = Item(Photo(path="x.jpg"))
-        await scanner.execute(item, executor)
+        await scanner.execute(item)
         assert scanner.calls == [item.photo]
 
     @allure.title("A force flag un-sets scanners not in its list")
@@ -101,34 +91,34 @@ class TestScannerBase:
 
     @allure.title("Swallows scan exceptions, returns error, and does not record a run")
     @pytest.mark.asyncio
-    async def test_failure_returns_error_and_not_recorded(self, executor, caplog):
+    async def test_failure_returns_error_and_not_recorded(self, caplog):
         scanner = FakeScanner()
         scanner.fail = True
         item = Item(Photo(path="x.jpg"))
-        result = await scanner.execute(item, executor)
+        result = await scanner.execute(item)
         assert result is ScannerResult.ERROR
         assert scanner._run_count == 0
         assert any("failed" in record.getMessage() for record in caplog.records)
 
     @allure.title("Sets the updated flag only when the scan changed the photo")
     @pytest.mark.asyncio
-    async def test_updated_only_when_changed(self, executor):
+    async def test_updated_only_when_changed(self):
         scanner = FakeScanner(changed=False)
         item = Item(Photo(path="x.jpg"))
-        await scanner.execute(item, executor)
+        await scanner.execute(item)
         assert item.updated is False
 
         scanner2 = FakeScanner(changed=True)
         item2 = Item(Photo(path="x.jpg"))
-        await scanner2.execute(item2, executor)
+        await scanner2.execute(item2)
         assert item2.updated is True
 
     @allure.title("Leaves the scanner list unchanged for non-tracking scanners")
     @pytest.mark.asyncio
-    async def test_non_tracking_does_not_append(self, executor):
+    async def test_non_tracking_does_not_append(self):
         scanner = FakeScanner()
         item = Item(Photo(path="x.jpg"))
-        await scanner.execute(item, executor)
+        await scanner.execute(item)
         assert item.photo.scanners == []
 
     @allure.title("Reports aggregated run statistics")
@@ -171,7 +161,7 @@ class TestAsyncScanner:
 
         scanner = AsyncScanner("Async")
         item = Item(Photo(path="x.jpg"))
-        result = await scanner.execute(item, None)
+        result = await scanner.execute(item)
         assert result is ScannerResult.SUCCESS
         assert calls == [item.photo]
         assert scanner._run_count == 1
@@ -198,7 +188,7 @@ class TestDatabaseScanner:
         item.photo.filename = "x.jpg"
         item.updated = True
 
-        result = await scanner.execute(item, None)
+        result = await scanner.execute(item)
         assert result is ScannerResult.SUCCESS
         assert item.updated is False
 

@@ -19,7 +19,7 @@ class ExifScanner(Scanner):
     def accept_(self, item: Any) -> bool:
         return not item.photo.exif
 
-    def executePhoto(self, item) -> bool:
+    async def executePhoto(self, item) -> bool:
         image = item.image
 
         if image is None:

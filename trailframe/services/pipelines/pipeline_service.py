@@ -53,12 +53,17 @@ class PipelineService(Service):
     async def forced_scan(cls, scanner_names: list[str]) -> None:
         await cls.next(ForceFlag(scanner_names))
 
-        async with DatabaseService.create_session() as session:
+        async def _load_photos(session) -> list[Photo]:
             result = await session.execute(select(Photo).order_by(Photo.id.asc()))
+            photos = list(result.scalars().all())
 
-            for photo in result.scalars().all():
+            for photo in photos:
                 session.expunge(photo)
-                await cls.next(Item(photo))
+
+            return photos
+
+        for photo in await DatabaseService.execute(_load_photos):
+            await cls.next(Item(photo))
 
         await cls.next(ForceFlag([]))
 

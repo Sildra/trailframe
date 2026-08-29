@@ -117,11 +117,14 @@ class FolderService(Service):
         in the database, or create a new (unscanned) Photo for it."""
         canonical = cls.canonical(path)
 
-        async with DatabaseService.create_session() as session:
-            existing = (await session.execute(select(Photo).where(Photo.path == canonical))).scalar_one_or_none()
+        async def _lookup(session) -> Photo | None:
+            result = await session.execute(select(Photo).where(Photo.path == canonical))
+            return result.scalar_one_or_none()
 
-            if existing is not None:
-                return existing
+        existing = await DatabaseService.execute(_lookup)
+
+        if existing is not None:
+            return existing
 
         return Photo(path=canonical, source=cls.SOURCE)
 

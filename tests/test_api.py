@@ -11,11 +11,13 @@ def _add_photos(app, photos):
     async def _insert():
         from trailframe.services.core.database_service import DatabaseService
 
-        async with DatabaseService.create_session() as session:
+        async def _op(session):
             for photo in photos:
                 session.add(photo)
             await session.commit()
             return [photo.id for photo in photos]
+
+        return await DatabaseService.execute(_op)
 
     return app.db(_insert())
 
@@ -142,9 +144,11 @@ class TestStatisticsApi:
         async def _insert():
             from trailframe.services.core.database_service import DatabaseService
 
-            async with DatabaseService.create_session() as session:
+            async def _op(session):
                 session.add(ScannerStat(scanner="EXIF", count=10, total_ms=1000.0))
                 await session.commit()
+
+            await DatabaseService.execute(_op)
 
         app.db(_insert())
 

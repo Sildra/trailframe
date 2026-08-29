@@ -12,7 +12,7 @@ class FileScanner(Scanner):
     def accept_(self, item: Any) -> bool:
         return item.photo.filename is None or item.photo.file_size is None
 
-    def executePhoto(self, item) -> bool:
+    async def executePhoto(self, item) -> bool:
         photo = item.photo
         changed = photo.filename is None or photo.file_size is None
 

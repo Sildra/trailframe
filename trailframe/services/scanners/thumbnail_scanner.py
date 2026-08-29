@@ -11,7 +11,7 @@ class ThumbnailScanner(Scanner):
     def accept_(self, item: Any) -> bool:
         return not ThumbnailService.exists(item.photo)
 
-    def executePhoto(self, item) -> bool:
+    async def executePhoto(self, item) -> bool:
         ThumbnailService.generate_all(item.photo)
 
         return False

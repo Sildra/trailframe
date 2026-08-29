@@ -9,20 +9,12 @@ from PIL import ExifTags, Image
 
 from trailframe.models.activity import Activity
 from trailframe.models.photo import Photo
-from trailframe.services.pipelines.executor import create_executor
 from trailframe.services.pipelines.item import Item
 from trailframe.services.scanners.activity_scanner import ActivityScanner
 from trailframe.services.scanners.exif_scanner import ExifScanner
 from trailframe.services.scanners.file_scanner import FileScanner
 from trailframe.services.scanners.object_scanner import ObjectScanner
 from trailframe.services.scanners.perceptual_hash_scanner import PerceptualHashScanner
-
-
-@pytest.fixture()
-def executor():
-    ex = create_executor("test-scanners", 2)
-    yield ex
-    ex.shutdown(wait=False, cancel_futures=True)
 
 
 def _make_image(path, exif_date=None):
@@ -42,12 +34,12 @@ def _make_image(path, exif_date=None):
 class TestFileScanner:
     @allure.title("Fills in filename and file size from the source file")
     @pytest.mark.asyncio
-    async def test_fills_filename_and_size(self, executor, tmp_path):
+    async def test_fills_filename_and_size(self, tmp_path):
         source = _make_image(tmp_path / "file.jpg")
         scanner = FileScanner()
         item = Item(Photo(path=str(source)))
 
-        result = await scanner.execute(item, executor)
+        result = await scanner.execute(item)
 
         assert result.value == "success"
         assert item.photo.filename == "file.jpg"
@@ -58,12 +50,12 @@ class TestFileScanner:
 class TestExifScanner:
     @allure.title("Extracts EXIF metadata and the capture date")
     @pytest.mark.asyncio
-    async def test_extracts_exif_and_date(self, executor, tmp_path):
+    async def test_extracts_exif_and_date(self, tmp_path):
         source = _make_image(tmp_path / "exif.jpg", exif_date="2023:06:01 12:34:56")
         scanner = ExifScanner()
         item = Item(Photo(path=str(source)))
 
-        result = await scanner.execute(item, executor)
+        result = await scanner.execute(item)
 
         assert result.value == "success"
         assert item.photo.exif.get("DateTimeOriginal") == "2023:06:01 12:34:56"
@@ -72,12 +64,12 @@ class TestExifScanner:
 
     @allure.title("Leaves the photo unchanged when there is no EXIF data")
     @pytest.mark.asyncio
-    async def test_no_exif_no_change(self, executor, tmp_path):
+    async def test_no_exif_no_change(self, tmp_path):
         source = _make_image(tmp_path / "plain.jpg")
         scanner = ExifScanner()
         item = Item(Photo(path=str(source)))
 
-        await scanner.execute(item, executor)
+        await scanner.execute(item)
 
         assert item.photo.exif == {}
         assert item.updated is False
@@ -86,12 +78,12 @@ class TestExifScanner:
 class TestPerceptualHashScanner:
     @allure.title("Computes a perceptual hash and records the scanner")
     @pytest.mark.asyncio
-    async def test_computes_phash(self, executor, tmp_path):
+    async def test_computes_phash(self, tmp_path):
         source = _make_image(tmp_path / "hash.jpg")
         scanner = PerceptualHashScanner()
         item = Item(Photo(path=str(source)))
 
-        result = await scanner.execute(item, executor)
+        result = await scanner.execute(item)
 
         assert result.value == "success"
         assert item.photo.phash is not None
@@ -102,7 +94,7 @@ class TestPerceptualHashScanner:
 class TestObjectScanner:
     @allure.title("Stores YOLO detections and records the scanner")
     @pytest.mark.asyncio
-    async def test_stores_detections(self, executor, tmp_path):
+    async def test_stores_detections(self, tmp_path):
         scanner = ObjectScanner()
 
         class Tensor:
@@ -129,7 +121,7 @@ class TestObjectScanner:
 
         item = Item(Photo(path=str(tmp_path / "obj.jpg")))
 
-        result = await scanner.execute(item, executor)
+        result = await scanner.execute(item)
 
         assert result.value == "success"
         assert item.photo.objects == [{"label": "person", "confidence": 0.95, "box": [1.0, 2.0, 3.0, 4.0]}]
@@ -148,7 +140,7 @@ class TestActivityScanner:
         async def _insert():
             from trailframe.services.core.database_service import DatabaseService
 
-            async with DatabaseService.create_session() as session:
+            async def _op(session):
                 session.add(
                     Activity(
                         start_time=start,
@@ -158,12 +150,14 @@ class TestActivityScanner:
                 )
                 await session.commit()
 
+            await DatabaseService.execute(_op)
+
         await _insert()
 
         photo = Photo(path="a.jpg", date=start + timedelta(seconds=1800))
         item = Item(photo)
 
-        result = await scanner.execute(item, None)
+        result = await scanner.execute(item)
 
         assert result.value == "success"
         assert item.photo.latitude == pytest.approx(45.05)

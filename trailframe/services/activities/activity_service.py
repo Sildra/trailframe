@@ -16,7 +16,7 @@ from trailframe.services.service import Service
 class ActivityService(Service):
     @classmethod
     async def list_activities(cls) -> list[ActivitySummary]:
-        async with DatabaseService.create_session() as session:
+        async def _list(session) -> list[ActivitySummary]:
             result = await session.execute(
                 select(
                     Activity.id,
@@ -47,14 +47,18 @@ class ActivityService(Service):
 
             return summaries
 
+        return await DatabaseService.execute(_list)
+
     @classmethod
     async def get_activity(cls, activity_id: int) -> Activity | None:
-        async with DatabaseService.create_session() as session:
+        async def _get(session) -> Activity | None:
             return await session.get(Activity, activity_id)
+
+        return await DatabaseService.execute(_get)
 
     @classmethod
     async def delete_activity(cls, activity_id: int) -> bool:
-        async with DatabaseService.create_session() as session:
+        async def _delete(session) -> bool:
             activity = await session.get(Activity, activity_id)
 
             if activity is None:
@@ -65,9 +69,11 @@ class ActivityService(Service):
 
             return True
 
+        return await DatabaseService.execute(_delete)
+
     @classmethod
     async def list_activity_photos(cls, activity_id: int) -> list[Photo]:
-        async with DatabaseService.create_session() as session:
+        async def _list_photos(session) -> list[Photo]:
             activity = await session.get(Activity, activity_id)
 
             if activity is None or activity.start_time is None:
@@ -82,13 +88,15 @@ class ActivityService(Service):
 
             return list(result.scalars().all())
 
+        return await DatabaseService.execute(_list_photos)
+
     @classmethod
     async def sync_garmin(cls, email: str, password: str) -> bool:
         return await GarminConnectService.sync(email, password)
 
     @classmethod
     async def import_activity(cls, activity_id: int) -> Activity | None:
-        async with DatabaseService.create_session() as session:
+        async def _import(session) -> Activity | None:
             garmin_activity = (
                 await session.execute(select(GarminActivity).where(GarminActivity.activityId == activity_id))
             ).scalar_one_or_none()
@@ -98,15 +106,19 @@ class ActivityService(Service):
 
             return await cls._save_activity(session, garmin_activity)
 
+        return await DatabaseService.execute(_import)
+
     @classmethod
     async def import_gpx(cls, gpx_id: int) -> Activity | None:
-        async with DatabaseService.create_session() as session:
+        async def _import(session) -> Activity | None:
             gpx_activity = await session.get(GpxActivity, gpx_id)
 
             if gpx_activity is None:
                 return None
 
             return await cls._save_activity(session, gpx_activity)
+
+        return await DatabaseService.execute(_import)
 
     @classmethod
     async def _save_activity(cls, session, source: GarminActivity | GpxActivity) -> Activity:

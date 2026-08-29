@@ -1,15 +1,12 @@
-import inspect
 import logging
 import time
 from abc import ABC, abstractmethod
-from concurrent.futures import ThreadPoolExecutor
 from enum import Enum
 from typing import Any
 
 from trailframe.log import get_logger
 from trailframe.models.photo import Photo
 from trailframe.services.core.configuration_service import Node
-from trailframe.services.pipelines.executor import run_in_thread
 from trailframe.services.pipelines.item import Item
 
 
@@ -59,7 +56,7 @@ class Scanner(ABC):
     def accept_(self, item: Any) -> bool:
         return True
 
-    async def execute(self, item: Any, executor: ThreadPoolExecutor) -> ScannerResult:
+    async def execute(self, item: Any) -> ScannerResult:
         if not self.accept(item):
             return ScannerResult.SUCCESS
 
@@ -69,7 +66,7 @@ class Scanner(ABC):
         start = time.perf_counter()
 
         try:
-            changed = await self._run(item, executor)
+            changed = await self.executePhoto(item)
         except Exception as exception:  # noqa: BLE001
             self._log(f"Scanner '{self.name}' failed on {item.photo.path}: {exception}", logging.ERROR)
 
@@ -81,12 +78,6 @@ class Scanner(ABC):
             item.updated = True
 
         return ScannerResult.SUCCESS
-
-    async def _run(self, item: Item, executor: ThreadPoolExecutor) -> bool:
-        if inspect.iscoroutinefunction(self.executePhoto):
-            return await self.executePhoto(item)
-
-        return await run_in_thread(executor, self.executePhoto, item)
 
     def get_run_stats(self) -> dict | None:
         if self._run_count == 0:

@@ -14,9 +14,13 @@ class DatabaseScanner(Scanner):
         if not item.updated:
             return False
 
-        async with DatabaseService.create_session() as session:
-            await session.merge(item.photo)
+        photo = item.photo
+
+        async def _save(session):
+            await session.merge(photo)
             await session.commit()
+
+        DatabaseService.execute_detached(_save)
 
         item.updated = False
 

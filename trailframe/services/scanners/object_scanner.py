@@ -34,7 +34,7 @@ class ObjectScanner(Scanner):
     def accept_(self, item: Any) -> bool:
         return self.name not in (item.photo.scanners or [])
 
-    def executePhoto(self, item) -> bool:
+    async def executePhoto(self, item) -> bool:
         photo = item.photo
 
         model = self._get_model()

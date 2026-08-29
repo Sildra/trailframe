@@ -57,7 +57,7 @@ class GarminConnectService(Service):
 
     @classmethod
     async def list_summaries(cls) -> list[GarminActivitySummary]:
-        async with DatabaseService.create_session() as session:
+        async def _summaries(session) -> list[GarminActivitySummary]:
             result = await session.execute(
                 select(
                     GarminActivity.id,
@@ -92,6 +92,8 @@ class GarminConnectService(Service):
                 )
 
             return summaries
+
+        return await DatabaseService.execute(_summaries)
 
     @classmethod
     async def _count_photos(cls, session: AsyncSession, start_time: datetime | None, duration: float | None) -> int:
@@ -184,16 +186,17 @@ class GarminConnectService(Service):
 
     @classmethod
     async def _existing_activity_ids(cls) -> set[int]:
-        async with DatabaseService.create_session() as session:
+        async def _query(session) -> set[int]:
             result = await session.execute(select(GarminActivity.activityId))
-
             return {row[0] for row in result.all() if row[0] is not None}
+
+        return await DatabaseService.execute(_query)
 
     @classmethod
     async def _save(cls, activities: list[GarminActivity]) -> list[GarminActivity]:
-        saved: list[GarminActivity] = []
+        async def _save_all(session) -> list[GarminActivity]:
+            saved: list[GarminActivity] = []
 
-        async with DatabaseService.create_session() as session:
             for activity in activities:
                 existing = (
                     await session.execute(
@@ -209,4 +212,6 @@ class GarminConnectService(Service):
 
             await session.commit()
 
-        return saved
+            return saved
+
+        return await DatabaseService.execute(_save_all)

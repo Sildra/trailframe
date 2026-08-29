@@ -13,7 +13,7 @@ class LocationScanner(Scanner):
 
         return photo.latitude is not None and photo.longitude is not None and photo.wireframe is None
 
-    def executePhoto(self, item) -> bool:
+    async def executePhoto(self, item) -> bool:
         photo = item.photo
 
         if photo.latitude is None or photo.longitude is None:

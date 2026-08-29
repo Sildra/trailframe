@@ -3,7 +3,6 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from trailframe.services.core.configuration_service import Node
-from trailframe.services.core.thread_pool_service import ThreadPoolService
 from trailframe.services.pipelines.item import Item
 from trailframe.services.scanners.scanner import ForceFlag
 from trailframe.services.service import Service
@@ -133,10 +132,8 @@ class Pipeline(Service):
 
     @classmethod
     async def _run_scanners(cls, item: Any) -> bool:
-        executor = ThreadPoolService.get_executor()
-
         for scanner in cls._scanners:
-            await scanner.execute(item, executor)
+            await scanner.execute(item)
 
         return True
 

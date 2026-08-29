@@ -21,7 +21,7 @@ class GpxService(Service):
         activity.content_hash = hashlib.sha1(content.encode("utf-8")).hexdigest()
         activity.filename = filename
 
-        async with DatabaseService.create_session() as session:
+        async def _save(session):
             existing = (
                 await session.execute(select(GpxActivity).where(GpxActivity.content_hash == activity.content_hash))
             ).scalar_one_or_none()
@@ -33,11 +33,13 @@ class GpxService(Service):
             await session.commit()
             await session.refresh(activity)
 
-        return activity
+            return activity
+
+        return await DatabaseService.execute(_save)
 
     @classmethod
     async def list_summaries(cls) -> list[GpxActivitySummary]:
-        async with DatabaseService.create_session() as session:
+        async def _summaries(session) -> list[GpxActivitySummary]:
             result = await session.execute(
                 select(
                     GpxActivity.id,
@@ -74,6 +76,8 @@ class GpxService(Service):
                 )
 
             return summaries
+
+        return await DatabaseService.execute(_summaries)
 
     @classmethod
     async def _count_photos(cls, session: AsyncSession, start_time, duration: float | None) -> int:

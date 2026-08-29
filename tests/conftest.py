@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import re
 from pathlib import Path
 
@@ -8,6 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from trailframe.main import create_app
+from trailframe.services.core.database_service import DatabaseService
 
 _WORD_BOUNDARY = re.compile(r"(?<!^)(?=[A-Z])")
 
@@ -85,6 +87,25 @@ def app(tmp_path) -> AppHarness:
     ConfigurationService._root = type("Root", (), {"to_dict": lambda self: {}})()
 
 
+class _DbSession:
+    """Proxy that runs any session operation on the database worker thread."""
+
+    def __getattr__(self, name):
+        def run(*args, **kwargs):
+            async def _job(session):
+                method = getattr(session, name)
+                result = method(*args, **kwargs)
+
+                if inspect.isawaitable(result):
+                    result = await result
+
+                return result
+
+            return DatabaseService.execute(_job)
+
+        return run
+
+
 @pytest.fixture()
 async def db_session(tmp_path):
     """Configure and start a standalone DatabaseService against a temp file."""
@@ -97,7 +118,6 @@ async def db_session(tmp_path):
     DatabaseService.configure(config)
     await DatabaseService.start()
 
-    async with DatabaseService.create_session() as session:
-        yield session
+    yield _DbSession()
 
     await DatabaseService.stop()

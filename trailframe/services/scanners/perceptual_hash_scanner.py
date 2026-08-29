@@ -12,7 +12,7 @@ class PerceptualHashScanner(Scanner):
     def accept_(self, item: Any) -> bool:
         return item.photo.phash is None
 
-    def executePhoto(self, item) -> bool:
+    async def executePhoto(self, item) -> bool:
         image = item.image
 
         if image is None:

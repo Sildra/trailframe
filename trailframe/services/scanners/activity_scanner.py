@@ -75,6 +75,10 @@ class ActivityScanner(Scanner):
                 if photo.date <= end:
                     candidates.append(activity)
 
+            return candidates
+
+        candidates = await DatabaseService.execute(_query)
+
         if not candidates:
             return None
 
