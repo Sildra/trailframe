@@ -117,7 +117,8 @@ def create_app(args: argparse.Namespace) -> FastAPI:
     pkg_dist = Path(str(resources.files("trailframe") / "frontend" / "dist"))
     frontend_dir = dev_dist if dev_dist.is_dir() else pkg_dist
 
-    app.frontend("/", directory=frontend_dir)
+    if frontend_dir.is_dir():
+        app.frontend("/", directory=frontend_dir)
 
     return app
 
