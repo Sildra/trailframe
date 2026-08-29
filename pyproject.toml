@@ -81,6 +81,7 @@ artifacts = ["trailframe/frontend/dist"]
 
 [tool.hatch.build.targets.sdist]
 artifacts = ["frontend/dist"]
+exclude = ["supervisor.py"]
 
 [tool.hatch.version]
 source = "vcs"

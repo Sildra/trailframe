@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Launch the gallery backend and restart it whenever it exits.
 
 - Ctrl+C (SIGINT) stops the launcher and the backend.
