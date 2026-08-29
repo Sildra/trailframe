@@ -1,22 +1,25 @@
 import asyncio
 import shutil
 from pathlib import Path
+from typing import ClassVar
 
 from sqlalchemy import select
 
 from trailframe.models.photo import Photo
-from trailframe.services.configuration_service import Node
-from trailframe.services.database_service import DatabaseService
+from trailframe.services.core.configuration_service import Node
+from trailframe.services.core.database_service import DatabaseService
 from trailframe.services.service import Service
 
 
 class FolderService(Service):
-    IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".tiff", ".bmp"}
+    SOURCE: ClassVar[str] = "File"
+
+    IMAGE_EXTENSIONS: ClassVar[set[str]] = {".jpg", ".jpeg", ".png", ".webp", ".tiff", ".bmp"}
 
     _folder: Path | None = None
     _trash_folder: Path | None = None
     _interval = 60
-    _known_files: set[Path] = set()
+    _known_files: ClassVar[set[Path]] = set()
     _task: asyncio.Task | None = None
     _running = False
 
@@ -96,7 +99,6 @@ class FolderService(Service):
 
         cls._running = True
 
-        await cls._normalize_paths()
         await cls.scan()
 
         cls._task = asyncio.create_task(cls._watch())
@@ -110,44 +112,18 @@ class FolderService(Service):
             cls._task = None
 
     @classmethod
-    async def _normalize_paths(cls) -> None:
-        """Rewrite stored paths into the canonical (photos-folder-relative) form.
-
-        One-shot migration: rows imported under a different photos_folder
-        representation (absolute vs relative, or an older CWD) are matched to
-        their file on disk and re-stored canonically so they are not re-imported.
-        """
-        async with DatabaseService.create_session() as session:
-            result = await session.execute(select(Photo))
-            photos = result.scalars().all()
-            updated = 0
-
-            for photo in photos:
-                canonical = cls.canonical(photo.path)
-
-                if canonical != photo.path:
-                    photo.path = canonical
-                    updated += 1
-
-            if updated:
-                await session.commit()
-                cls._log(f"normalized {updated} photo path(s) relative to '{cls._folder}'")
-
-    @classmethod
     async def to_photo(cls, path: Path) -> Photo:
         """Convert a filesystem path to a Photo: look up the canonical stored path
         in the database, or create a new (unscanned) Photo for it."""
         canonical = cls.canonical(path)
 
         async with DatabaseService.create_session() as session:
-            existing = (
-                await session.execute(select(Photo).where(Photo.path == canonical))
-            ).scalar_one_or_none()
+            existing = (await session.execute(select(Photo).where(Photo.path == canonical))).scalar_one_or_none()
 
             if existing is not None:
                 return existing
 
-        return Photo(path=canonical, source="File")
+        return Photo(path=canonical, source=cls.SOURCE)
 
     @classmethod
     async def scan(cls) -> None:
@@ -160,7 +136,7 @@ class FolderService(Service):
 
             cls._known_files.add(path)
 
-            from trailframe.services.pipeline_service import PipelineService
+            from trailframe.services.pipelines.pipeline_service import PipelineService
 
             await PipelineService.next(await cls.to_photo(path))
 
@@ -174,7 +150,7 @@ class FolderService(Service):
             while chunk := await content.read(1024 * 1024):
                 output.write(chunk)
 
-        from trailframe.services.pipeline_service import PipelineService
+        from trailframe.services.pipelines.pipeline_service import PipelineService
 
         await PipelineService.next(await cls.to_photo(destination))
 

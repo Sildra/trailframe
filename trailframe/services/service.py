@@ -1,7 +1,10 @@
-from abc import ABC, abstractmethod
+from abc import ABC
 from enum import Enum
 
-from trailframe.services.configuration_service import Node
+from trailframe.log import get_logger
+from trailframe.services.core.configuration_service import Node
+
+_logger = get_logger()
 
 
 class ServiceState(Enum):
@@ -53,7 +56,7 @@ class Service(ABC):
 
     @classmethod
     def _log(cls, message: str) -> None:
-        print(f"[{cls.get_name()}] {message}", flush=True)
+        _logger.info(f"[{cls.get_name()}] {message}")
 
     @classmethod
     def _configure(cls, config: Node) -> None:

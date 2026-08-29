@@ -19,3 +19,13 @@ dist/
 # Python build artifacts
 /build/
 *.egg-info
+
+# Coverage data
+.pytest_cache
+.coverage
+coverage.xml
+htmlcov/
+
+# Allure test reports
+/allure-results/
+/allure-report/

@@ -1,11 +1,12 @@
 import re
 from pathlib import Path
+from typing import ClassVar
 
 from PIL import Image
 
 from trailframe.models.photo import Photo
-from trailframe.services.configuration_service import Node
-from trailframe.services.folder_service import FolderService
+from trailframe.services.core.configuration_service import Node
+from trailframe.services.photos.photo_service import PhotoService
 from trailframe.services.service import Service
 
 _INVALID_FILENAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
@@ -13,7 +14,7 @@ _INVALID_FILENAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
 class ThumbnailService(Service):
     _folder: Path | None = None
-    _sizes: list[int] = []
+    _sizes: ClassVar[list[int]] = []
 
     @classmethod
     def _configure(cls, config: Node) -> None:
@@ -21,9 +22,7 @@ class ThumbnailService(Service):
             config.get_path_value("thumbnails_folder", "Folder where thumbnails are stored", "thumbnails")
         )
         cls._folder.mkdir(parents=True, exist_ok=True)
-        sizes = config.get_path_value(
-            "thumbnail_sizes", "Thumbnail heights (px) generated for each photo", [160, 400]
-        )
+        sizes = config.get_path_value("thumbnail_sizes", "Thumbnail heights (px) generated for each photo", [160, 400])
         cls._sizes = sorted({int(size) for size in sizes})
 
     @classmethod
@@ -61,7 +60,7 @@ class ThumbnailService(Service):
 
         thumbnail.parent.mkdir(parents=True, exist_ok=True)
 
-        with Image.open(FolderService.resolve(photo.path)) as image:
+        with Image.open(PhotoService.resolve(photo)) as image:
             image.thumbnail((size, size))
             image.save(thumbnail, format="WEBP", quality=85)
 

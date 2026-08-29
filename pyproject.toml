@@ -46,7 +46,21 @@ dependencies = [
 dev = [
     "ruff",
     "openapi-typescript",
+    "pytest",
+    "pytest-asyncio",
+    "pytest-cov",
+    "httpx",
+    "allure-pytest",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = "--alluredir=allure-results --clean-alluredir --cov=trailframe --cov-report=term"
+
+[tool.coverage.run]
+branch = true
+source = ["trailframe"]
 
 [project.scripts]
 trailframe = "trailframe.main:main"
@@ -77,6 +91,12 @@ line-length = 120
 
 [tool.ruff.format]
 skip-magic-trailing-comma = true
+
+[tool.ruff.lint]
+ignore = ["DTZ001", "DTZ005", "DTZ006", "DTZ007"]
+
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = ["fastapi.Depends", "fastapi.File", "fastapi.Query"]
 
 [tool.ruff.lint.isort]
 split-on-trailing-comma = false

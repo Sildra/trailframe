@@ -7,7 +7,9 @@ from typing import ClassVar
 
 import requests
 
-from trailframe.services.configuration_service import Node
+from trailframe.services.core.configuration_service import Node
+from trailframe.services.core.thread_pool_service import ThreadPoolService
+from trailframe.services.pipelines.executor import run_in_thread
 from trailframe.services.service import Service
 
 _USER_AGENT = "ha_gallery/0.1 (local personal photo gallery)"
@@ -40,8 +42,12 @@ class TileService(Service):
         subdomains = str(config.get_path_value("maps.tile_subdomains", "Subdomains for the {s} placeholder", "abc"))
         cls._subdomains = [char for char in subdomains if not char.isspace()] or ["a"]
         cls._subdomain_cycle = cycle(cls._subdomains)
-        cls._ttl_days = float(config.get_path_value("maps.tile_ttl_days", "Days before a cached tile is re-fetched", 30))
-        megabytes = int(config.get_path_value("maps.tile_cache_mb", "Maximum tile cache size in MB (LRU eviction)", 1024))
+        cls._ttl_days = float(
+            config.get_path_value("maps.tile_ttl_days", "Days before a cached tile is re-fetched", 30)
+        )
+        megabytes = int(
+            config.get_path_value("maps.tile_cache_mb", "Maximum tile cache size in MB (LRU eviction)", 1024)
+        )
         cls._cache_bytes = megabytes * 1024 * 1024
         cls._folder.mkdir(parents=True, exist_ok=True)
         cls._evict()
@@ -68,7 +74,7 @@ class TileService(Service):
         try:
             result = await cls._download(z, x, y, path)
             pending.set_result(result)
-        except Exception as exception:
+        except (OSError, requests.RequestException) as exception:
             result = path if path.exists() else None
             pending.set_result(result)
             cls._log(f"download failed for {key}: {exception}")
@@ -85,11 +91,11 @@ class TileService(Service):
     @classmethod
     async def _download(cls, z: int, x: int, y: int, path: Path) -> Path | None:
         url = cls._tile_url(z, x, y)
-        loop = asyncio.get_running_loop()
 
         try:
-            response = await loop.run_in_executor(
-                None, lambda: requests.get(url, timeout=10, headers={"User-Agent": _USER_AGENT})
+            response = await run_in_thread(
+                ThreadPoolService.get_executor(),
+                lambda: requests.get(url, timeout=10, headers={"User-Agent": _USER_AGENT}),
             )
         except requests.RequestException as exception:
             cls._log(f"fetch failed for {z}/{x}/{y}: {exception}")
@@ -108,7 +114,7 @@ class TileService(Service):
 
         if cls._downloads_since_eviction >= _EVICTION_INTERVAL:
             cls._downloads_since_eviction = 0
-            await loop.run_in_executor(None, cls._evict)
+            await run_in_thread(ThreadPoolService.get_executor(), cls._evict)
 
         return path
 

@@ -11,11 +11,11 @@ from pydantic import BaseModel
 
 from trailframe.models.activity import Activity, ActivitySummary, GarminActivitySummary, GpxActivitySummary
 from trailframe.models.photo import Photo, PhotoDetail
-from trailframe.services.activity_service import ActivityService
-from trailframe.services.folder_service import FolderService
-from trailframe.services.garmin_connect_service import GarminConnectService
-from trailframe.services.gpx_service import GpxService
-from trailframe.services.map_service import MapService
+from trailframe.services.activities.activity_service import ActivityService
+from trailframe.services.activities.garmin_connect_service import GarminConnectService
+from trailframe.services.activities.gpx_service import GpxService
+from trailframe.services.map.map_service import MapService
+from trailframe.services.photos.photo_service import PhotoService
 
 router = APIRouter(prefix="/api/activities", tags=["activities"])
 
@@ -131,7 +131,7 @@ def _build_zip_response(activity: Activity, photos: list[Photo], overlay_path: P
 
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
         for photo in photos:
-            path = FolderService.resolve(photo.path)
+            path = PhotoService.resolve(photo)
 
             if path.is_file():
                 archive.write(path, arcname=path.name)
@@ -162,10 +162,7 @@ async def activity_zip(activity_id: int) -> Response:
 
 
 @router.post("/{activity_id}/zip")
-async def activity_zip_with_overlay(
-    activity_id: int,
-    overlay: Annotated[UploadFile | None, File()] = None,
-) -> Response:
+async def activity_zip_with_overlay(activity_id: int, overlay: Annotated[UploadFile | None, File()] = None) -> Response:
     activity = await ActivityService.get_activity(activity_id)
 
     if activity is None:

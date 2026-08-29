@@ -1,11 +1,10 @@
 import math
 from datetime import datetime
+from typing import Any
 
-from PIL import ExifTags, Image
+from PIL import ExifTags
 from PIL.ExifTags import GPSTAGS, TAGS
 
-from trailframe.models.photo import Photo
-from trailframe.services.folder_service import FolderService
 from trailframe.services.scanners.scanner import Scanner
 
 
@@ -17,25 +16,31 @@ class ExifScanner(Scanner):
     def __init__(self):
         super().__init__("EXIF")
 
-    def accept(self, photo: Photo) -> bool:
-        return not photo.exif
+    def accept_(self, item: Any) -> bool:
+        return not item.photo.exif
 
-    def scan(self, photo: Photo) -> None:
-        path = FolderService.resolve(photo.path)
+    def executePhoto(self, item) -> bool:
+        image = item.image
 
-        with Image.open(path) as image:
-            exif = image.getexif()
+        if image is None:
+            return False
 
-            if not exif:
-                return
+        exif = image.getexif()
 
-            photo.exif = {TAGS[tag_id]: str(value) for tag_id, value in exif.items() if tag_id in TAGS}
+        if not exif:
+            return False
 
-            self._update_ifds(photo, exif)
-            self._update_date(photo)
-            self._update_location(photo, exif)
+        photo = item.photo
 
-    def _update_ifds(self, photo: Photo, exif) -> None:
+        photo.exif = {TAGS[tag_id]: str(value) for tag_id, value in exif.items() if tag_id in TAGS}
+
+        self._update_ifds(photo, exif)
+        self._update_date(photo)
+        self._update_location(photo, exif)
+
+        return True
+
+    def _update_ifds(self, photo, exif) -> None:
         exif_ifd = exif.get_ifd(ExifTags.Base.ExifOffset)
 
         if exif_ifd:
@@ -50,7 +55,7 @@ class ExifScanner(Scanner):
                 if tag_id in GPSTAGS:
                     photo.exif[GPSTAGS[tag_id]] = str(value)
 
-    def _update_date(self, photo: Photo) -> None:
+    def _update_date(self, photo) -> None:
         value = photo.exif.get("DateTimeOriginal") or photo.exif.get("DateTimeDigitized") or photo.exif.get("DateTime")
 
         if value is None:
@@ -61,11 +66,12 @@ class ExifScanner(Scanner):
         except ValueError:
             pass
 
-    def _update_location(self, photo: Photo, exif) -> None:
+    def _update_location(self, photo, exif) -> None:
         gps_info = exif.get_ifd(ExifTags.Base.GPSInfo)
 
         if not gps_info:
             return
+
         gps = {GPSTAGS.get(key, key): value for key, value in gps_info.items()}
 
         photo.latitude = self._convert_coordinate(gps.get("GPSLatitude"), gps.get("GPSLatitudeRef"))

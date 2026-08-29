@@ -74,11 +74,7 @@ async def list_packages() -> list[PackageInfo]:
             continue
 
         packages.append(
-            PackageInfo(
-                name=dist.metadata.get("Name", ""),
-                version=dist.version,
-                license=_package_license(dist),
-            )
+            PackageInfo(name=dist.metadata.get("Name", ""), version=dist.version, license=_package_license(dist))
         )
 
     return packages

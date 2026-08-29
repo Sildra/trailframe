@@ -3,7 +3,7 @@ from pydantic import BaseModel
 
 from trailframe.services.pipelines.basic_pipeline import BasicPipeline
 from trailframe.services.pipelines.creation_pipeline import CreationPipeline
-from trailframe.services.pipeline_service import PipelineService
+from trailframe.services.pipelines.pipeline_service import PipelineService
 
 router = APIRouter(prefix="/api/pipeline", tags=["pipeline"])
 
@@ -13,11 +13,7 @@ class ForcedScanRequest(BaseModel):
 
 
 def _known_scanners() -> list[str]:
-    return [
-        scanner.name
-        for pipeline in (CreationPipeline, BasicPipeline)
-        for scanner in pipeline._scanners
-    ]
+    return [scanner.name for pipeline in (CreationPipeline, BasicPipeline) for scanner in pipeline._scanners]
 
 
 @router.get("/scanners")

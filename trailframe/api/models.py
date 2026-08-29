@@ -2,7 +2,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
 
-from trailframe.services.configuration_service import ConfigurationService
+from trailframe.services.core.configuration_service import ConfigurationService
 
 router = APIRouter(prefix="/api/models", tags=["models"])
 

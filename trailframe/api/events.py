@@ -5,7 +5,7 @@ from typing import Any
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 
-from trailframe.services.pipeline_service import PipelineService
+from trailframe.services.pipelines.pipeline_service import PipelineService
 
 router = APIRouter(prefix="/api/events", tags=["events"])
 

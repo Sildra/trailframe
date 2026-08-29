@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 
-from trailframe.services.tile_service import TileService
+from trailframe.services.map.tile_service import TileService
 
 router = APIRouter(prefix="/api/tiles", tags=["tiles"])
 

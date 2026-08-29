@@ -2,7 +2,6 @@ import json
 import math
 import re
 import threading
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import ClassVar
 
@@ -10,7 +9,8 @@ import requests
 from shapely.geometry import MultiPolygon, Point, Polygon, shape
 
 from trailframe.models.photo import Photo
-from trailframe.services.configuration_service import Node
+from trailframe.services.core.configuration_service import Node
+from trailframe.services.core.thread_pool_service import ThreadPoolService
 from trailframe.services.service import Service
 
 _INVALID_FILENAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
@@ -32,9 +32,7 @@ class LocationService(Service):
 
     @classmethod
     def _configure(cls, config: Node) -> None:
-        cls._folder = Path(
-            config.get_path_value("maps_folder", "Folder where location maps are stored", "maps")
-        )
+        cls._folder = Path(config.get_path_value("maps_folder", "Folder where location maps are stored", "maps"))
         cls._cache_folder = cls._folder / "_cache"
         cls._folder.mkdir(parents=True, exist_ok=True)
         cls._cache_folder.mkdir(parents=True, exist_ok=True)
@@ -192,13 +190,7 @@ class LocationService(Service):
         max_lon, max_lat = cls._mercator_inverse(cx + half, cy + half)
 
         return Polygon(
-            [
-                (min_lon, min_lat),
-                (max_lon, min_lat),
-                (max_lon, max_lat),
-                (min_lon, max_lat),
-                (min_lon, min_lat),
-            ]
+            [(min_lon, min_lat), (max_lon, min_lat), (max_lon, max_lat), (min_lon, max_lat), (min_lon, min_lat)]
         )
 
     @classmethod
@@ -371,8 +363,8 @@ class LocationService(Service):
 
     @classmethod
     def _fetch_geojsons(cls, urls: list[str]) -> list[dict | None]:
-        with ThreadPoolExecutor(max_workers=8) as executor:
-            results = list(executor.map(cls._fetch_json, urls))
+        executor = ThreadPoolService.get_executor()
+        results = list(executor.map(cls._fetch_json, urls))
 
         return results
 
@@ -400,13 +392,7 @@ class LocationService(Service):
                 continue
 
             properties = feature.get("properties") or {}
-            entries.append(
-                (
-                    geometry,
-                    properties.get("shapeName"),
-                    properties.get("shapeISO") or "",
-                )
-            )
+            entries.append((geometry, properties.get("shapeName"), properties.get("shapeISO") or ""))
 
         return entries
 
@@ -420,10 +406,7 @@ class LocationService(Service):
 
     @classmethod
     def _write_entries(cls, path: Path, entries: list[tuple]) -> None:
-        data = [
-            {"geometry": geometry.__geo_interface__, "name": name, "iso": iso}
-            for geometry, name, iso in entries
-        ]
+        data = [{"geometry": geometry.__geo_interface__, "name": name, "iso": iso} for geometry, name, iso in entries]
         path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
 
     @staticmethod

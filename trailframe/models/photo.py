@@ -69,7 +69,7 @@ class PhotoDetail(BaseModel):
 
     @staticmethod
     def from_photo(photo: "Photo", *, groups: list["RelatedPhotoGroup"] | None = None) -> "PhotoDetail":
-        from trailframe.services.location_service import LocationService
+        from trailframe.services.map.location_service import LocationService
 
         exif = {key: value for key, value in (photo.exif or {}).items() if key != "MakerNote"}
 

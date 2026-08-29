@@ -2,7 +2,7 @@ from typing import Any
 
 from fastapi import APIRouter
 
-from trailframe.services.configuration_service import ConfigurationService
+from trailframe.services.core.configuration_service import ConfigurationService
 
 router = APIRouter(prefix="/api/configuration", tags=["configuration"])
 

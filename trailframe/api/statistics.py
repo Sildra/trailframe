@@ -1,10 +1,9 @@
+import psutil
 from fastapi import APIRouter
 from pydantic import BaseModel
 
-import psutil
-
 from trailframe.models.scanner_stat import ScannerStatSummary
-from trailframe.services.statistics_service import StatisticsService
+from trailframe.services.core.statistics_service import StatisticsService
 
 router = APIRouter(prefix="/api/statistics", tags=["statistics"])
 

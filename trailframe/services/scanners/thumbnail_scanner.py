@@ -1,14 +1,17 @@
-from trailframe.models.photo import Photo
+from typing import Any
+
+from trailframe.services.photos.thumbnail_service import ThumbnailService
 from trailframe.services.scanners.scanner import Scanner
-from trailframe.services.thumbnail_service import ThumbnailService
 
 
 class ThumbnailScanner(Scanner):
     def __init__(self):
         super().__init__("Thumbnail")
 
-    def accept(self, photo: Photo) -> bool:
-        return not ThumbnailService.exists(photo)
+    def accept_(self, item: Any) -> bool:
+        return not ThumbnailService.exists(item.photo)
 
-    def scan(self, photo: Photo) -> None:
-        ThumbnailService.generate_all(photo)
+    def executePhoto(self, item) -> bool:
+        ThumbnailService.generate_all(item.photo)
+
+        return False

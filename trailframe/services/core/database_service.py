@@ -11,7 +11,7 @@ from trailframe.models.activity import Activity, GarminActivity  # noqa: F401  (
 from trailframe.models.group import PhotoGroup  # noqa: F401  (registers models with SQLModel metadata)
 from trailframe.models.photo import Photo  # noqa: F401  (registers models with SQLModel metadata)
 from trailframe.models.scanner_stat import ScannerStat  # noqa: F401  (registers models with SQLModel metadata)
-from trailframe.services.configuration_service import Node
+from trailframe.services.core.configuration_service import Node
 from trailframe.services.service import Service
 
 
@@ -39,14 +39,15 @@ class DatabaseService(Service):
     def _register_hamming(cls) -> None:
         @event.listens_for(cls._engine.sync_engine, "connect")
         def _on_connect(dbapi_conn, _connection_record):
-            dbapi_conn.create_function("hamming", 2, lambda a, b: (int.from_bytes(a, "big") ^ int.from_bytes(b, "big")).bit_count())
+            dbapi_conn.create_function(
+                "hamming", 2, lambda a, b: (int.from_bytes(a, "big") ^ int.from_bytes(b, "big")).bit_count()
+            )
 
     @classmethod
     def _add_missing_columns(cls, connection) -> None:
         inspector = inspect(connection)
         existing = {
-            table: {column["name"] for column in inspector.get_columns(table)}
-            for table in inspector.get_table_names()
+            table: {column["name"] for column in inspector.get_columns(table)} for table in inspector.get_table_names()
         }
 
         for table in SQLModel.metadata.sorted_tables:
@@ -71,8 +72,7 @@ class DatabaseService(Service):
     def _sync_indexes(cls, connection) -> None:
         inspector = inspect(connection)
         existing = {
-            table: {index["name"] for index in inspector.get_indexes(table)}
-            for table in inspector.get_table_names()
+            table: {index["name"] for index in inspector.get_indexes(table)} for table in inspector.get_table_names()
         }
 
         for table in SQLModel.metadata.sorted_tables:
@@ -133,5 +133,5 @@ class DatabaseService(Service):
 
     @classmethod
     async def get_session(cls):
-        async with cls._session_factory() as session:
+        async with cls.create_session() as session:
             yield session

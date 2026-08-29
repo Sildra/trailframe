@@ -16,18 +16,20 @@ from trailframe.api.photos import router as photos_router
 from trailframe.api.pipeline import router as pipeline_router
 from trailframe.api.statistics import router as statistics_router
 from trailframe.api.tiles import router as tiles_router
-from trailframe.services.activity_service import ActivityService
-from trailframe.services.configuration_service import ConfigurationService
-from trailframe.services.database_service import DatabaseService
-from trailframe.services.folder_service import FolderService
-from trailframe.services.garmin_connect_service import GarminConnectService
-from trailframe.services.gpx_service import GpxService
-from trailframe.services.location_service import LocationService
-from trailframe.services.map_service import MapService
-from trailframe.services.pipeline_service import PipelineService
-from trailframe.services.statistics_service import StatisticsService
-from trailframe.services.thumbnail_service import ThumbnailService
-from trailframe.services.tile_service import TileService
+from trailframe.services.activities.activity_service import ActivityService
+from trailframe.services.activities.garmin_connect_service import GarminConnectService
+from trailframe.services.activities.gpx_service import GpxService
+from trailframe.services.core.configuration_service import ConfigurationService
+from trailframe.services.core.database_service import DatabaseService
+from trailframe.services.core.statistics_service import StatisticsService
+from trailframe.services.core.thread_pool_service import ThreadPoolService
+from trailframe.services.map.location_service import LocationService
+from trailframe.services.map.map_service import MapService
+from trailframe.services.map.tile_service import TileService
+from trailframe.services.photos.folder_service import FolderService
+from trailframe.services.photos.photo_service import PhotoService
+from trailframe.services.photos.thumbnail_service import ThumbnailService
+from trailframe.services.pipelines.pipeline_service import PipelineService
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -37,7 +39,10 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--database", type=Path, default=None, help="SQLite database")
     parser.add_argument("--port", type=int, default=None, help="API port")
     parser.add_argument("--root-path", type=str, default="/", help="Root path prefix when behind a reverse proxy")
-    parser.add_argument("--openapi", type=Path, default=None, metavar="FILE", help="Write OpenAPI schema to FILE and exit")
+    parser.add_argument("--failsafe", action="store_true", help="Start without the FolderService (no scan/watch)")
+    parser.add_argument(
+        "--openapi", type=Path, default=None, metavar="FILE", help="Write OpenAPI schema to FILE and exit"
+    )
     return parser.parse_args()
 
 
@@ -65,6 +70,7 @@ def create_app(args: argparse.Namespace) -> FastAPI:
     async def lifespan(app: FastAPI):
 
         FolderService.configure(general_node)
+        PhotoService.configure(general_node)
         PipelineService.configure(root_node)
         ThumbnailService.configure(general_node)
         DatabaseService.configure(general_node)
@@ -75,17 +81,24 @@ def create_app(args: argparse.Namespace) -> FastAPI:
         MapService.configure(general_node)
         TileService.configure(root_node)
         StatisticsService.configure(general_node)
+        ThreadPoolService.configure(general_node)
         ConfigurationService.save()
 
         # Tables must exist before the pipelines consume items
+        await ThreadPoolService.start()
         await DatabaseService.start()
+        await PhotoService.start()
         await PipelineService.start()
-        await FolderService.start()
+
+        if not args.failsafe:
+            await FolderService.start()
 
         yield
 
         await FolderService.stop()
+        await PhotoService.stop()
         await PipelineService.stop()
+        await ThreadPoolService.stop()
         await DatabaseService.stop()
 
     root_path = args.root_path.rstrip("/") or "/"
@@ -123,12 +136,28 @@ def main() -> None:
         return
 
     from trailframe.api import events
+    from trailframe.log import TimestampAccessFormatter, TimestampFormatter
+
+    log_config = uvicorn.config.LOGGING_CONFIG
+    formatters = dict(log_config["formatters"])
+    formatters["default"] = {
+        "()": TimestampFormatter,
+        "fmt": "%(asctime)s %(levelprefix)s %(message)s",
+        "use_colors": None,
+    }
+    formatters["access"] = {
+        "()": TimestampAccessFormatter,
+        "fmt": '%(asctime)s %(levelprefix)s %(client_addr)s - "%(request_line)s" %(status_code)s',
+        "use_colors": None,
+    }
+    log_config = {**log_config, "formatters": formatters}
 
     config = uvicorn.Config(
         app,
         host="0.0.0.0",
         port=ConfigurationService.root().get_path_value("general.api_port"),
         timeout_graceful_shutdown=5,
+        log_config=log_config,
     )
     config.load_app()
     server = uvicorn.Server(config)

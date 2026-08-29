@@ -284,10 +284,7 @@ class GpxActivity(SQLModel, table=True):
 
         for index in range(1, len(points)):
             distance += cls._haversine(
-                points[index - 1]["lat"],
-                points[index - 1]["lon"],
-                points[index]["lat"],
-                points[index]["lon"],
+                points[index - 1]["lat"], points[index - 1]["lon"], points[index]["lat"], points[index]["lon"]
             )
 
         parsed_times: list[datetime] = []

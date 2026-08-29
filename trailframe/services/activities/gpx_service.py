@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from trailframe.models.activity import Activity, GpxActivity, GpxActivitySummary
 from trailframe.models.photo import Photo
-from trailframe.services.database_service import DatabaseService
+from trailframe.services.core.database_service import DatabaseService
 from trailframe.services.service import Service
 
 
@@ -51,9 +51,7 @@ class GpxService(Service):
             )
 
             imported_ids = {
-                row[0]
-                for row in (await session.execute(select(Activity.activity_id))).all()
-                if row[0] is not None
+                row[0] for row in (await session.execute(select(Activity.activity_id))).all() if row[0] is not None
             }
 
             summaries: list[GpxActivitySummary] = []

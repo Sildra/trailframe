@@ -7,7 +7,7 @@ from sqlmodel import select
 
 from trailframe.models.activity import Activity
 from trailframe.models.photo import Photo
-from trailframe.services.database_service import DatabaseService
+from trailframe.services.core.database_service import DatabaseService
 
 router = APIRouter(prefix="/api/map-data", tags=["map-data"])
 
@@ -43,7 +43,11 @@ async def get_map_data(session: AsyncSession = Depends(DatabaseService.get_sessi
     ).all()
 
     activity_rows = (
-        await session.execute(select(Activity.id, Activity.name, Activity.trace, Activity.start_time, Activity.distance, Activity.duration))
+        await session.execute(
+            select(
+                Activity.id, Activity.name, Activity.trace, Activity.start_time, Activity.distance, Activity.duration
+            )
+        )
     ).all()
 
     return MapData(

@@ -1,11 +1,11 @@
 import asyncio
-from abc import abstractmethod
-from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any
 
-from trailframe.services.pipelines.executor import create_executor
+from trailframe.services.core.configuration_service import Node
+from trailframe.services.core.thread_pool_service import ThreadPoolService
+from trailframe.services.pipelines.item import Item
+from trailframe.services.scanners.scanner import ForceFlag
 from trailframe.services.service import Service
 
 
@@ -17,21 +17,19 @@ def is_pipeline_empty(item: Any) -> bool:
     return isinstance(item, PipelineEmpty) or item is PipelineEmpty
 
 
-@dataclass
-class ForcedScan:
-    scanners: list[str] = field(default_factory=list)
-
-
 class Pipeline(Service):
     _queue: asyncio.Queue | None = None
-    _tasks: list[asyncio.Task] | None = None
-    _executor: ThreadPoolExecutor | None = None
-    _worker_count = 4
+    _task: asyncio.Task | None = None
     _running = False
     _success = 0
     _failure = 0
     _inflight = 0
     _reset_timestamp: datetime | None = None
+
+    @classmethod
+    def _configure(cls, config: Node) -> None:
+        for scanner in cls._scanners:
+            scanner.configure(config)
 
     @classmethod
     async def _start(cls) -> None:
@@ -40,34 +38,22 @@ class Pipeline(Service):
         cls._success = 0
         cls._failure = 0
         cls._reset_timestamp = None
-        cls.get_executor()
-        cls._tasks = [asyncio.create_task(cls._process()) for _ in range(cls._worker_count)]
+        cls._task = asyncio.create_task(cls._process())
 
     @classmethod
     async def _stop(cls) -> None:
         cls._running = False
 
-        if cls._tasks:
-            for task in cls._tasks:
-                task.cancel()
-            cls._tasks = None
-
-        if cls._executor is not None:
-            cls._executor.shutdown(wait=False, cancel_futures=True)
-            cls._executor = None
-
-    @classmethod
-    def get_executor(cls) -> ThreadPoolExecutor:
-        if cls._executor is None:
-            cls._executor = create_executor(cls.get_name(), cls._worker_count)
-
-        return cls._executor
+        if cls._task is not None:
+            cls._task.cancel()
+            cls._task = None
 
     @classmethod
     async def add(cls, item: Any) -> None:
         if is_pipeline_empty(item):
             cls._previous_pipeline_empty()
             return
+
         await cls._add(item)
 
     @classmethod
@@ -96,17 +82,7 @@ class Pipeline(Service):
     def get_status_message(cls) -> str:
         queue = cls.get_queue_size()
 
-        if queue > 0:
-            if cls._reset_timestamp is not None:
-                cls._success = 0
-                cls._failure = 0
-                cls._reset_timestamp = None
-
-            total = cls._success + cls._failure + queue
-
-            return f"({cls._success}/{cls._failure}/{total})"
-
-        if cls._reset_timestamp and datetime.now() >= cls._reset_timestamp:
+        if cls._reset_timestamp is not None and (queue > 0 or datetime.now() >= cls._reset_timestamp):
             cls._success = 0
             cls._failure = 0
             cls._reset_timestamp = None
@@ -114,7 +90,7 @@ class Pipeline(Service):
         if cls._success == 0 and cls._failure == 0:
             return "Idle"
 
-        total = cls._success + cls._failure
+        total = cls._success + cls._failure + queue
 
         return f"({cls._success}/{cls._failure}/{total})"
 
@@ -128,12 +104,12 @@ class Pipeline(Service):
                 if await cls._process_item(item):
                     cls._success += 1
 
-                    from trailframe.services.pipeline_service import PipelineService
+                    from trailframe.services.pipelines.pipeline_service import PipelineService
 
                     await PipelineService.next(item, cls)
                 else:
                     cls._failure += 1
-            except Exception:
+            except Exception:  # noqa: BLE001
                 cls._failure += 1
             finally:
                 cls._queue.task_done()
@@ -144,9 +120,25 @@ class Pipeline(Service):
 
                 await cls._flush_stats()
 
-                from trailframe.services.pipeline_service import PipelineService
+                from trailframe.services.pipelines.pipeline_service import PipelineService
 
                 await PipelineService.next(PipelineEmpty, cls)
+
+    @classmethod
+    async def _process_item(cls, item: Any) -> bool:
+        if not isinstance(item, (Item, ForceFlag)):
+            item = Item(item)
+
+        return await cls._run_scanners(item)
+
+    @classmethod
+    async def _run_scanners(cls, item: Any) -> bool:
+        executor = ThreadPoolService.get_executor()
+
+        for scanner in cls._scanners:
+            await scanner.execute(item, executor)
+
+        return True
 
     @classmethod
     async def _flush_stats(cls) -> None:
@@ -164,11 +156,6 @@ class Pipeline(Service):
         if not stats:
             return
 
-        from trailframe.services.statistics_service import StatisticsService
+        from trailframe.services.core.statistics_service import StatisticsService
 
         await StatisticsService.record_run(stats)
-
-    @classmethod
-    @abstractmethod
-    async def _process_item(cls, item: Any) -> bool:
-        return True

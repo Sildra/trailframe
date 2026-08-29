@@ -5,8 +5,8 @@ from typing import ClassVar
 from sqlalchemy import func, select
 
 from trailframe.models.scanner_stat import ScannerStat, ScannerStatSummary
-from trailframe.services.configuration_service import Node
-from trailframe.services.database_service import DatabaseService
+from trailframe.services.core.configuration_service import Node
+from trailframe.services.core.database_service import DatabaseService
 from trailframe.services.service import Service
 
 
@@ -29,13 +29,7 @@ class StatisticsService(Service):
     async def record_run(cls, stats: list[dict]) -> None:
         async with DatabaseService.create_session() as session:
             for stat in stats:
-                session.add(
-                    ScannerStat(
-                        scanner=stat["scanner"],
-                        count=stat["count"],
-                        total_ms=stat["total_ms"],
-                    )
-                )
+                session.add(ScannerStat(scanner=stat["scanner"], count=stat["count"], total_ms=stat["total_ms"]))
 
             await session.commit()
 
@@ -43,11 +37,7 @@ class StatisticsService(Service):
     async def get_scanner_summary(cls) -> list[ScannerStatSummary]:
         async with DatabaseService.create_session() as session:
             result = await session.execute(
-                select(
-                    ScannerStat.scanner,
-                    func.sum(ScannerStat.count),
-                    func.sum(ScannerStat.total_ms),
-                )
+                select(ScannerStat.scanner, func.sum(ScannerStat.count), func.sum(ScannerStat.total_ms))
                 .group_by(ScannerStat.scanner)
                 .order_by(ScannerStat.scanner.asc())
             )
@@ -57,11 +47,7 @@ class StatisticsService(Service):
 
         for scanner, items, total_ms in rows:
             summary.append(
-                ScannerStatSummary(
-                    name=scanner,
-                    items=items,
-                    value=items / (total_ms / 1000) if total_ms > 0 else 0.0,
-                )
+                ScannerStatSummary(name=scanner, items=items, value=items / (total_ms / 1000) if total_ms > 0 else 0.0)
             )
 
         return summary

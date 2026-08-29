@@ -7,7 +7,7 @@ import s2sphere
 import staticmaps
 from s2sphere import LatLng
 
-from trailframe.services.configuration_service import Node
+from trailframe.services.core.configuration_service import Node
 from trailframe.services.service import Service
 
 
@@ -23,7 +23,9 @@ class MapService(Service):
 
     @classmethod
     def _configure(cls, config: Node) -> None:
-        cls._folder = Path(config.get_path_value("activities_folder", "Folder where activity maps are stored", "activities"))
+        cls._folder = Path(
+            config.get_path_value("activities_folder", "Folder where activity maps are stored", "activities")
+        )
         cls._margin = config.get_path_value("maps_margin", "Margins for the generated map", 0.1)
         cls._folder.mkdir(parents=True, exist_ok=True)
 
@@ -36,14 +38,7 @@ class MapService(Service):
         return cls._folder / f"{cls._safe_name(activity)}_trace.svg"
 
     @classmethod
-    def create_map(
-        cls,
-        activity: str,
-        min_lat: float,
-        min_lon: float,
-        max_lat: float,
-        max_lon: float,
-    ) -> dict:
+    def create_map(cls, activity: str, min_lat: float, min_lon: float, max_lat: float, max_lon: float) -> dict:
         if cls._folder is None:
             raise RuntimeError("MapService is not configured")
 
@@ -86,8 +81,8 @@ class MapService(Service):
             f'<svg xmlns="http://www.w3.org/2000/svg" width="{size}" height="{size}" viewBox="0 0 {size} {size}">\n'
             f'  <polyline fill="none" stroke="#e53935" stroke-width="8" '
             f'stroke-linecap="round" stroke-linejoin="round" points="{path}"/>\n'
-            f'{cls._pin(start_x, start_y, "#2e7d32", "START")}'
-            f'{cls._pin(end_x, end_y, "#d32f2f", "STOP")}'
+            f"{cls._pin(start_x, start_y, '#2e7d32', 'START')}"
+            f"{cls._pin(end_x, end_y, '#d32f2f', 'STOP')}"
             f"</svg>\n"
         )
 
@@ -102,8 +97,7 @@ class MapService(Service):
         context.set_tile_provider(staticmaps.tile_provider_OSM)
         context.add_bounds(
             s2sphere.LatLngRect.from_point_pair(
-                staticmaps.create_latlng(min_lat, min_lon),
-                staticmaps.create_latlng(max_lat, max_lon),
+                staticmaps.create_latlng(min_lat, min_lon), staticmaps.create_latlng(max_lat, max_lon)
             ),
             extra_pixel_bounds=cls._MAP_PADDING,
         )
@@ -121,12 +115,7 @@ class MapService(Service):
             "height": cls._MAP_SIZE,
             "zoom": zoom,
             "center": {"lat": center.lat().degrees, "lon": center.lng().degrees},
-            "bounds": {
-                "min_lat": min_lat,
-                "min_lon": min_lon,
-                "max_lat": max_lat,
-                "max_lon": max_lon,
-            },
+            "bounds": {"min_lat": min_lat, "min_lon": min_lon, "max_lat": max_lat, "max_lon": max_lon},
         }
 
     @classmethod
@@ -158,9 +147,7 @@ class MapService(Service):
             indices = np.linspace(0, len(points) - 1, cls._TRACE_MAX_POINTS).astype(int)
             points = [points[index] for index in indices]
 
-        return [
-            [float(px), float(py)] for px, py in cls._simplify(np.asarray(points), tolerance=cls._TRACE_TOLERANCE)
-        ]
+        return [[float(px), float(py)] for px, py in cls._simplify(np.asarray(points), tolerance=cls._TRACE_TOLERANCE)]
 
     @classmethod
     def _pin(cls, x: float, y: float, color: str, label: str) -> str:

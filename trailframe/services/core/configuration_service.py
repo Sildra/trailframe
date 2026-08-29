@@ -5,7 +5,6 @@ from typing import Any
 
 import yaml
 
-
 _UNDEFINED = object()
 
 
@@ -140,7 +139,7 @@ class ConfigurationService:
             data = yaml.safe_load(file) or {}
 
         if not isinstance(data, dict):
-            raise ValueError("Configuration root must be a mapping")
+            raise TypeError("Configuration root must be a mapping")
 
         for name, value in data.items():
             cls._root.children[name] = Node.from_dict(name, value)

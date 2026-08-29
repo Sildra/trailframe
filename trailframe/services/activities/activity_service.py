@@ -1,21 +1,19 @@
-from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
-from typing import ClassVar
 
 from sqlalchemy import select
 
 from trailframe.models.activity import Activity, ActivitySummary, GarminActivity, GpxActivity
 from trailframe.models.photo import Photo
-from trailframe.services.configuration_service import ConfigurationService
-from trailframe.services.database_service import DatabaseService
-from trailframe.services.garmin_connect_service import GarminConnectService
-from trailframe.services.map_service import MapService
-from trailframe.services.pipelines.executor import create_executor, run_in_thread
+from trailframe.services.activities.garmin_connect_service import GarminConnectService
+from trailframe.services.core.configuration_service import ConfigurationService
+from trailframe.services.core.database_service import DatabaseService
+from trailframe.services.core.thread_pool_service import ThreadPoolService
+from trailframe.services.map.map_service import MapService
+from trailframe.services.pipelines.executor import run_in_thread
 from trailframe.services.service import Service
 
 
 class ActivityService(Service):
-    _executor: ClassVar[ThreadPoolExecutor] = create_executor("maps", 2)
     @classmethod
     async def list_activities(cls) -> list[ActivitySummary]:
         async with DatabaseService.create_session() as session:
@@ -152,9 +150,13 @@ class ActivityService(Service):
             return
 
         try:
-            projection = await run_in_thread(cls._executor, cls._render_map, activity.activity_id, *bounds)
-            points = await run_in_thread(cls._executor, cls._render_trace, activity.activity_id, activity.trace, projection)
-        except Exception as error:
+            projection = await run_in_thread(
+                ThreadPoolService.get_executor(), cls._render_map, activity.activity_id, *bounds
+            )
+            points = await run_in_thread(
+                ThreadPoolService.get_executor(), cls._render_trace, activity.activity_id, activity.trace, projection
+            )
+        except Exception as error:  # noqa: BLE001
             cls._log(f"map generation failed: {error}")
             return
 

@@ -1,5 +1,4 @@
 import asyncio
-from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from typing import ClassVar
 
@@ -9,23 +8,22 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from trailframe.models.activity import Activity, GarminActivity, GarminActivitySummary
 from trailframe.models.photo import Photo
-from trailframe.services.configuration_service import Node
-from trailframe.services.database_service import DatabaseService
-from trailframe.services.pipelines.executor import create_executor, run_in_thread
+from trailframe.services.core.database_service import DatabaseService
+from trailframe.services.core.thread_pool_service import ThreadPoolService
+from trailframe.services.pipelines.executor import run_in_thread
 from trailframe.services.service import Service
 
 
 class GarminConnectService(Service):
     _tasks: ClassVar[set[asyncio.Task]] = set()
-    _executor: ClassVar[ThreadPoolExecutor] = create_executor("garmin", 4)
 
     @classmethod
     async def sync(cls, email: str, password: str) -> bool:
         client = Garmin(email, password)
 
         try:
-            (needs_mfa, _) = await run_in_thread(cls._executor, client.login)
-        except Exception as error:
+            (needs_mfa, _) = await run_in_thread(ThreadPoolService.get_executor(), client.login)
+        except Exception as error:  # noqa: BLE001
             cls._log(f"login failed: {error}")
             return False
 
@@ -50,9 +48,11 @@ class GarminConnectService(Service):
     async def _sync(cls, client: Garmin) -> None:
         try:
             existing_ids = await cls._existing_activity_ids()
+            cls._log(f"importing activities (already have {len(existing_ids)})...")
             activities = await cls._fetch_activities(client, existing_ids)
-            await cls._save(activities)
-        except Exception as error:
+            saved = await cls._save(activities)
+            cls._log(f"import done: {len(saved)} new activity(ies) saved")
+        except Exception as error:  # noqa: BLE001
             cls._log(f"import failed: {error}")
 
     @classmethod
@@ -70,9 +70,7 @@ class GarminConnectService(Service):
             )
 
             imported_ids = {
-                row[0]
-                for row in (await session.execute(select(Activity.activity_id))).all()
-                if row[0] is not None
+                row[0] for row in (await session.execute(select(Activity.activity_id))).all() if row[0] is not None
             }
 
             summaries: list[GarminActivitySummary] = []
@@ -114,17 +112,23 @@ class GarminConnectService(Service):
         activities: list[GarminActivity] = []
         start = 0
         limit = 10
+        fetched = 0
+        skipped = 0
 
         while True:
-            batch = await run_in_thread(cls._executor, client.get_activities, start, limit)
+            cls._log(f"fetching activities {start}-{start + limit}...")
+            batch = await run_in_thread(ThreadPoolService.get_executor(), client.get_activities, start, limit)
 
             if not batch:
                 break
+
+            fetched += len(batch)
 
             for data in batch:
                 activity = GarminActivity.from_data(data)
 
                 if activity is None or activity.activityId in existing_ids:
+                    skipped += 1
                     continue
 
                 activities.append(activity)
@@ -134,9 +138,16 @@ class GarminConnectService(Service):
 
             start += limit
 
+        cls._log(f"done fetching activities: {fetched} fetched, {len(activities)} new, {skipped} already known")
+
         for activity in activities:
-            details = await run_in_thread(cls._executor, client.get_activity_details, str(activity.activityId))
+            cls._log(f"fetching details for activity {activity.activityId} ({activity.activityName})...")
+            details = await run_in_thread(
+                ThreadPoolService.get_executor(), client.get_activity_details, str(activity.activityId)
+            )
             activity.jsonDetails = cls._filter_traces(details)
+
+        cls._log(f"done fetching details for {len(activities)} activities")
 
         return activities
 

@@ -1,11 +1,11 @@
 from datetime import timedelta
+from typing import Any
 
 from sqlalchemy import select
 
 from trailframe.models.activity import Activity
-from trailframe.models.photo import Photo
-from trailframe.services.configuration_service import Node
-from trailframe.services.database_service import DatabaseService
+from trailframe.services.core.configuration_service import Node
+from trailframe.services.core.database_service import DatabaseService
 from trailframe.services.scanners.scanner import Scanner
 
 
@@ -14,13 +14,14 @@ class ActivityScanner(Scanner):
         super().__init__("Activity")
         self.use_activity_position = False
 
-    def configure(self, config: Node) -> None:
-        super().configure(config)
+    def configure_(self, config: Node) -> None:
         self.use_activity_position = config.get_path_value(
             "scanners.Activity.use_activity_position", "Use Activity as GPS Position", False
         )
 
-    def accept(self, photo: Photo) -> bool:
+    def accept_(self, item: Any) -> bool:
+        photo = item.photo
+
         return (
             self.use_activity_position
             and photo.date is not None
@@ -28,28 +29,32 @@ class ActivityScanner(Scanner):
             and (photo.latitude is None or photo.longitude is None)
         )
 
-    async def scan(self, photo: Photo) -> None:
+    async def executePhoto(self, item) -> bool:
+        photo = item.photo
+
         if not self.use_activity_position or photo.date is None:
-            return
+            return False
 
         if photo.latitude is not None and photo.longitude is not None:
-            return
+            return False
 
         activity = await self._find_activity(photo)
 
         if activity is None:
-            return
+            return False
 
         position = Activity.interpolate_trace(activity.trace, photo.date, activity.start_time)
 
         if position is None:
-            return
+            return False
 
         photo.latitude = position[0]
         photo.longitude = position[1]
         photo.location_source = "Activity"
 
-    async def _find_activity(self, photo: Photo) -> Activity | None:
+        return True
+
+    async def _find_activity(self, photo) -> Activity | None:
         start_upper = photo.date + timedelta(minutes=10)
         start_lower = photo.date - timedelta(hours=12)
 

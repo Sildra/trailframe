@@ -1,21 +1,26 @@
-import imagehash
-from PIL import Image
+from typing import Any
 
-from trailframe.models.photo import Photo
-from trailframe.services.folder_service import FolderService
+import imagehash
+
 from trailframe.services.scanners.scanner import Scanner
 
 
 class PerceptualHashScanner(Scanner):
     def __init__(self) -> None:
         super().__init__("PerceptualHash")
-        self.needs_tracking = True
 
-    def accept(self, photo: Photo) -> bool:
-        return photo.phash is None
+    def accept_(self, item: Any) -> bool:
+        return item.photo.phash is None
 
-    def scan(self, photo: Photo) -> None:
+    def executePhoto(self, item) -> bool:
+        image = item.image
 
+        if image is None:
+            return False
 
-        image = Image.open(FolderService.resolve(photo.path))
+        photo = item.photo
+
         photo.phash = imagehash.phash(image).hash.flatten().tobytes()
+        self.add_scanner(photo)
+
+        return True

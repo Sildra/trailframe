@@ -10,10 +10,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from trailframe.models.group import PhotoGroup, PhotoGroupSummary
 from trailframe.models.photo import Photo, PhotoDetail, RelatedPhotoGroup
-from trailframe.services.database_service import DatabaseService
-from trailframe.services.folder_service import FolderService
-from trailframe.services.location_service import LocationService
-from trailframe.services.thumbnail_service import ThumbnailService
+from trailframe.services.core.database_service import DatabaseService
+from trailframe.services.map.location_service import LocationService
+from trailframe.services.photos.folder_service import FolderService
+from trailframe.services.photos.photo_service import PhotoService
+from trailframe.services.photos.thumbnail_service import ThumbnailService
 
 router = APIRouter(prefix="/api/photos", tags=["photos"])
 
@@ -29,16 +30,12 @@ class FavoriteUpdate(BaseModel):
 
 
 def _group_date_bounds(start_date: date, end_date: date) -> tuple[datetime, datetime]:
-    return (
-        datetime.combine(start_date, time.min),
-        datetime.combine(end_date + timedelta(days=1), time.min),
-    )
+    return (datetime.combine(start_date, time.min), datetime.combine(end_date + timedelta(days=1), time.min))
 
 
 @router.get("", response_model=list[PhotoDetail])
 async def list_photos(
-    favorites: bool = Query(False),
-    session: AsyncSession = Depends(DatabaseService.get_session),
+    favorites: bool = Query(False), session: AsyncSession = Depends(DatabaseService.get_session)
 ) -> list[PhotoDetail]:
     stmt = select(Photo).order_by(Photo.date.asc().nulls_last(), Photo.id.asc())
 
@@ -82,9 +79,7 @@ async def custom_slideshow(
         stmt = stmt.where(Photo.is_favorite)
 
     if group is not None:
-        group_row = (
-            await session.execute(select(PhotoGroup).where(PhotoGroup.name == group))
-        ).scalar_one_or_none()
+        group_row = (await session.execute(select(PhotoGroup).where(PhotoGroup.name == group))).scalar_one_or_none()
 
         if group_row is not None and group_row.start_date is not None and group_row.end_date is not None:
             start, end = _group_date_bounds(group_row.start_date, group_row.end_date)
@@ -133,7 +128,9 @@ async def list_groups(session: AsyncSession = Depends(DatabaseService.get_sessio
             continue
 
         start, end = _group_date_bounds(group.start_date, group.end_date)
-        photo_ids = [photo_id for photo_id, photo_date in photo_rows if photo_date is not None and start <= photo_date < end]
+        photo_ids = [
+            photo_id for photo_id, photo_date in photo_rows if photo_date is not None and start <= photo_date < end
+        ]
         assigned_ids.update(photo_ids)
 
         groups.append(
@@ -180,8 +177,7 @@ async def list_groups(session: AsyncSession = Depends(DatabaseService.get_sessio
 
 @router.post("/groups", response_model=PhotoGroupSummary)
 async def create_group(
-    payload: PhotoGroupCreate,
-    session: AsyncSession = Depends(DatabaseService.get_session),
+    payload: PhotoGroupCreate, session: AsyncSession = Depends(DatabaseService.get_session)
 ) -> PhotoGroupSummary:
     group = PhotoGroup(name=payload.name, start_date=payload.start_date, end_date=payload.end_date)
 
@@ -224,8 +220,7 @@ async def delete_photo(photo_id: int, session: AsyncSession = Depends(DatabaseSe
     if photo is None:
         raise HTTPException(404, f"Photo {photo_id} not found")
 
-    source = FolderService.resolve(photo.path)
-    FolderService.delete(source)
+    PhotoService.delete(photo)
 
     for size in ThumbnailService.sizes():
         thumbnail_path = ThumbnailService.get_thumbnail_path(photo, size)
@@ -241,9 +236,7 @@ async def delete_photo(photo_id: int, session: AsyncSession = Depends(DatabaseSe
 
 @router.put("/{photo_id}/favorite")
 async def set_favorite(
-    photo_id: int,
-    payload: FavoriteUpdate,
-    session: AsyncSession = Depends(DatabaseService.get_session),
+    photo_id: int, payload: FavoriteUpdate, session: AsyncSession = Depends(DatabaseService.get_session)
 ):
     photo = (await session.execute(select(Photo).where(Photo.id == photo_id))).scalar_one_or_none()
 
@@ -286,21 +279,19 @@ async def get_photo(photo_id: int, session: AsyncSession = Depends(DatabaseServi
 
 @router.get("/{photo_id}/image")
 async def get_image(photo_id: int, session: AsyncSession = Depends(DatabaseService.get_session)):
-    photo_path = (await session.execute(select(Photo.path).where(Photo.id == photo_id))).scalar_one_or_none()
+    photo = (await session.execute(select(Photo).where(Photo.id == photo_id))).scalar_one_or_none()
 
-    if photo_path is None:
+    if photo is None:
         raise HTTPException(404, f"Photo {photo_id} not found")
 
-    source = FolderService.resolve(photo_path)
+    source = PhotoService.resolve(photo)
     media_type, _ = mimetypes.guess_type(source.name)
     return FileResponse(source, media_type=media_type)
 
 
 @router.get("/{photo_id}/thumbnail")
 async def get_thumbnail(
-    photo_id: int,
-    size: int | None = Query(None),
-    session: AsyncSession = Depends(DatabaseService.get_session),
+    photo_id: int, size: int | None = Query(None), session: AsyncSession = Depends(DatabaseService.get_session)
 ):
     photo = (await session.execute(select(Photo).where(Photo.id == photo_id))).scalar_one_or_none()
 
