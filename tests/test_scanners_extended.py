@@ -141,13 +141,7 @@ class TestActivityScanner:
             from trailframe.services.core.database_service import DatabaseService
 
             async def _op(session):
-                session.add(
-                    Activity(
-                        start_time=start,
-                        duration=3600,
-                        trace=[{"time": 0, "lat": 45.0, "lon": 6.0}, {"time": 3600, "lat": 45.1, "lon": 6.1}],
-                    )
-                )
+                session.add(Activity(start_time=start, duration=3600, trace=[[0, 45.0, 6.0], [3600, 45.1, 6.1]]))
                 await session.commit()
 
             await DatabaseService.execute(_op)

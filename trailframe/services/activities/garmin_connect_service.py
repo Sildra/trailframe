@@ -19,19 +19,7 @@ class GarminConnectService(Service):
 
     @classmethod
     async def sync(cls, email: str, password: str) -> bool:
-        client = Garmin(email, password)
-
-        try:
-            (needs_mfa, _) = await run_in_thread(ThreadPoolService.get_executor(), client.login)
-        except Exception as error:  # noqa: BLE001
-            cls._log(f"login failed: {error}")
-            return False
-
-        if needs_mfa:
-            cls._log(f"login requires MFA: {needs_mfa}")
-            return False
-
-        task = asyncio.create_task(cls._sync(client))
+        task = asyncio.create_task(run_in_thread(ThreadPoolService.get_executor(), cls._sync, email, password))
         cls._tasks.add(task)
         task.add_done_callback(cls._tasks.discard)
 
@@ -45,15 +33,78 @@ class GarminConnectService(Service):
         cls._tasks.clear()
 
     @classmethod
-    async def _sync(cls, client: Garmin) -> None:
+    def _sync(cls, email: str, password: str) -> None:
         try:
-            existing_ids = await cls._existing_activity_ids()
-            cls._log(f"importing activities (already have {len(existing_ids)})...")
-            activities = await cls._fetch_activities(client, existing_ids)
-            saved = await cls._save(activities)
-            cls._log(f"import done: {len(saved)} new activity(ies) saved")
+            client = Garmin(email, password)
+            client.login()
+            asyncio.run(cls._import(client))
         except Exception as error:  # noqa: BLE001
-            cls._log(f"import failed: {error}")
+            cls._log(f"sync failed: {error}")
+
+    @classmethod
+    async def _import(cls, client: Garmin) -> None:
+        existing_ids = await cls._existing_activity_ids()
+        cls._log(f"importing activities (already have {len(existing_ids)})...")
+        count = await cls._import_activities(client, existing_ids)
+        cls._log(f"import done: {count} new activity(ies) saved")
+
+    @classmethod
+    async def _import_activities(cls, client: Garmin, existing_ids: set[int]) -> int:
+        saved = 0
+        start = 0
+        limit = 10
+        fetched = 0
+        skipped = 0
+
+        while True:
+            cls._log(f"fetching activities {start}-{start + limit}...")
+            batch = client.get_activities(start, limit)
+
+            if not batch:
+                break
+
+            fetched += len(batch)
+
+            for data in batch:
+                activity = GarminActivity.from_data(data)
+
+                if activity is None or activity.activityId in existing_ids:
+                    skipped += 1
+                    continue
+
+                cls._log(f"fetching details for activity {activity.activityId} ({activity.activityName})...")
+                details = client.get_activity_details(str(activity.activityId))
+                activity.jsonDetails = cls._filter_traces(details)
+
+                if await cls._save_activity(activity):
+                    saved += 1
+                    existing_ids.add(activity.activityId)
+
+            if len(batch) < limit:
+                break
+
+            start += limit
+
+        cls._log(f"done importing activities: {fetched} fetched, {saved} new, {skipped} already known")
+
+        return saved
+
+    @classmethod
+    async def _save_activity(cls, activity: GarminActivity) -> bool:
+        async def _save(session) -> bool:
+            existing = (
+                await session.execute(select(GarminActivity).where(GarminActivity.activityId == activity.activityId))
+            ).scalar_one_or_none()
+
+            if existing is not None:
+                return False
+
+            session.add(activity)
+            await session.commit()
+
+            return True
+
+        return await DatabaseService.execute(_save)
 
     @classmethod
     async def list_summaries(cls) -> list[GarminActivitySummary]:
@@ -110,50 +161,6 @@ class GarminConnectService(Service):
         return result.scalar_one()
 
     @classmethod
-    async def _fetch_activities(cls, client: Garmin, existing_ids: set[int]) -> list[GarminActivity]:
-        activities: list[GarminActivity] = []
-        start = 0
-        limit = 10
-        fetched = 0
-        skipped = 0
-
-        while True:
-            cls._log(f"fetching activities {start}-{start + limit}...")
-            batch = await run_in_thread(ThreadPoolService.get_executor(), client.get_activities, start, limit)
-
-            if not batch:
-                break
-
-            fetched += len(batch)
-
-            for data in batch:
-                activity = GarminActivity.from_data(data)
-
-                if activity is None or activity.activityId in existing_ids:
-                    skipped += 1
-                    continue
-
-                activities.append(activity)
-
-            if len(batch) < limit:
-                break
-
-            start += limit
-
-        cls._log(f"done fetching activities: {fetched} fetched, {len(activities)} new, {skipped} already known")
-
-        for activity in activities:
-            cls._log(f"fetching details for activity {activity.activityId} ({activity.activityName})...")
-            details = await run_in_thread(
-                ThreadPoolService.get_executor(), client.get_activity_details, str(activity.activityId)
-            )
-            activity.jsonDetails = cls._filter_traces(details)
-
-        cls._log(f"done fetching details for {len(activities)} activities")
-
-        return activities
-
-    @classmethod
     def _filter_traces(cls, details: dict) -> dict:
         polyline_dto = details.get("geoPolylineDTO")
 
@@ -191,27 +198,3 @@ class GarminConnectService(Service):
             return {row[0] for row in result.all() if row[0] is not None}
 
         return await DatabaseService.execute(_query)
-
-    @classmethod
-    async def _save(cls, activities: list[GarminActivity]) -> list[GarminActivity]:
-        async def _save_all(session) -> list[GarminActivity]:
-            saved: list[GarminActivity] = []
-
-            for activity in activities:
-                existing = (
-                    await session.execute(
-                        select(GarminActivity).where(GarminActivity.activityId == activity.activityId)
-                    )
-                ).scalar_one_or_none()
-
-                if existing is not None:
-                    continue
-
-                session.add(activity)
-                saved.append(activity)
-
-            await session.commit()
-
-            return saved
-
-        return await DatabaseService.execute(_save_all)

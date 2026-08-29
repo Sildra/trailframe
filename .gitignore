@@ -29,3 +29,6 @@ htmlcov/
 # Allure test reports
 /allure-results/
 /allure-report/
+
+# Editor / IDE
+.vscode/

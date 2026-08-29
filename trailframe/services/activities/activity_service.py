@@ -2,7 +2,7 @@ from datetime import timedelta
 
 from sqlalchemy import select
 
-from trailframe.models.activity import Activity, ActivitySummary, GarminActivity, GpxActivity
+from trailframe.models.activity import Activity, ActivitySummary, GarminActivity, GpxActivity, coerce_trace
 from trailframe.models.photo import Photo
 from trailframe.services.activities.garmin_connect_service import GarminConnectService
 from trailframe.services.core.configuration_service import ConfigurationService
@@ -106,7 +106,12 @@ class ActivityService(Service):
 
             return await cls._save_activity(session, garmin_activity)
 
-        return await DatabaseService.execute(_import)
+        activity = await DatabaseService.execute(_import)
+
+        if activity is not None:
+            await cls._generate_and_persist_maps(activity)
+
+        return activity
 
     @classmethod
     async def import_gpx(cls, gpx_id: int) -> Activity | None:
@@ -118,7 +123,12 @@ class ActivityService(Service):
 
             return await cls._save_activity(session, gpx_activity)
 
-        return await DatabaseService.execute(_import)
+        activity = await DatabaseService.execute(_import)
+
+        if activity is not None:
+            await cls._generate_and_persist_maps(activity)
+
+        return activity
 
     @classmethod
     async def _save_activity(cls, session, source: GarminActivity | GpxActivity) -> Activity:
@@ -144,22 +154,35 @@ class ActivityService(Service):
         await session.commit()
         await session.refresh(activity)
 
-        await cls._create_maps(activity)
-
-        session.add(activity)
-        await session.commit()
-
         return activity
 
     @classmethod
-    async def _create_maps(cls, activity: Activity) -> None:
+    async def _generate_and_persist_maps(cls, activity: Activity) -> None:
         if not activity.activity_id:
             return
 
+        map_data = await cls._generate_map_data(activity)
+
+        if map_data is None:
+            return
+
+        activity.map_data = map_data
+
+        async def _persist_map(session) -> None:
+            stored = await session.get(Activity, activity.id)
+
+            if stored is not None:
+                stored.map_data = map_data
+                await session.commit()
+
+        await DatabaseService.execute(_persist_map)
+
+    @classmethod
+    async def _generate_map_data(cls, activity: Activity) -> dict | None:
         bounds = cls._trace_bounds(activity.trace)
 
         if bounds is None:
-            return
+            return None
 
         try:
             projection = await run_in_thread(
@@ -170,9 +193,9 @@ class ActivityService(Service):
             )
         except Exception as error:  # noqa: BLE001
             cls._log(f"map generation failed: {error}")
-            return
+            return None
 
-        activity.map_data = {
+        return {
             "map": projection,
             "trace": {
                 "points": [list(point) for point in points],
@@ -186,17 +209,20 @@ class ActivityService(Service):
         return MapService.create_map(activity_id, min_lat, min_lon, max_lat, max_lon)
 
     @classmethod
-    def _render_trace(cls, activity_id: str, trace: list[dict], projection: dict) -> list[list[float]]:
+    def _render_trace(cls, activity_id: str, trace: list[list], projection: dict) -> list[list[float]]:
         return MapService.create_trace(activity_id, trace, projection)
 
     @classmethod
-    def _trace_bounds(cls, trace: list[dict]) -> tuple[float, float, float, float] | None:
+    def _trace_bounds(cls, trace) -> tuple[float, float, float, float] | None:
         latitudes: list[float] = []
         longitudes: list[float] = []
 
-        for point in trace:
-            lat = point.get("lat")
-            lon = point.get("lon")
+        for point in coerce_trace(trace):
+            if len(point) < 3:
+                continue
+
+            lat = point[1]
+            lon = point[2]
 
             if lat is None or lon is None:
                 continue

@@ -230,23 +230,26 @@ async def delete_group(group_id: int):
 
 @router.delete("/{photo_id}")
 async def delete_photo(photo_id: int):
+    async def _fetch(session) -> Photo | None:
+        return (await session.execute(select(Photo).where(Photo.id == photo_id))).scalar_one_or_none()
+
+    photo = await DatabaseService.execute(_fetch)
+
+    if photo is None:
+        raise HTTPException(404, f"Photo {photo_id} not found")
+
+    PhotoService.delete(photo)
+
+    for size in ThumbnailService.sizes():
+        thumbnail_path = ThumbnailService.get_thumbnail_path(photo, size)
+
+        if thumbnail_path.exists():
+            thumbnail_path.unlink()
+
     async def _delete(session):
-        photo = (await session.execute(select(Photo).where(Photo.id == photo_id))).scalar_one_or_none()
-
-        if photo is None:
-            raise HTTPException(404, f"Photo {photo_id} not found")
-
-        PhotoService.delete(photo)
-
-        for size in ThumbnailService.sizes():
-            thumbnail_path = ThumbnailService.get_thumbnail_path(photo, size)
-
-            if thumbnail_path.exists():
-                thumbnail_path.unlink()
-
-        await session.delete(photo)
+        stored = (await session.execute(select(Photo).where(Photo.id == photo_id))).scalar_one()
+        await session.delete(stored)
         await session.commit()
-
         return {"deleted": True}
 
     return await DatabaseService.execute(_delete)

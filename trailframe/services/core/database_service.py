@@ -113,6 +113,7 @@ class DatabaseService(Service):
                 if future is not None:
                     future.set_result(result)
             finally:
+                await cls._ScopedSession.remove()
                 cls._queue.task_done()
 
     @classmethod
@@ -127,6 +128,20 @@ class DatabaseService(Service):
     def execute_detached(cls, fn) -> None:
         """Submit `await fn(session)` to the DB thread without waiting (fire-and-forget)."""
         cls._enqueue(fn, None)
+
+    @classmethod
+    async def sync(cls) -> None:
+        """Wait until every job already queued (including `execute_detached` writes) has run.
+
+        Because the worker drains the FIFO queue in order, awaiting this barrier
+        guarantees that all prior operations have completed on the DB thread.
+        """
+        await cls.execute(_noop)
+
+    @classmethod
+    def pending_jobs(cls) -> int:
+        """Number of jobs still queued and not yet processed."""
+        return cls._queue.qsize() if cls._queue is not None else 0
 
     @classmethod
     def _enqueue(cls, fn, future: Future | None) -> None:

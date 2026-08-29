@@ -38,7 +38,6 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--folder", type=Path, default=None, help="Base folder where photos and thumbnails are stored")
     parser.add_argument("--database", type=Path, default=None, help="SQLite database")
     parser.add_argument("--port", type=int, default=None, help="API port")
-    parser.add_argument("--root-path", type=str, default="/", help="Root path prefix when behind a reverse proxy")
     parser.add_argument("--failsafe", action="store_true", help="Start without the FolderService (no scan/watch)")
     parser.add_argument(
         "--openapi", type=Path, default=None, metavar="FILE", help="Write OpenAPI schema to FILE and exit"

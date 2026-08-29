@@ -72,6 +72,9 @@ def app(tmp_path) -> AppHarness:
 
     with TestClient(instance) as client:
         yield AppHarness(client)
+        # Wait for any fire-and-forget DB writes (detached commits) to land before
+        # the app's lifespan stops the DatabaseService, so no work is dropped mid-teardown.
+        client.portal.call(_sync_db)
 
     from trailframe.services.core.configuration_service import ConfigurationService
     from trailframe.services.map.location_service import LocationService
@@ -85,6 +88,14 @@ def app(tmp_path) -> AppHarness:
     ThumbnailService._folder = None
     ThumbnailService._sizes = []
     ConfigurationService._root = type("Root", (), {"to_dict": lambda self: {}})()
+
+
+def _sync_db():
+    from trailframe.services.core.database_service import DatabaseService
+
+    if DatabaseService._loop is not None:
+        return DatabaseService.sync()
+    return None
 
 
 class _DbSession:
@@ -113,11 +124,13 @@ async def db_session(tmp_path):
     from trailframe.services.core.database_service import DatabaseService
 
     config = Node("general")
-    config.get_node("database").set_value(str(tmp_path / "test.db"))
+    config.get_node("database").set_value(":memory:")
 
     DatabaseService.configure(config)
     await DatabaseService.start()
 
     yield _DbSession()
 
+    # Drain any fire-and-forget writes before stopping so nothing is dropped.
+    await DatabaseService.sync()
     await DatabaseService.stop()

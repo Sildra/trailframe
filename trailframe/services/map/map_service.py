@@ -7,6 +7,7 @@ import s2sphere
 import staticmaps
 from s2sphere import LatLng
 
+from trailframe.models.activity import coerce_trace
 from trailframe.services.core.configuration_service import Node
 from trailframe.services.service import Service
 
@@ -61,7 +62,7 @@ class MapService(Service):
         return cls._projection(min_lat, min_lon, max_lat, max_lon)
 
     @classmethod
-    def create_trace(cls, activity: str, trace: list[dict], projection: dict) -> list[list[float]]:
+    def create_trace(cls, activity: str, trace, projection: dict) -> list[list[float]]:
         if cls._folder is None:
             raise RuntimeError("MapService is not configured")
 
@@ -119,7 +120,7 @@ class MapService(Service):
         }
 
     @classmethod
-    def _project_trace(cls, projection: dict, trace: list[dict]) -> list[list[float]]:
+    def _project_trace(cls, projection: dict, trace) -> list[list[float]]:
         transformer = staticmaps.transformer.Transformer(
             projection["width"],
             projection["height"],
@@ -130,9 +131,12 @@ class MapService(Service):
 
         points: list[tuple[float, float]] = []
 
-        for point in trace:
-            lat = point.get("lat")
-            lon = point.get("lon")
+        for point in coerce_trace(trace):
+            if len(point) < 3:
+                continue
+
+            lat = point[1]
+            lon = point[2]
 
             if lat is None or lon is None:
                 continue

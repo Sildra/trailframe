@@ -157,7 +157,7 @@ class TestMapDataApi:
             from trailframe.services.core.database_service import DatabaseService
 
             async def _op(session):
-                session.add(Activity(name="Ride", trace=[{"lat": 45.0, "lon": 6.0}, {"lat": 45.1, "lon": 6.1}]))
+                session.add(Activity(name="Ride", trace=[[0, 45.0, 6.0], [3600, 45.1, 6.1]]))
                 await session.commit()
 
             await DatabaseService.execute(_op)

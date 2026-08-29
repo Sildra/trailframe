@@ -21,11 +21,7 @@ class TestActivityTrace:
             }
         }
         trace = Activity._trace(details)
-        assert trace == [
-            {"time": 1000, "lat": 2.0, "lon": 2.0},
-            {"time": "2000", "lat": 3.0, "lon": 3.0},
-            {"time": 3000, "lat": 1.0, "lon": 1.0},
-        ]
+        assert trace == [[1000, 2.0, 2.0], ["2000", 3.0, 3.0], [3000, 1.0, 1.0]]
 
     @allure.title("Skips points that are missing required fields")
     def test_trace_skips_incomplete_points(self):
@@ -39,7 +35,7 @@ class TestActivityTrace:
                 ]
             }
         }
-        assert Activity._trace(details) == [{"time": 1000, "lat": 1.0, "lon": 1.0}]
+        assert Activity._trace(details) == [[1000, 1.0, 1.0]]
 
     @allure.title("Returns an empty trace for malformed payloads")
     def test_trace_returns_empty_for_bad_shapes(self):
@@ -63,7 +59,7 @@ class TestActivityTrace:
 
 class TestInterpolateTrace:
     def _trace(self):
-        return [{"time": 1600000000, "lat": 0.0, "lon": 0.0}, {"time": 1600001000, "lat": 2.0, "lon": 4.0}]
+        return [[1600000000, 0.0, 0.0], [1600001000, 2.0, 4.0]]
 
     @allure.title("Linearly interpolates a position between two trace points")
     def test_interpolates_midpoint(self):
@@ -146,7 +142,7 @@ class TestGarminActivity:
         activity = garmin.to_activity()
         assert activity.activity_id == "Garmin:55"
         assert activity.activity_type == "Riding"
-        assert activity.trace == [{"time": 1, "lat": 1.0, "lon": 1.0}]
+        assert activity.trace == [[1, 1.0, 1.0]]
 
 
 class TestGpxActivity:
@@ -174,9 +170,10 @@ class TestGpxActivity:
         assert len(activity.trace) == 2
 
         first = activity.trace[0]
-        assert first["lat"] == 1.0
-        assert first["lon"] == 2.0
-        assert first["altitude"] == 100
+        assert first[0] == 1685606400000
+        assert first[1] == 1.0
+        assert first[2] == 2.0
+        assert first[3] == 100
 
     @allure.title("Falls back to the filename when the track has no name")
     def test_from_gpx_uses_filename_when_no_name(self):
@@ -203,7 +200,7 @@ class TestGpxActivity:
             start_time=datetime(2023, 6, 1, 8, 0, 0),
             distance=100.0,
             duration=10.0,
-            trace=[{"time": 1, "lat": 1.0, "lon": 1.0}],
+            trace=[[1, 1.0, 1.0]],
         )
         converted = activity.to_activity()
         assert converted.activity_id == "GPX:7"

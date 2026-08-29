@@ -58,7 +58,7 @@ class ActivityScanner(Scanner):
         start_upper = photo.date + timedelta(minutes=10)
         start_lower = photo.date - timedelta(hours=12)
 
-        async with DatabaseService.create_session() as session:
+        async def _query(session) -> list[Activity]:
             result = await session.execute(
                 select(Activity).where(
                     Activity.start_time.is_not(None),

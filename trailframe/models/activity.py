@@ -8,6 +8,39 @@ from xml.etree import ElementTree as ET
 from sqlmodel import JSON, Column, Field, SQLModel
 
 
+def coerce_trace(trace: list | None) -> list[list]:
+    """Normalize trace rows to the compact [time, lat, lon, altitude?] layout."""
+    if not isinstance(trace, list) or not trace:
+        return []
+
+    if isinstance(trace[0], dict):
+        rows: list[list] = []
+
+        for point in trace:
+            if not isinstance(point, dict):
+                continue
+
+            time = point.get("time")
+            lat = point.get("lat")
+            lon = point.get("lon")
+
+            if time is None or lat is None or lon is None:
+                continue
+
+            row: list = [time, lat, lon]
+
+            altitude = point.get("altitude")
+
+            if altitude is not None:
+                row.append(altitude)
+
+            rows.append(row)
+
+        return rows
+
+    return trace
+
+
 class Activity(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
 
@@ -17,11 +50,11 @@ class Activity(SQLModel, table=True):
     start_time: datetime | None = None
     duration: float | None = None
     distance: float | None = None
-    trace: list[dict] = Field(default_factory=list, sa_column=Column(JSON))
+    trace: list[list] = Field(default_factory=list, sa_column=Column(JSON))
     map_data: dict = Field(default_factory=dict, sa_column=Column(JSON))
 
     @classmethod
-    def _trace(cls, details: dict | None) -> list[dict]:
+    def _trace(cls, details: dict | None) -> list[list]:
         if not isinstance(details, dict):
             return []
 
@@ -35,7 +68,7 @@ class Activity(SQLModel, table=True):
         if not isinstance(polyline, list):
             return []
 
-        trace: list[dict] = []
+        trace: list[list] = []
 
         for point in polyline:
             if not isinstance(point, dict):
@@ -48,9 +81,9 @@ class Activity(SQLModel, table=True):
             if time is None or lat is None or lon is None:
                 continue
 
-            trace.append({"time": time, "lat": lat, "lon": lon})
+            trace.append([time, lat, lon])
 
-        trace.sort(key=lambda point: cls._trace_sort_key(point["time"]))
+        trace.sort(key=lambda point: cls._trace_sort_key(point[0]))
 
         return trace
 
@@ -62,21 +95,26 @@ class Activity(SQLModel, table=True):
             return 0.0
 
     @classmethod
-    def interpolate_trace(cls, trace: list[dict], photo_date, activity_start) -> tuple[float, float] | None:
+    def interpolate_trace(cls, trace, photo_date, activity_start) -> tuple[float, float] | None:
+        trace = coerce_trace(trace)
+
         if not trace or photo_date is None or activity_start is None:
             return None
 
-        anchor = cls._trace_epoch(trace[0].get("time"))
+        anchor = cls._trace_epoch(trace[0][0])
 
         if anchor is None:
             return None
 
         points: list[tuple[float, float, float]] = []
 
-        for point in trace:
-            epoch = cls._trace_epoch(point.get("time"))
-            lat = point.get("lat")
-            lon = point.get("lon")
+        for row in trace:
+            if len(row) < 3:
+                continue
+
+            epoch = cls._trace_epoch(row[0])
+            lat = row[1]
+            lon = row[2]
 
             if epoch is None or lat is None or lon is None:
                 continue
@@ -220,7 +258,7 @@ class GpxActivity(SQLModel, table=True):
     start_time: datetime | None = None
     distance: float | None = None
     duration: float | None = None
-    trace: list[dict] = Field(default_factory=list, sa_column=Column(JSON))
+    trace: list[list] = Field(default_factory=list, sa_column=Column(JSON))
 
     def to_activity(self) -> Activity:
         return Activity(
@@ -288,7 +326,7 @@ class GpxActivity(SQLModel, table=True):
             )
 
         parsed_times: list[datetime] = []
-        trace: list[dict] = []
+        trace: list[list] = []
 
         for point in points:
             if not point["time"]:
@@ -301,17 +339,17 @@ class GpxActivity(SQLModel, table=True):
 
             parsed_times.append(parsed)
 
-            entry: dict = {"time": int(parsed.timestamp() * 1000), "lat": point["lat"], "lon": point["lon"]}
+            entry: list = [int(parsed.timestamp() * 1000), point["lat"], point["lon"]]
 
             if point["ele"] is not None:
-                entry["altitude"] = point["ele"]
+                entry.append(point["ele"])
 
             trace.append(entry)
 
         if not parsed_times:
             return None
 
-        trace.sort(key=lambda entry: entry["time"])
+        trace.sort(key=lambda entry: entry[0])
 
         start_time = min(parsed_times)
         end_time = max(parsed_times)

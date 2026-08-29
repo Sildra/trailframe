@@ -3,6 +3,7 @@ from __future__ import annotations
 import allure
 
 from trailframe.models.scanner_stat import ScannerStat
+from trailframe.services.core.database_service import DatabaseService
 from trailframe.services.core.statistics_service import StatisticsService
 
 
@@ -34,8 +35,11 @@ class TestRecordAndSummary:
     @allure.title("Reads directly inserted scanner stat rows")
     async def test_direct_insert_reads_back(self, db_session):
         # AGENTS.md recommends inserting ScannerStat rows directly to test the endpoints.
-        db_session.add(ScannerStat(scanner="Object", count=3, total_ms=300.0))
-        await db_session.commit()
+        async def _insert(session):
+            session.add(ScannerStat(scanner="Object", count=3, total_ms=300.0))
+            await session.commit()
+
+        await DatabaseService.execute(_insert)
 
         summary = await StatisticsService.get_scanner_summary()
         assert any(entry.name == "Object" and entry.items == 3 and entry.value == 10.0 for entry in summary)

@@ -4,7 +4,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 from sqlmodel import select
 
-from trailframe.models.activity import Activity
+from trailframe.models.activity import Activity, coerce_trace
 from trailframe.models.photo import Photo
 from trailframe.services.core.database_service import DatabaseService
 
@@ -61,7 +61,7 @@ async def get_map_data() -> MapData:
                 ActivityTrace(
                     id=a[0],
                     name=a[1],
-                    trace=[[pt["lat"], pt["lon"]] for pt in (a[2] or []) if "lat" in pt and "lon" in pt],
+                    trace=[[pt[1], pt[2]] for pt in coerce_trace(a[2]) if len(pt) > 2],
                     start_time=a[3],
                     distance=a[4],
                     duration=a[5],

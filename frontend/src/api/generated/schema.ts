@@ -658,9 +658,7 @@ export interface components {
             /** Distance */
             distance?: number | null;
             /** Trace */
-            trace?: {
-                [key: string]: unknown;
-            }[];
+            trace?: unknown[][];
             /** Map Data */
             map_data?: {
                 [key: string]: unknown;
