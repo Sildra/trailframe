@@ -5,20 +5,32 @@ import {
     Button,
     Chip,
     FormControlLabel,
+    IconButton,
     Stack,
     Switch,
     TextField,
+    Tooltip,
     Typography,
 } from "@mui/material";
 import ShuffleIcon from "@mui/icons-material/Shuffle";
 import StarIcon from "@mui/icons-material/Star";
+import CheckIcon from "@mui/icons-material/Check";
+import ContentCopyIcon from "@mui/icons-material/ContentCopy";
 import { api } from "../api/client";
 import type { components } from "../api/generated/schema";
+import { orderedSearch } from "../lib/slideshowSections";
+import type { SlideshowOption } from "../pages/SlideshowPage";
 
 type PhotoGroupSummary = components["schemas"]["PhotoGroupSummary"];
 
 interface CustomSlideshowMenuProps {
-    onStart: (name: string, photoIds: number[], useThumbnails: boolean) => void;
+    onStart: (
+        name: string,
+        photoIds: number[],
+        useThumbnails: boolean,
+        controls: SlideshowOption,
+        map: SlideshowOption,
+    ) => void;
 }
 
 export default function CustomSlideshowMenu({ onStart }: CustomSlideshowMenuProps) {
@@ -32,7 +44,10 @@ export default function CustomSlideshowMenu({ onStart }: CustomSlideshowMenuProp
     const [randomize, setRandomize] = useState(false);
     const [favoritesOnly, setFavoritesOnly] = useState(false);
     const [useThumbnails, setUseThumbnails] = useState(false);
+    const [controls, setControls] = useState<SlideshowOption>("full");
+    const [map, setMap] = useState<SlideshowOption>("full");
     const [loading, setLoading] = useState(false);
+    const [copied, setCopied] = useState(false);
 
     useEffect(() => {
         let cancelled = false;
@@ -59,48 +74,101 @@ export default function CustomSlideshowMenu({ onStart }: CustomSlideshowMenuProp
         }
     };
 
+    const buildParams = (): Record<string, unknown> => {
+        const params: Record<string, unknown> = {};
+
+        if (startDate) {
+            params.start_date = startDate;
+        }
+
+        if (endDate) {
+            params.end_date = endDate;
+        }
+
+        if (selectedGroup) {
+            params.group = selectedGroup.name;
+        }
+
+        if (location) {
+            params.location = location;
+        }
+
+        if (tags.length > 0) {
+            params.tags = tags;
+        }
+
+        if (favoritesOnly) {
+            params.favorites = true;
+        }
+
+        if (randomize) {
+            params.randomize = true;
+        }
+
+        return params;
+    };
+
+    const fetchPhotoIds = async (): Promise<number[]> => {
+        const { data, error } = await api.GET("/api/photos/custom", {
+            params: { query: buildParams() },
+        });
+
+        return !error && data ? data : [];
+    };
+
     const handleStart = async () => {
         setLoading(true);
 
         try {
-            const params: Record<string, unknown> = {};
+            const photoIds = await fetchPhotoIds();
 
-            if (startDate) {
-                params.start_date = startDate;
-            }
-
-            if (endDate) {
-                params.end_date = endDate;
-            }
-
-            if (selectedGroup) {
-                params.group = selectedGroup.name;
-            }
-
-            if (location) {
-                params.location = location;
-            }
-
-            if (tags.length > 0) {
-                params.tags = tags;
-            }
-
-            if (favoritesOnly) {
-                params.favorites = true;
-            }
-
-            if (randomize) {
-                params.randomize = true;
-            }
-
-            const { data, error } = await api.GET("/api/photos/custom", { params: { query: params } });
-
-            if (!error && data && data.length > 0) {
+            if (photoIds.length > 0) {
                 const label = buildLabel();
-                onStart(label, data, useThumbnails);
+                onStart(label, photoIds, useThumbnails, controls, map);
             }
         } finally {
             setLoading(false);
+        }
+    };
+
+    const buildSlideshowUrl = (): string => {
+        const params = new URLSearchParams();
+        params.set("section", "custom");
+        params.set("start", "1");
+        params.set("name", buildLabel());
+
+        for (const [key, value] of Object.entries(buildParams())) {
+            if (value === true) {
+                params.set(key, "1");
+            } else if (Array.isArray(value)) {
+                params.set(key, value.join(","));
+            } else if (value) {
+                params.set(key, String(value));
+            }
+        }
+
+        if (useThumbnails) {
+            params.set("thumbs", "1");
+        }
+
+        if (controls !== "full") {
+            params.set("controls", controls);
+        }
+
+        if (map !== "full") {
+            params.set("map", map);
+        }
+
+        return `./slideshow.html${orderedSearch(params)}`;
+    };
+
+    const handleCopyUrl = async () => {
+        try {
+            await navigator.clipboard.writeText(buildSlideshowUrl());
+            setCopied(true);
+            window.setTimeout(() => setCopied(false), 2000);
+        } catch {
+            // clipboard write can fail (e.g. insecure context or denied permission)
         }
     };
 
@@ -231,6 +299,22 @@ export default function CustomSlideshowMenu({ onStart }: CustomSlideshowMenuProp
                     variant={useThumbnails ? "filled" : "outlined"}
                     onClick={() => setUseThumbnails((value) => !value)}
                 />
+                <Chip
+                    size="small"
+                    label={controls === "full" ? "Full controls" : "Hide controls"}
+                    clickable
+                    color={controls === "full" ? "primary" : "default"}
+                    variant={controls === "full" ? "filled" : "outlined"}
+                    onClick={() => setControls((value) => (value === "hide" ? "full" : "hide"))}
+                />
+                <Chip
+                    size="small"
+                    label={map === "full" ? "Full map" : "Hide map"}
+                    clickable
+                    color={map === "full" ? "primary" : "default"}
+                    variant={map === "full" ? "filled" : "outlined"}
+                    onClick={() => setMap((value) => (value === "hide" ? "full" : "hide"))}
+                />
             </Box>
 
             <FormControlLabel
@@ -245,9 +329,22 @@ export default function CustomSlideshowMenu({ onStart }: CustomSlideshowMenuProp
                 }
             />
 
-            <Button variant="contained" onClick={handleStart} disabled={loading}>
-                Start slideshow
-            </Button>
+            <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+                <Button variant="contained" onClick={handleStart} disabled={loading} sx={{ flex: 1 }}>
+                    Start slideshow
+                </Button>
+                <Tooltip title={copied ? "Copied!" : "Copy slideshow URL"}>
+                    <IconButton
+                        aria-label="Copy slideshow URL"
+                        size="small"
+                        color="primary"
+                        onClick={handleCopyUrl}
+                        disabled={loading || copied}
+                    >
+                        {copied ? <CheckIcon fontSize="small" /> : <ContentCopyIcon fontSize="small" />}
+                    </IconButton>
+                </Tooltip>
+            </Box>
         </Stack>
     );
 }

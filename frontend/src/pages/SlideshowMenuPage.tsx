@@ -118,8 +118,15 @@ export default function SlideshowMenuPage({ section, onSectionChange, onStartSli
                 />
             ) : (
                 <CustomSlideshowMenu
-                    onStart={(name, photoIds, useThumbnails) =>
-                        onStartSlideshow({ kind: "group", name, photoIds, thumbnails: useThumbnails })
+                    onStart={(name, photoIds, useThumbnails, controls, map) =>
+                        onStartSlideshow({
+                            kind: "group",
+                            name,
+                            photoIds,
+                            thumbnails: useThumbnails,
+                            controls,
+                            map,
+                        })
                     }
                 />
             )}

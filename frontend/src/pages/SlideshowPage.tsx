@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Box, Button, CircularProgress, IconButton, Typography } from "@mui/material";
+import { Box, CircularProgress, IconButton, Tooltip, Typography } from "@mui/material";
 import ChevronLeftIcon from "@mui/icons-material/ChevronLeft";
 import ChevronRightIcon from "@mui/icons-material/ChevronRight";
 import PauseIcon from "@mui/icons-material/Pause";
 import PlayArrowIcon from "@mui/icons-material/PlayArrow";
+import LogoutIcon from "@mui/icons-material/Logout";
+import FolderZipIcon from "@mui/icons-material/FolderZip";
 import { api } from "../api/client";
 import type { components } from "../api/generated/schema";
 import WireframeMap from "../components/WireframeMap";
@@ -16,10 +18,31 @@ type Photo = components["schemas"]["PhotoDetail"];
 
 const SLIDE_INTERVAL_MS = 5000;
 const PROGRESS_TICK_MS = 100;
+const INFO_FONT = "13px monospace";
+const HEADER_PADDING_X = 24;
+const HEADER_GAPS = 16;
 
-export type SlideshowSource =
+function measureTextWidth(text: string, font: string): number {
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d");
+
+    if (!ctx) {
+        return text.length * 8;
+    }
+
+    ctx.font = font;
+    return ctx.measureText(text).width;
+}
+
+export type SlideshowOption = "hide" | "full";
+
+export type SlideshowSource = {
+    controls?: SlideshowOption;
+    map?: SlideshowOption;
+} & (
     | { kind: "activity"; activity: ActivitySummary }
-    | { kind: "group"; name: string; photoIds: number[]; thumbnails?: boolean };
+    | { kind: "group"; name: string; photoIds: number[]; thumbnails?: boolean }
+);
 
 function slideImageUrl(photoId: number, size?: number | null): string {
     return size ? `./api/photos/${photoId}/thumbnail?size=${size}` : `./api/photos/${photoId}/image`;
@@ -257,6 +280,8 @@ export default function SlideshowPage({ source, onExit }: SlideshowPageProps) {
 
     const photos = fetchedPhotos;
     const thumbnails = source.kind === "group" ? source.thumbnails : false;
+    const hideControls = source.controls === "hide";
+    const hideMap = source.map === "hide";
 
     const mapData = useMemo<MapData | null>(() => {
         if (!detail?.map_data || typeof detail.map_data !== "object") {
@@ -287,7 +312,7 @@ export default function SlideshowPage({ source, onExit }: SlideshowPageProps) {
     const slides = useMemo<Slide[]>(() => {
         const list: Slide[] = [];
 
-        if (source.kind === "activity" && !mapFailed) {
+        if (source.kind === "activity" && !mapFailed && !hideMap) {
             list.push({ kind: "map" });
         }
 
@@ -301,7 +326,7 @@ export default function SlideshowPage({ source, onExit }: SlideshowPageProps) {
         }
 
         return list;
-    }, [photos, mapFailed, source]);
+    }, [photos, mapFailed, source, hideMap]);
 
     useEffect(() => {
         const node = stageRef.current;
@@ -466,7 +491,40 @@ export default function SlideshowPage({ source, onExit }: SlideshowPageProps) {
     }, [slideIndex, slides, thumbnails]);
     const currentPhoto = slide.kind === "photo" ? (photos.find((photo) => photo.id === slide.photoId) ?? null) : null;
     const currentLocation = currentPhoto?.location || currentPhoto?.country || null;
+    const lowerLocation = currentLocation ? currentLocation.split(",")[0]?.trim() || currentLocation : null;
     const currentDate = currentPhoto?.date ? formatDateTime(currentPhoto.date) : null;
+    const headerRef = useRef<HTMLDivElement | null>(null);
+    const titleRef = useRef<HTMLParagraphElement | null>(null);
+    const buttonsRef = useRef<HTMLDivElement | null>(null);
+    const [overflows, setOverflows] = useState(false);
+    const shownLocation = overflows ? lowerLocation : currentLocation;
+    const counterText = slides.length === 0 ? "0 / 0" : `${slideIndex + 1} / ${slides.length}`;
+    const fullInfoText = `${counterText}${currentLocation ? ` · ${currentLocation}` : ""}${currentDate ? ` · ${currentDate}` : ""}`;
+
+    useEffect(() => {
+        const header = headerRef.current;
+        const title = titleRef.current;
+        const buttons = buttonsRef.current;
+
+        if (!header || !title || !buttons) {
+            return;
+        }
+
+        const update = () => {
+            const available =
+                header.clientWidth -
+                HEADER_PADDING_X -
+                title.getBoundingClientRect().width -
+                buttons.getBoundingClientRect().width -
+                HEADER_GAPS;
+            setOverflows(measureTextWidth(fullInfoText, INFO_FONT) > available);
+        };
+
+        update();
+        window.addEventListener("resize", update);
+
+        return () => window.removeEventListener("resize", update);
+    }, [fullInfoText]);
     const title =
         source.kind === "activity" ? (activity?.name ?? activity?.activity_id ?? "Activity") : source.name;
     const activityId = source.kind === "activity" ? (activity?.id ?? null) : null;
@@ -537,7 +595,9 @@ export default function SlideshowPage({ source, onExit }: SlideshowPageProps) {
 
     return (
         <Box sx={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+            {!hideControls && (
             <Box
+                ref={headerRef}
                 sx={{
                     display: "flex",
                     alignItems: "center",
@@ -549,13 +609,25 @@ export default function SlideshowPage({ source, onExit }: SlideshowPageProps) {
                     borderColor: "divider",
                 }}
             >
-                <Typography sx={{ fontWeight: 600 }}>{title}</Typography>
-                <Typography sx={{ color: "text.secondary", fontSize: 13, fontFamily: "monospace" }}>
-                    {slides.length === 0 ? "0 / 0" : `${slideIndex + 1} / ${slides.length}`}
-                    {currentLocation && ` · ${currentLocation}`}
+                <Typography ref={titleRef} sx={{ fontWeight: 600 }}>
+                    {title}
+                </Typography>
+                <Typography
+                    noWrap
+                    sx={{
+                        color: "text.secondary",
+                        fontSize: 13,
+                        fontFamily: "monospace",
+                        minWidth: 0,
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                    }}
+                >
+                    {counterText}
+                    {shownLocation && ` · ${shownLocation}`}
                     {currentDate && ` · ${currentDate}`}
                 </Typography>
-                <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+                <Box ref={buttonsRef} sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
                     <IconButton size="small" aria-label="Previous slide" onClick={previous}>
                         <ChevronLeftIcon fontSize="small" />
                     </IconButton>
@@ -570,14 +642,16 @@ export default function SlideshowPage({ source, onExit }: SlideshowPageProps) {
                             {paused ? <PlayArrowIcon fontSize="small" /> : <PauseIcon fontSize="small" />}
                         </IconButton>
                         <CircularProgress
-                            size={36}
-                            thickness={1.2}
+                            size={30}
+                            thickness={2}
                             variant="determinate"
                             value={progress}
                             sx={{
                                 position: "absolute",
-                                inset: -2,
-                                opacity: 0.4,
+                                inset: 0,
+                                margin: "auto",
+                                opacity: 0.85,
+                                color: "primary.main",
                                 pointerEvents: "none",
                                 "& .MuiCircularProgress-circle": { transition: "none" },
                             }}
@@ -586,16 +660,32 @@ export default function SlideshowPage({ source, onExit }: SlideshowPageProps) {
                     <IconButton size="small" aria-label="Next slide" onClick={next}>
                         <ChevronRightIcon fontSize="small" />
                     </IconButton>
-                    <Button size="small" onClick={onExit}>
-                        Exit
-                    </Button>
+                    <Tooltip title="Exit slideshow">
+                        <IconButton size="small" aria-label="Exit slideshow" color="error" onClick={onExit}>
+                            <LogoutIcon fontSize="small" />
+                        </IconButton>
+                    </Tooltip>
                     {source.kind === "activity" && (
-                        <Button size="small" onClick={exportZip} disabled={exporting}>
-                            {exporting ? "Exporting…" : "Export ZIP"}
-                        </Button>
+                        <Tooltip title={exporting ? "Exporting…" : "Export ZIP"}>
+                            <span>
+                                <IconButton
+                                    size="small"
+                                    aria-label="Export ZIP"
+                                    onClick={exportZip}
+                                    disabled={exporting}
+                                >
+                                    {exporting ? (
+                                        <CircularProgress size={16} thickness={5} />
+                                    ) : (
+                                        <FolderZipIcon fontSize="small" />
+                                    )}
+                                </IconButton>
+                            </span>
+                        </Tooltip>
                     )}
                 </Box>
             </Box>
+            )}
             <Box
                 ref={stageRef}
                 sx={{ flex: 1, minHeight: 0, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}
@@ -619,6 +709,7 @@ export default function SlideshowPage({ source, onExit }: SlideshowPageProps) {
                             alt={`Photo ${slide.photoId}`}
                             style={{ display: "block", width: "100%", height: "100%", objectFit: "contain" }}
                         />
+                        {!hideMap && (
                         <Box
                             sx={{
                                 position: "absolute",
@@ -641,6 +732,7 @@ export default function SlideshowPage({ source, onExit }: SlideshowPageProps) {
                                 map={currentPhoto?.map ?? null}
                             />
                         </Box>
+                        )}
                     </Box>
                 )}
             </Box>
