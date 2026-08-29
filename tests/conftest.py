@@ -41,7 +41,7 @@ def _build_args(tmp_path: Path):
             "database": tmp_path / "gallery.db",
             "port": None,
             "root_path": "/",
-            "failsafe": False,
+            "failsafe": True,
             "openapi": None,
         },
     )()

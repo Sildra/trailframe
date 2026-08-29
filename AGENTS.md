@@ -35,7 +35,7 @@ Trailframe — photo gallery app: Python/FastAPI backend + React/TS/Vite fronten
 ## Verification
 - **Tests**: pytest + pytest-asyncio + httpx in `tests/`; run `python -m pytest` from repo root. Fixtures: `app` (TestClient, full lifespan; `.db(coro)` for inserts on the app's event-loop thread) and `db_session` (standalone configured `DatabaseService`). Coverage via `addopts`; gitignored `.coverage`/`coverage.xml`/`htmlcov/`.
 - **Allure 3**: `addopts = --alluredir=allure-results --clean-alluredir`; groups by class (`feature`)/method (`story`). GlCanvas CLI via npm. View: `allure generate ./allure-results` + `allure open ./allure-report` (or `allure generate ./allure-results --open`; `allure watch`). Results/report gitignored.
-- **No CI**. Test against `http://localhost:8000` — confirm the frontend is up first (else ask the user). **NEVER TEST GARMIN CONNECT.**
+- **CI** (`.github/workflows/publish.yml`, on `v*` tags): `Test` job runs ruff, pytest, frontend lint (deps from `requirements-dev.txt`, pip cached) → `Release` builds web UI + wheel, publishes to PyPI/GitHub → `Notify` dispatches `trailframe-release` to hassio-trailframe. Local verification: Test against `http://localhost:8000` — confirm the frontend is up first (else ask the user). **NEVER test Garmin Connect against the live service/login — always mock the `garminconnect` client** (pattern in `tests/test_garmin_connect_service.py`).
 - **Backend changes**: kill the port-8000 process (`netstat -ano | findstr :8000`, `taskkill -PID <pid> -F`), wait auto-restart.
 - **API changes**: regenerate instead of hitting the live server (see regenerate note in Frontend section).
 - **Frontend changes**: build from `frontend/`: `npm run build`.

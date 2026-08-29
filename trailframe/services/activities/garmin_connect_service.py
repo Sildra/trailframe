@@ -1,8 +1,9 @@
+from __future__ import annotations
+
 import asyncio
 from datetime import datetime, timedelta
-from typing import ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
-from garminconnect import Garmin
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,6 +13,9 @@ from trailframe.services.core.database_service import DatabaseService
 from trailframe.services.core.thread_pool_service import ThreadPoolService
 from trailframe.services.pipelines.executor import run_in_thread
 from trailframe.services.service import Service
+
+if TYPE_CHECKING:
+    from garminconnect import Garmin
 
 
 class GarminConnectService(Service):
@@ -35,6 +39,8 @@ class GarminConnectService(Service):
     @classmethod
     def _sync(cls, email: str, password: str) -> None:
         try:
+            from garminconnect import Garmin
+
             client = Garmin(email, password)
             client.login()
             asyncio.run(cls._import(client))
@@ -162,6 +168,9 @@ class GarminConnectService(Service):
 
     @classmethod
     def _filter_traces(cls, details: dict) -> dict:
+        if not isinstance(details, dict):
+            return details
+
         polyline_dto = details.get("geoPolylineDTO")
 
         if not isinstance(polyline_dto, dict):

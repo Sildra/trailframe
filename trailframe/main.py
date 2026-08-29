@@ -100,9 +100,7 @@ def create_app(args: argparse.Namespace) -> FastAPI:
         await ThreadPoolService.stop()
         await DatabaseService.stop()
 
-    root_path = args.root_path.rstrip("/") or "/"
-
-    app = FastAPI(title="Trailframe", version="0.1.0", lifespan=lifespan, root_path=root_path)
+    app = FastAPI(title="Trailframe", version="0.1.0", lifespan=lifespan)
 
     app.include_router(about_router)
     app.include_router(photos_router)

@@ -198,3 +198,24 @@ class TestAboutApi:
         packages = response.json()
         assert isinstance(packages, list)
         assert all({"name", "version", "license"} <= set(pkg) for pkg in packages)
+
+    @allure.title("Computes the package list once and caches it")
+    def test_packages_result_is_cached(self, app, monkeypatch):
+        from trailframe.api import about
+
+        calls = 0
+        original = about._build_packages
+
+        def counting():
+            nonlocal calls
+            calls += 1
+            return original()
+
+        about._cached_packages = None
+        monkeypatch.setattr(about, "_build_packages", counting)
+
+        first = app.get("/api/about/packages").json()
+        second = app.get("/api/about/packages").json()
+
+        assert calls == 1
+        assert first == second

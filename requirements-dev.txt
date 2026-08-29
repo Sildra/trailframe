@@ -1,0 +1,24 @@
+# CI dependency set for the Test job (kept light on purpose: ultralytics/torch and
+# garminconnect are only imported lazily inside the services, so the test suite does
+# not need them; the released wheel still declares them in pyproject.toml).
+fastapi
+sqlalchemy[asyncio]
+sqlmodel
+aiosqlite
+uvicorn
+pyyaml
+pillow
+imagehash
+requests
+shapely
+numpy
+s2sphere
+py-staticmaps
+psutil
+python-multipart
+httpx
+pytest
+pytest-asyncio
+pytest-cov
+allure-pytest
+ruff
