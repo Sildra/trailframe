@@ -22,6 +22,7 @@ class FolderService(Service):
     _known_files: ClassVar[set[Path]] = set()
     _task: asyncio.Task | None = None
     _running = False
+    _creation_throttle = 0
 
     @classmethod
     def resolve(cls, stored: str | Path) -> Path:
@@ -91,6 +92,7 @@ class FolderService(Service):
             config.get_path_value("trash_folder", "Folder where deleted photos are moved", "trash")
         )
         cls._trash_folder.mkdir(parents=True, exist_ok=True)
+        cls._creation_throttle = config.get_path_value("creation_throttle", "Throttle items simultaneously added to the pipeline", 0)
 
     @classmethod
     async def _start(cls) -> None:
@@ -138,6 +140,9 @@ class FolderService(Service):
 
             items += 1
             cls._known_files.add(path)
+            if cls._creation_throttle != 0:
+                while PipelineService.get_queue_size() > cls._creation_throttle:
+                    await asyncio.sleep(1)
 
             from trailframe.services.pipelines.pipeline_service import PipelineService
 
