@@ -128,7 +128,12 @@ class Pipeline(Service):
         if isinstance(item, Photo):
             item = Item(item)
 
-        return await cls._run_scanners(item)
+        success = await cls._run_scanners(item)
+        if isinstance(item, Item):
+            item.image.close()
+
+        return success
+        
 
     @classmethod
     async def _run_scanners(cls, item: Any) -> bool:

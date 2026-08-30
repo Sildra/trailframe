@@ -11,16 +11,18 @@ class Item:
         self.photo = photo
         self.updated = False
         self._image: Image.Image | None = None
-        self._image_loaded = False
 
     @property
     def image(self) -> Image.Image | None:
-        if not self._image_loaded:
-            self._image_loaded = True
-
+        if not self._image:
             try:
                 self._image = Image.open(PhotoService.resolve(self.photo))
             except OSError:
                 self._image = None
 
         return self._image
+
+    def close(self) -> None:
+        if self._image:
+            self._image.close()
+            self._image = None

@@ -130,6 +130,7 @@ class FolderService(Service):
 
     @classmethod
     async def scan(cls) -> None:
+        from trailframe.services.pipelines.pipeline_service import PipelineService
         items = 0
         for path in cls._folder.rglob("*"):
             if not cls._is_image(path):
@@ -143,8 +144,6 @@ class FolderService(Service):
             if cls._creation_throttle != 0:
                 while PipelineService.get_queue_size() > cls._creation_throttle:
                     await asyncio.sleep(1)
-
-            from trailframe.services.pipelines.pipeline_service import PipelineService
 
             await PipelineService.next(await cls.to_photo(path))
         if items != 0:
