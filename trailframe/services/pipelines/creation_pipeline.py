@@ -1,6 +1,5 @@
 from typing import ClassVar
 
-from trailframe.services.pipelines.item import Item
 from trailframe.services.pipelines.pipeline import Pipeline
 from trailframe.services.scanners.database_scanner import DatabaseScanner
 from trailframe.services.scanners.exif_scanner import ExifScanner

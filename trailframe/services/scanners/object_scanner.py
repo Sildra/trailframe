@@ -1,6 +1,5 @@
 from pathlib import Path
 from threading import Lock
-from typing import Any
 
 from trailframe.models.photo import Photo
 from trailframe.services.core.configuration_service import Node

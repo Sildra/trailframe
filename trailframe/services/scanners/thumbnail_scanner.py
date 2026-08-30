@@ -1,4 +1,3 @@
-from typing import Any
 
 from trailframe.models.photo import Photo
 from trailframe.services.photos.thumbnail_service import ThumbnailService

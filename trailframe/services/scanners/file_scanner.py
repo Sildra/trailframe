@@ -1,8 +1,6 @@
 import os
-from typing import Any
 
 from trailframe.models.photo import Photo
-from trailframe.services.core.configuration_service import Node
 from trailframe.services.photos.photo_service import PhotoService
 from trailframe.services.pipelines.item import Item
 from trailframe.services.scanners.scanner import Scanner

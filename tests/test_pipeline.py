@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import allure
-import pytest
 
 from trailframe.services.pipelines.pipeline import Pipeline, PipelineEmpty
 from trailframe.services.pipelines.pipeline_service import PipelineService

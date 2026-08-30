@@ -1,6 +1,5 @@
 import math
 from datetime import datetime
-from typing import Any
 
 from PIL import ExifTags
 from PIL.ExifTags import GPSTAGS, TAGS

@@ -1,7 +1,6 @@
 from sqlalchemy import select
 
 from trailframe.models.photo import Photo
-from trailframe.services.core.configuration_service import Node
 from trailframe.services.core.database_service import DatabaseService
 from trailframe.services.pipelines.item import Item
 from trailframe.services.scanners.scanner import Scanner
