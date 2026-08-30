@@ -52,7 +52,7 @@ class TestPhotosApi:
         response = app.put("/api/photos/999/favorite", json={"value": True})
         assert response.status_code == 404
 
-    @allure.title("Returns photo detail, stripping the EXIF MakerNote")
+    @allure.title("Returns photo detail")
     def test_photo_detail_strips_makernote(self, app):
         photo_id = _add_photos(
             app,
@@ -63,7 +63,7 @@ class TestPhotosApi:
                     file_size=10,
                     date=datetime(2023, 6, 1, 12, 0, 0),
                     tags=["sunset"],
-                    exif={"Make": "Nikon", "MakerNote": "secret"},
+                    exif={"Make": "Nikon"},
                     latitude=45.0,
                     longitude=6.0,
                 )
@@ -73,7 +73,6 @@ class TestPhotosApi:
         detail = app.get(f"/api/photos/{photo_id}/data").json()
         assert detail["filename"] == "x.jpg"
         assert detail["tags"] == ["sunset"]
-        assert "MakerNote" not in detail["exif"]
         assert detail["exif"]["Make"] == "Nikon"
 
     @allure.title("Returns 404 when deleting a missing photo")
@@ -178,7 +177,7 @@ class TestPipelineApi:
     @allure.title("Lists the scanners known to both pipelines")
     def test_lists_known_scanners(self, app):
         scanners = app.get("/api/pipeline/scanners").json()
-        assert "File" in scanners
+        assert "File" not in scanners
         assert "EXIF" in scanners
         assert "Thumbnail" in scanners
         assert "PerceptualHash" in scanners

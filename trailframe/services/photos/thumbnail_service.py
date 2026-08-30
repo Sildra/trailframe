@@ -95,6 +95,7 @@ class ThumbnailService(Service):
         safe = _INVALID_FILENAME_CHARS.sub("_", name).lstrip(".").strip()
 
         if not safe:
+            cls._log(f"{name} -> photo")
             return "photo"
 
         return safe

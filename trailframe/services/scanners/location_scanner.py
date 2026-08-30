@@ -1,6 +1,6 @@
-from typing import Any
-
+from trailframe.models.photo import Photo
 from trailframe.services.map.location_service import LocationService
+from trailframe.services.pipelines.item import Item
 from trailframe.services.scanners.scanner import Scanner
 
 
@@ -8,12 +8,10 @@ class LocationScanner(Scanner):
     def __init__(self) -> None:
         super().__init__("Location")
 
-    def accept_(self, item: Any) -> bool:
-        photo = item.photo
-
+    def accept_(self, photo: Photo) -> bool:
         return photo.latitude is not None and photo.longitude is not None and photo.wireframe is None
 
-    async def executePhoto(self, item) -> bool:
+    async def executePhoto(self, item: Item) -> bool:
         photo = item.photo
 
         if photo.latitude is None or photo.longitude is None:

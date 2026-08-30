@@ -2,8 +2,10 @@ from pathlib import Path
 from threading import Lock
 from typing import Any
 
+from trailframe.models.photo import Photo
 from trailframe.services.core.configuration_service import Node
 from trailframe.services.photos.photo_service import PhotoService
+from trailframe.services.pipelines.item import Item
 from trailframe.services.scanners.scanner import Scanner
 
 YOLO_MODELS = {
@@ -31,10 +33,10 @@ class ObjectScanner(Scanner):
             config.get_path_value("general.models_folder", "Folder where models are stored", "models")
         )
 
-    def accept_(self, item: Any) -> bool:
-        return self.name not in (item.photo.scanners or [])
+    def accept_(self, photo: Photo) -> bool:
+        return self.name not in (photo.scanners or [])
 
-    async def executePhoto(self, item) -> bool:
+    async def executePhoto(self, item: Item) -> bool:
         photo = item.photo
 
         model = self._get_model()

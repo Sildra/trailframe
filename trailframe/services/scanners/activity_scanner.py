@@ -4,8 +4,10 @@ from typing import Any
 from sqlalchemy import select
 
 from trailframe.models.activity import Activity
+from trailframe.models.photo import Photo
 from trailframe.services.core.configuration_service import Node
 from trailframe.services.core.database_service import DatabaseService
+from trailframe.services.pipelines.item import Item
 from trailframe.services.scanners.scanner import Scanner
 
 
@@ -19,9 +21,7 @@ class ActivityScanner(Scanner):
             "scanners.Activity.use_activity_position", "Use Activity as GPS Position", False
         )
 
-    def accept_(self, item: Any) -> bool:
-        photo = item.photo
-
+    def accept_(self, photo: Photo) -> bool:
         return (
             self.use_activity_position
             and photo.date is not None
@@ -29,7 +29,7 @@ class ActivityScanner(Scanner):
             and (photo.latitude is None or photo.longitude is None)
         )
 
-    async def executePhoto(self, item) -> bool:
+    async def executePhoto(self, item: Item) -> bool:
         photo = item.photo
 
         if not self.use_activity_position or photo.date is None:

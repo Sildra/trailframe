@@ -105,12 +105,12 @@ class DatabaseService(Service):
                 session = cls._ScopedSession()
                 result = await fn(session)
             except Exception as exception:  # noqa: BLE001
-                if future is not None:
+                if future is not None and not future.cancelled():
                     future.set_exception(exception)
-                else:
+                elif future is None:
                     cls._log(f"detached DB job failed: {exception}")
             else:
-                if future is not None:
+                if future is not None and not future.cancelled():
                     future.set_result(result)
             finally:
                 await cls._ScopedSession.remove()

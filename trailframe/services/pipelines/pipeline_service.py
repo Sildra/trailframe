@@ -35,9 +35,6 @@ class PipelineService(Service):
 
     @classmethod
     async def next(cls, item: Any, pipeline: type[Pipeline] | None = None) -> None:
-        if isinstance(item, Photo):
-            item = Item(item)
-
         if pipeline is None:
             candidates = cls._pipelines
         else:

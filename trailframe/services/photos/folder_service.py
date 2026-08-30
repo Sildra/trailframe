@@ -18,7 +18,7 @@ class FolderService(Service):
 
     _folder: Path | None = None
     _trash_folder: Path | None = None
-    _interval = 60
+    _interval = 10
     _known_files: ClassVar[set[Path]] = set()
     _task: asyncio.Task | None = None
     _running = False
@@ -99,8 +99,6 @@ class FolderService(Service):
 
         cls._running = True
 
-        await cls.scan()
-
         cls._task = asyncio.create_task(cls._watch())
 
     @classmethod
@@ -130,6 +128,7 @@ class FolderService(Service):
 
     @classmethod
     async def scan(cls) -> None:
+        items = 0
         for path in cls._folder.rglob("*"):
             if not cls._is_image(path):
                 continue
@@ -137,11 +136,14 @@ class FolderService(Service):
             if path in cls._known_files:
                 continue
 
+            items += 1
             cls._known_files.add(path)
 
             from trailframe.services.pipelines.pipeline_service import PipelineService
 
             await PipelineService.next(await cls.to_photo(path))
+        if items != 0:
+            cls._log(f"Found {items} new files")
 
     @classmethod
     async def upload(cls, filename: str, content) -> Path:

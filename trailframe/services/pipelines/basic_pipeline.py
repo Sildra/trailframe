@@ -19,12 +19,3 @@ class BasicPipeline(Pipeline):
         DatabaseScanner(),
     ]
 
-    @classmethod
-    def accepts(cls, item) -> bool:
-        if isinstance(item, ForceFlag):
-            return True
-
-        if isinstance(item, Item):
-            return any(scanner.accept(item) for scanner in cls._scanners)
-
-        return super().accepts(item)

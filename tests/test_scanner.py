@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import asyncio
+
 import allure
 import pytest
 
 from trailframe.models.photo import Photo
+from trailframe.services.core.database_service import DatabaseService
 from trailframe.services.pipelines.item import Item
 from trailframe.services.scanners.database_scanner import DatabaseScanner
 from trailframe.services.scanners.scanner import ForceFlag, Scanner, ScannerResult
@@ -20,7 +23,7 @@ class FakeScanner(Scanner):
     def accept_(self, item) -> bool:
         return self.accept_result
 
-    async def executePhoto(self, item) -> bool:
+    async def executePhoto(self, item: Item) -> bool:
         if self.fail:
             raise RuntimeError("boom")
         self.calls.append(item.photo)
@@ -43,7 +46,7 @@ class TestScannerBase:
     @pytest.mark.asyncio
     async def test_disabled_scanner_skips(self):
         scanner = FakeScanner()
-        scanner.enabled = False
+        scanner._enabled = False
         item = Item(Photo(path="x.jpg"))
         result = await scanner.execute(item)
         assert result is ScannerResult.SUCCESS
@@ -54,7 +57,7 @@ class TestScannerBase:
     @pytest.mark.asyncio
     async def test_disabled_scanner_skips_even_when_forced(self):
         scanner = FakeScanner()
-        scanner.enabled = False
+        scanner._enabled = False
         scanner.accept(ForceFlag(["Fake"]))
         item = Item(Photo(path="x.jpg"))
         await scanner.execute(item)
@@ -155,7 +158,7 @@ class TestAsyncScanner:
         calls = []
 
         class AsyncScanner(Scanner):
-            async def executePhoto(self, item) -> bool:
+            async def executePhoto(self, item: Item) -> bool:
                 calls.append(item.photo)
                 return True
 
@@ -195,3 +198,53 @@ class TestDatabaseScanner:
         photo = (await db_session.execute(select(Photo).where(Photo.path == "x.jpg"))).scalar_one_or_none()
         assert photo is not None
         assert photo.filename == "x.jpg"
+
+    @allure.title("Resaves a photo whose path is already in the database without breaking the unique constraint")
+    @pytest.mark.asyncio
+    async def test_upserts_duplicate_path(self, db_session):
+        from sqlalchemy import select
+
+        from trailframe.models.photo import Photo
+        from trailframe.services.core.database_service import DatabaseService
+
+        scanner = DatabaseScanner()
+        first = Item(Photo(path="x.jpg"))
+        first.photo.filename = "x-first.jpg"
+        first.updated = True
+
+        result = await scanner.execute(first)
+        assert result is ScannerResult.SUCCESS
+        await DatabaseService.sync()
+
+        second = Item(Photo(path="x.jpg"))
+        second.photo.filename = "x-second.jpg"
+        second.updated = True
+
+        result = await scanner.execute(second)
+        assert result is ScannerResult.SUCCESS
+        await DatabaseService.sync()
+
+        rows = (await db_session.execute(select(Photo).where(Photo.path == "x.jpg"))).scalars().all()
+        assert len(rows) == 1
+        assert rows[0].filename == "x-second.jpg"
+
+    @allure.title("A cancelled caller does not crash the database worker thread")
+    @pytest.mark.asyncio
+    async def test_cancelled_execute_keeps_worker_alive(self, db_session):
+        async def _job(session):
+            await asyncio.sleep(0.2)
+            return "done"
+
+        async def _caller():
+            await DatabaseService.execute(_job)
+
+        task = asyncio.create_task(_caller())
+        await asyncio.sleep(0.05)
+        task.cancel()
+
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        await DatabaseService.sync()
+
+        assert DatabaseService._thread is not None and DatabaseService._thread.is_alive()

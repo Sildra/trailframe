@@ -71,8 +71,6 @@ class PhotoDetail(BaseModel):
     def from_photo(photo: "Photo", *, groups: list["RelatedPhotoGroup"] | None = None) -> "PhotoDetail":
         from trailframe.services.map.location_service import LocationService
 
-        exif = {key: value for key, value in (photo.exif or {}).items() if key != "MakerNote"}
-
         map_data = None
 
         if photo.latitude is not None and photo.longitude is not None:
@@ -99,7 +97,7 @@ class PhotoDetail(BaseModel):
             country=photo.country,
             location=photo.location,
             wireframe=photo.wireframe,
-            exif=exif,
+            exif=photo.exif,
             tags=photo.tags or [],
             scores=photo.scores or {},
             scanners=photo.scanners or [],

@@ -13,12 +13,14 @@ class ForcedScanRequest(BaseModel):
 
 
 def _known_scanners() -> list[str]:
-    return [scanner.name for pipeline in (CreationPipeline, BasicPipeline) for scanner in pipeline._scanners]
+    return [scanner.name for pipeline in (CreationPipeline, BasicPipeline) for scanner in pipeline._scanners if scanner._can_be_disabled]
 
 
 @router.get("/scanners")
 async def list_scanners() -> list[str]:
-    return _known_scanners()
+    values = _known_scanners()
+    values.sort()
+    return values
 
 
 @router.post("/scan")

@@ -26,7 +26,7 @@ class StatisticsService(Service):
         }
 
     @classmethod
-    async def record_run(cls, stats: list[dict]) -> None:
+    def record_run(cls, stats: list[dict]) -> None:
         def _record(session):
             async def _run(s):
                 for stat in stats:

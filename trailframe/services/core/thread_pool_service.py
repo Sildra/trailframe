@@ -21,7 +21,7 @@ class ThreadPoolService(Service):
     @classmethod
     def _configure(cls, config: Node) -> None:
         cls._max_workers = int(
-            config.get_path_value("general.thread_pool_size", "Number of threads in the shared worker pool", 2)
+            config.get_path_value("thread_pool_size", "Number of threads in the shared worker pool", 4)
         )
 
     @classmethod

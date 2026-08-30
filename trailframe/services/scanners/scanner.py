@@ -23,7 +23,9 @@ class ForceFlag:
 class Scanner(ABC):
     def __init__(self, name: str):
         self.name = name
-        self.enabled = True
+        self._can_be_disabled = True
+        self._can_be_remote = False
+        self._enabled = True
         self._forced = False
         self._run_count = 0
         self._run_total_ms = 0.0
@@ -33,27 +35,36 @@ class Scanner(ABC):
         get_logger().log(level, message)
 
     def configure(self, config: Node) -> None:
-        self.enabled = config.get_path_value(f"scanners.{self.name}.enabled", f"Enable {self.name} scanner", True)
+        if self._can_be_disabled:
+            self._enabled = config.get_path_value(f"scanners.{self.name}.enabled", f"Enable {self.name} scanner", True)
+        if self._can_be_remote:
+            pass
         self.configure_(config)
+
 
     def configure_(self, config: Node) -> None:
         pass
 
     def accept(self, item: Any) -> bool:
-        if isinstance(item, ForceFlag):
-            self._forced = self.name in item.scanners
+        if self._can_be_disabled:
+            if isinstance(item, ForceFlag):
+                self._forced = self.name in item.scanners
+                return False
 
-            return False
+            if not self._enabled:
+                return False
 
-        if not self.enabled:
-            return False
+            if self._forced:
+                return True
 
-        if self._forced:
-            return True
+        if isinstance(item, Photo):
+            return self.accept_(item)
+        if isinstance(item, Item):
+            return self.accept_(item.photo)
 
-        return self.accept_(item)
+        return False
 
-    def accept_(self, item: Any) -> bool:
+    def accept_(self, item: Photo) -> bool:
         return True
 
     async def execute(self, item: Any) -> ScannerResult:

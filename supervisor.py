@@ -50,10 +50,7 @@ def main() -> int:
 
     while not stop:
         print("[launcher] starting backend...", flush=True)
-        backend = subprocess.Popen(
-            [sys.executable, "-m", "trailframe.main", *sys.argv[1:]],
-            cwd=BACKEND_DIR,
-        )
+        backend = subprocess.Popen([sys.executable, "-m", "trailframe.main", *sys.argv[1:]], cwd=BACKEND_DIR)
 
         try:
             status = backend.wait()

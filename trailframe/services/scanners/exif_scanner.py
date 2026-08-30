@@ -5,6 +5,8 @@ from typing import Any
 from PIL import ExifTags
 from PIL.ExifTags import GPSTAGS, TAGS
 
+from trailframe.models.photo import Photo
+from trailframe.services.pipelines.item import Item
 from trailframe.services.scanners.scanner import Scanner
 
 
@@ -16,10 +18,10 @@ class ExifScanner(Scanner):
     def __init__(self):
         super().__init__("EXIF")
 
-    def accept_(self, item: Any) -> bool:
-        return not item.photo.exif
+    def accept_(self, photo: Photo) -> bool:
+        return not photo.exif
 
-    async def executePhoto(self, item) -> bool:
+    async def executePhoto(self, item: Item) -> bool:
         image = item.image
 
         if image is None:
@@ -32,7 +34,7 @@ class ExifScanner(Scanner):
 
         photo = item.photo
 
-        photo.exif = {TAGS[tag_id]: str(value) for tag_id, value in exif.items() if tag_id in TAGS}
+        photo.exif = {TAGS[tag_id]: str(value) for tag_id, value in exif.items() if tag_id in TAGS and tag_id is not ExifTags.Base.MakerNote}
 
         self._update_ifds(photo, exif)
         self._update_date(photo)
@@ -45,7 +47,7 @@ class ExifScanner(Scanner):
 
         if exif_ifd:
             for tag_id, value in exif_ifd.items():
-                if tag_id in TAGS:
+                if tag_id in TAGS and tag_id is not ExifTags.Base.MakerNote:
                     photo.exif[TAGS[tag_id]] = str(value)
 
         gps_ifd = exif.get_ifd(ExifTags.Base.GPSInfo)

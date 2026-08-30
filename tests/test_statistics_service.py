@@ -10,10 +10,10 @@ from trailframe.services.core.statistics_service import StatisticsService
 class TestRecordAndSummary:
     @allure.title("Aggregates scanner runs across calls into per-scanner summary")
     async def test_record_run_then_summary(self, db_session):
-        await StatisticsService.record_run(
+        StatisticsService.record_run(
             [{"scanner": "EXIF", "count": 10, "total_ms": 1000.0}, {"scanner": "File", "count": 5, "total_ms": 500.0}]
         )
-        await StatisticsService.record_run([{"scanner": "EXIF", "count": 10, "total_ms": 1000.0}])
+        StatisticsService.record_run([{"scanner": "EXIF", "count": 10, "total_ms": 1000.0}])
 
         summary = await StatisticsService.get_scanner_summary()
         by_name = {entry.name: entry for entry in summary}
@@ -27,7 +27,7 @@ class TestRecordAndSummary:
 
     @allure.title("Yields a zero throughput when no time was recorded")
     async def test_summary_zero_time_yields_zero_value(self, db_session):
-        await StatisticsService.record_run([{"scanner": "Test", "count": 7, "total_ms": 0.0}])
+        StatisticsService.record_run([{"scanner": "Test", "count": 7, "total_ms": 0.0}])
         summary = await StatisticsService.get_scanner_summary()
         assert summary[0].items == 7
         assert summary[0].value == 0.0

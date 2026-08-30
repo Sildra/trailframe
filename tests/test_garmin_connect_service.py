@@ -163,7 +163,9 @@ class TestSync:
         created: list[FakeGarmin] = []
 
         def _factory(email, password):
-            fake = FakeGarmin(email=email, password=password, activities=[_activity_payload(1, "Run"), _activity_payload(2, "Ride")])
+            fake = FakeGarmin(
+                email=email, password=password, activities=[_activity_payload(1, "Run"), _activity_payload(2, "Ride")]
+            )
             created.append(fake)
             return fake
 
