@@ -49,7 +49,7 @@ dev = [
     "pytest",
     "pytest-asyncio",
     "pytest-cov",
-    "httpx",
+    "httpx2",
     "allure-pytest",
 ]
 

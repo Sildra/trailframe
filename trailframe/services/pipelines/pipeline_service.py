@@ -5,11 +5,17 @@ from sqlalchemy import select
 from trailframe.models.photo import Photo
 from trailframe.services.core.configuration_service import Node
 from trailframe.services.core.database_service import DatabaseService
-from trailframe.services.pipelines.basic_pipeline import BasicPipeline
-from trailframe.services.pipelines.creation_pipeline import CreationPipeline
 from trailframe.services.pipelines.item import Item
 from trailframe.services.pipelines.pipeline import Pipeline
+from trailframe.services.scanners.activity_scanner import ActivityScanner
+from trailframe.services.scanners.database_scanner import DatabaseScanner
+from trailframe.services.scanners.exif_scanner import ExifScanner
+from trailframe.services.scanners.file_scanner import FileScanner
+from trailframe.services.scanners.location_scanner import LocationScanner
+from trailframe.services.scanners.object_scanner import ObjectScanner
+from trailframe.services.scanners.perceptual_hash_scanner import PerceptualHashScanner
 from trailframe.services.scanners.scanner import ForceFlag
+from trailframe.services.scanners.thumbnail_scanner import ThumbnailScanner
 from trailframe.services.service import Service
 
 
@@ -18,7 +24,14 @@ class PipelineService(Service):
 
     @classmethod
     def _configure(cls, config: Node) -> None:
-        cls._pipelines = [CreationPipeline, BasicPipeline]
+        if not cls._pipelines:
+            cls._pipelines = [
+                Pipeline("CreationPipeline", [ ExifScanner(), ThumbnailScanner() ]),
+                Pipeline("BasicPipeline", [ ActivityScanner(), LocationScanner(), ObjectScanner(), PerceptualHashScanner() ])
+            ]
+            cls._pipelines[0]._scanners = [ FileScanner() ] + cls._pipelines[0]._scanners
+            for pipeline in cls._pipelines:
+                pipeline._scanners += [ DatabaseScanner() ]
 
         for pipeline in cls._pipelines:
             pipeline.configure(config)

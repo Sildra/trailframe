@@ -16,7 +16,7 @@ s2sphere
 py-staticmaps
 psutil
 python-multipart
-httpx
+httpx2
 pytest
 pytest-asyncio
 pytest-cov

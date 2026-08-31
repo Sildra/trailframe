@@ -1,8 +1,6 @@
 from fastapi import APIRouter
 from pydantic import BaseModel
 
-from trailframe.services.pipelines.basic_pipeline import BasicPipeline
-from trailframe.services.pipelines.creation_pipeline import CreationPipeline
 from trailframe.services.pipelines.pipeline_service import PipelineService
 
 router = APIRouter(prefix="/api/pipeline", tags=["pipeline"])
@@ -13,7 +11,7 @@ class ForcedScanRequest(BaseModel):
 
 
 def _known_scanners() -> list[str]:
-    return [scanner.name for pipeline in (CreationPipeline, BasicPipeline) for scanner in pipeline._scanners if scanner._can_be_disabled]
+    return [scanner.name for pipeline in PipelineService._pipelines for scanner in pipeline._scanners if scanner._can_be_disabled]
 
 
 @router.get("/scanners")
