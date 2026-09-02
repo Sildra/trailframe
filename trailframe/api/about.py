@@ -9,7 +9,6 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 
 from trailframe.services.core.thread_pool_service import ThreadPoolService
-from trailframe.services.pipelines.executor import run_in_thread
 
 router = APIRouter(prefix="/api/about", tags=["about"])
 
@@ -95,6 +94,6 @@ async def list_packages() -> list[PackageInfo]:
     if _cached_packages is None:
         async with _packages_lock:
             if _cached_packages is None:
-                _cached_packages = await run_in_thread(ThreadPoolService.get_executor(), _build_packages)
+                _cached_packages = await ThreadPoolService.run(_build_packages)
 
     return _cached_packages

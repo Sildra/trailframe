@@ -17,7 +17,7 @@ class PipelineEmpty:
 _STOP = object()
 
 
-class Pipeline():
+class Pipeline:
     def __init__(self, name: str, scanners: list[Scanner]):
         super().__init__()
         self._name = name

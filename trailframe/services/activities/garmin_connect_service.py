@@ -11,7 +11,6 @@ from trailframe.models.activity import Activity, GarminActivity, GarminActivityS
 from trailframe.models.photo import Photo
 from trailframe.services.core.database_service import DatabaseService
 from trailframe.services.core.thread_pool_service import ThreadPoolService
-from trailframe.services.pipelines.executor import run_in_thread
 from trailframe.services.service import Service
 
 if TYPE_CHECKING:
@@ -23,7 +22,7 @@ class GarminConnectService(Service):
 
     @classmethod
     async def sync(cls, email: str, password: str) -> bool:
-        task = asyncio.create_task(run_in_thread(ThreadPoolService.get_executor(), cls._sync, email, password))
+        task = asyncio.create_task(ThreadPoolService.run(cls._sync, email, password))
         cls._tasks.add(task)
         task.add_done_callback(cls._tasks.discard)
 

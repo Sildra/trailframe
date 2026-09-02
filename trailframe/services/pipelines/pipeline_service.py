@@ -84,7 +84,7 @@ class PipelineService(Service):
     @classmethod
     def get_snapshot(cls) -> dict[str, Any]:
         message: dict[str, Any] = {
-            f"{pipeline.get_name().removesuffix('Pipeline')}": pipeline.get_status_message()
+            f"{pipeline._name.removesuffix('Pipeline')}": pipeline.get_status_message()
             for pipeline in cls._pipelines
         }
 

@@ -9,7 +9,6 @@ import requests
 
 from trailframe.services.core.configuration_service import Node
 from trailframe.services.core.thread_pool_service import ThreadPoolService
-from trailframe.services.pipelines.executor import run_in_thread
 from trailframe.services.service import Service
 
 _USER_AGENT = "ha_gallery/0.1 (local personal photo gallery)"
@@ -93,10 +92,7 @@ class TileService(Service):
         url = cls._tile_url(z, x, y)
 
         try:
-            response = await run_in_thread(
-                ThreadPoolService.get_executor(),
-                lambda: requests.get(url, timeout=10, headers={"User-Agent": _USER_AGENT}),
-            )
+            response = await ThreadPoolService.run(lambda: requests.get(url, timeout=10, headers={"User-Agent": _USER_AGENT}))
         except requests.RequestException as exception:
             cls._log(f"fetch failed for {z}/{x}/{y}: {exception}")
             return path if path.exists() else None
@@ -114,7 +110,7 @@ class TileService(Service):
 
         if cls._downloads_since_eviction >= _EVICTION_INTERVAL:
             cls._downloads_since_eviction = 0
-            await run_in_thread(ThreadPoolService.get_executor(), cls._evict)
+            await ThreadPoolService.run(cls._evict)
 
         return path
 

@@ -9,7 +9,6 @@ from trailframe.services.core.configuration_service import ConfigurationService
 from trailframe.services.core.database_service import DatabaseService
 from trailframe.services.core.thread_pool_service import ThreadPoolService
 from trailframe.services.map.map_service import MapService
-from trailframe.services.pipelines.executor import run_in_thread
 from trailframe.services.service import Service
 
 
@@ -185,12 +184,8 @@ class ActivityService(Service):
             return None
 
         try:
-            projection = await run_in_thread(
-                ThreadPoolService.get_executor(), cls._render_map, activity.activity_id, *bounds
-            )
-            points = await run_in_thread(
-                ThreadPoolService.get_executor(), cls._render_trace, activity.activity_id, activity.trace, projection
-            )
+            projection = await ThreadPoolService.run(cls._render_map, activity.activity_id, *bounds)
+            points = await ThreadPoolService.run(cls._render_trace, activity.activity_id, activity.trace, projection)
         except Exception as error:  # noqa: BLE001
             cls._log(f"map generation failed: {error}")
             return None

@@ -1,4 +1,6 @@
+import asyncio
 from concurrent.futures import ThreadPoolExecutor
+from functools import partial
 from typing import ClassVar
 
 from trailframe.services.core.configuration_service import Node
@@ -42,3 +44,8 @@ class ThreadPoolService(Service):
             cls._pool = ThreadPoolExecutor(max_workers=max(1, cls._max_workers), thread_name_prefix="common")
 
         return cls._pool
+
+    @classmethod
+    async def run(cls, func, *args, **kwargs):
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(cls.get_executor(), partial(func, *args, **kwargs))

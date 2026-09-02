@@ -67,7 +67,10 @@ class ExifScanner(Scanner):
         except ValueError:
             pass
 
-    def _update_location(self, photo, exif) -> None:
+    def _update_location(self, photo: Photo, exif) -> None:
+        if photo.location_source is not None:
+            return
+
         gps_info = exif.get_ifd(ExifTags.Base.GPSInfo)
 
         if not gps_info:

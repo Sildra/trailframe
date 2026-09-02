@@ -21,20 +21,15 @@ class ActivityScanner(Scanner):
         )
 
     def accept_(self, photo: Photo) -> bool:
-        return (
-            self.use_activity_position
-            and photo.date is not None
-            and photo.location_source is None
-            and (photo.latitude is None or photo.longitude is None)
-        )
+        return (photo.location_source != "Manual" and photo.date is not None)
 
     async def executePhoto(self, item: Item) -> bool:
         photo = item.photo
 
-        if not self.use_activity_position or photo.date is None:
+        if photo.location_source == "Manual" or photo.date is None:
             return False
 
-        if photo.latitude is not None and photo.longitude is not None:
+        if photo.location_source is not None and not self.use_activity_position:
             return False
 
         activity = await self._find_activity(photo)
@@ -53,7 +48,7 @@ class ActivityScanner(Scanner):
 
         return True
 
-    async def _find_activity(self, photo) -> Activity | None:
+    async def _find_activity(self, photo: Photo) -> Activity | None:
         start_upper = photo.date + timedelta(minutes=10)
         start_lower = photo.date - timedelta(hours=12)
 
