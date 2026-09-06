@@ -228,6 +228,54 @@ class TestDatabaseScanner:
         assert len(rows) == 1
         assert rows[0].filename == "x-second.jpg"
 
+    @allure.title("Registers the phash with DuplicatesService when phash_changed is set")
+    @pytest.mark.asyncio
+    async def test_marks_added_when_phash_changed(self, db_session):
+        from trailframe.models.photo import Photo
+        from trailframe.services.photos.duplicates_service import DuplicatesService
+
+        scanner = DatabaseScanner()
+        item = Item(Photo(path="x.jpg", phash=bytes([1] * 8)))
+        item.updated = True
+        item.phash_changed = True
+
+        with DuplicatesService._lock:
+            DuplicatesService._pending_adds = {}
+            DuplicatesService._pending_deletes = set()
+
+        result = await scanner.execute(item)
+        assert result is ScannerResult.SUCCESS
+        await DatabaseService.sync()
+
+        assert item.phash_changed is False
+        with DuplicatesService._lock:
+            known = 1 in DuplicatesService._pending_adds
+
+        assert known is True
+
+    @allure.title("Does not register the phash when phash_changed is unset")
+    @pytest.mark.asyncio
+    async def test_skips_mark_added_without_phash_changed(self, db_session):
+        from trailframe.models.photo import Photo
+        from trailframe.services.photos.duplicates_service import DuplicatesService
+
+        scanner = DatabaseScanner()
+        item = Item(Photo(path="x.jpg", phash=bytes([1] * 8)))
+        item.updated = True
+
+        with DuplicatesService._lock:
+            DuplicatesService._pending_adds = {}
+            DuplicatesService._pending_deletes = set()
+
+        result = await scanner.execute(item)
+        assert result is ScannerResult.SUCCESS
+        await DatabaseService.sync()
+
+        with DuplicatesService._lock:
+            known = 1 not in DuplicatesService._pending_adds
+
+        assert known is True
+
     @allure.title("A cancelled caller does not crash the database worker thread")
     @pytest.mark.asyncio
     async def test_cancelled_execute_keeps_worker_alive(self, db_session):

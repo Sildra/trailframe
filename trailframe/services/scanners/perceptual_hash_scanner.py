@@ -1,4 +1,3 @@
-
 import imagehash
 
 from trailframe.models.photo import Photo
@@ -23,5 +22,6 @@ class PerceptualHashScanner(Scanner):
 
         photo.phash = imagehash.phash(image).hash.flatten().tobytes()
         self.add_scanner(photo)
+        item.phash_changed = True
 
         return True

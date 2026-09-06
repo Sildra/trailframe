@@ -89,6 +89,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/photos/duplicates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Duplicates */
+        get: operations["get_duplicates_api_photos_duplicates_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/photos/location-issues": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Location Issues */
+        get: operations["get_location_issues_api_photos_location_issues_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/photos/groups": {
         parameters: {
             query?: never;
@@ -802,6 +836,15 @@ export interface components {
             /** Success */
             success: boolean;
         };
+        /** LocationEstimate */
+        LocationEstimate: {
+            /** Lat */
+            lat: number;
+            /** Lon */
+            lon: number;
+            /** Radius M */
+            radius_m: number;
+        };
         /** MapData */
         MapData: {
             /** Photos */
@@ -886,6 +929,7 @@ export interface components {
              * @default []
              */
             groups: components["schemas"]["RelatedPhotoGroup"][];
+            location_estimate?: components["schemas"]["LocationEstimate"] | null;
         };
         /** PhotoGroupCreate */
         PhotoGroupCreate: {
@@ -1119,6 +1163,46 @@ export interface operations {
                 };
                 content: {
                     "application/json": number;
+                };
+            };
+        };
+    };
+    get_duplicates_api_photos_duplicates_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PhotoGroupSummary"][];
+                };
+            };
+        };
+    };
+    get_location_issues_api_photos_location_issues_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PhotoGroupSummary"][];
                 };
             };
         };

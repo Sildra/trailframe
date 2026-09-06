@@ -1,5 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Box, Button, Dialog, DialogActions, DialogContent, DialogTitle, IconButton } from "@mui/material";
+import {
+    Box,
+    Button,
+    Dialog,
+    DialogActions,
+    DialogContent,
+    DialogTitle,
+    IconButton,
+    Menu,
+    MenuItem,
+} from "@mui/material";
 import ChevronLeftIcon from "@mui/icons-material/ChevronLeft";
 import ChevronRightIcon from "@mui/icons-material/ChevronRight";
 import DeleteIcon from "@mui/icons-material/Delete";
@@ -9,14 +19,24 @@ import GroupedGallery from "../components/GroupedGallery";
 import ImageViewer from "../components/ImageViewer";
 import PhotoMetadata from "../components/PhotoMetadata";
 import UploadButton from "../components/UploadButton";
-import { groupKey } from "../lib/groups";
+import { duplicateKey, groupKey, locationIssueKey } from "../lib/groups";
 
 type PhotoGroupSummary = components["schemas"]["PhotoGroupSummary"];
+
+const MENUS = ["Groups", "Duplicates", "Location Issues"] as const;
+
+type Menu = (typeof MENUS)[number];
 
 export default function GalleryPage() {
     const [selectedPhotoId, setSelectedPhotoId] = useState<number | null>(null);
     const [groups, setGroups] = useState<PhotoGroupSummary[] | null>(null);
+    const [duplicates, setDuplicates] = useState<PhotoGroupSummary[] | null>(null);
+    const [locationIssues, setLocationIssues] = useState<PhotoGroupSummary[] | null>(null);
+    const [menu, setMenu] = useState<Menu>("Groups");
+    const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
     const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+    const [duplicatesCollapsed, setDuplicatesCollapsed] = useState<Set<string>>(new Set());
+    const [locationIssuesCollapsed, setLocationIssuesCollapsed] = useState<Set<string>>(new Set());
     const [leftCollapsed, setLeftCollapsed] = useState(false);
     const [rightCollapsed, setRightCollapsed] = useState(false);
     const [hoveredBox, setHoveredBox] = useState<number[] | null>(null);
@@ -84,6 +104,41 @@ export default function GalleryPage() {
                 }
             });
 
+        api.GET("/api/photos/duplicates")
+            .then(({ data, error }) => {
+                if (cancelled) {
+                    return;
+                }
+                if (error || data === undefined) {
+                    setDuplicates([]);
+                    return;
+                }
+                setDuplicates(data);
+            })
+            .catch(() => {
+                if (!cancelled) {
+                    setDuplicates([]);
+                }
+            });
+
+        api.GET("/api/photos/location-issues")
+            .then(({ data, error }) => {
+                if (cancelled) {
+                    return;
+                }
+                if (error || data === undefined) {
+                    setLocationIssues([]);
+                    return;
+                }
+                setLocationIssues(data);
+                setLocationIssuesCollapsed(new Set());
+            })
+            .catch(() => {
+                if (!cancelled) {
+                    setLocationIssues([]);
+                }
+            });
+
         return () => {
             cancelled = true;
         };
@@ -98,29 +153,62 @@ export default function GalleryPage() {
 
         setGroups(data);
         setCollapsed(new Set(data.slice(1).map(groupKey)));
+
+        const { data: duplicateData, error: duplicateError } = await api.GET("/api/photos/duplicates");
+
+        if (!duplicateError && duplicateData) {
+            setDuplicates(duplicateData);
+        }
+
+        const { data: locationData, error: locationError } = await api.GET("/api/photos/location-issues");
+
+        if (!locationError && locationData) {
+            setLocationIssues(locationData);
+        }
     };
 
-    const toggle = (key: string) => {
-        setCollapsed((previous) => {
-            const next = new Set(previous);
+    const toggle = useCallback(
+        (setter: React.Dispatch<React.SetStateAction<Set<string>>>) => (key: string) => {
+            setter((previous) => {
+                const next = new Set(previous);
 
-            if (next.has(key)) {
-                next.delete(key);
-            } else {
-                next.add(key);
-            }
+                if (next.has(key)) {
+                    next.delete(key);
+                } else {
+                    next.add(key);
+                }
 
-            return next;
-        });
+                return next;
+            });
+        },
+        [],
+    );
+
+    const toggleCollapsed = useMemo(() => toggle(setCollapsed), [toggle]);
+    const toggleDuplicates = useMemo(() => toggle(setDuplicatesCollapsed), [toggle]);
+    const toggleLocationIssues = useMemo(() => toggle(setLocationIssuesCollapsed), [toggle]);
+
+    const cycleMenu = (direction: number) => {
+        setMenu((current) => MENUS[(MENUS.indexOf(current) + direction + MENUS.length) % MENUS.length]);
     };
 
     const orderedPhotoIds = useMemo(() => {
-        if (!groups) {
-            return [];
+        if (menu === "Duplicates") {
+            return (duplicates ?? [])
+                .filter((group) => !duplicatesCollapsed.has(duplicateKey(group)))
+                .flatMap((group) => group.photo_ids ?? []);
         }
 
-        return groups.flatMap((group) => (collapsed.has(groupKey(group)) ? [] : group.photo_ids ?? []));
-    }, [groups, collapsed]);
+        if (menu === "Location Issues") {
+            return (locationIssues ?? [])
+                .filter((group) => !locationIssuesCollapsed.has(locationIssueKey(group)))
+                .flatMap((group) => group.photo_ids ?? []);
+        }
+
+        return (groups ?? [])
+            .filter((group) => !collapsed.has(groupKey(group)))
+            .flatMap((group) => group.photo_ids ?? []);
+    }, [groups, collapsed, duplicates, duplicatesCollapsed, locationIssues, locationIssuesCollapsed, menu]);
 
     const deletePhoto = useCallback(() => {
         if (selectedPhotoId === null) {
@@ -145,6 +233,26 @@ export default function GalleryPage() {
         setHoveredBox(null);
 
         setGroups((previous) =>
+            previous?.map((group) => ({
+                ...group,
+                photo_ids: (group.photo_ids ?? []).filter((id) => id !== photoId),
+            })) ?? null,
+        );
+
+        setDuplicates((previous) => {
+            if (!previous) {
+                return previous;
+            }
+
+            return previous
+                .map((group) => ({
+                    ...group,
+                    photo_ids: (group.photo_ids ?? []).filter((id) => id !== photoId),
+                }))
+                .filter((group) => (group.photo_ids?.length ?? 0) >= 2);
+        });
+
+        setLocationIssues((previous) =>
             previous?.map((group) => ({
                 ...group,
                 photo_ids: (group.photo_ids ?? []).filter((id) => id !== photoId),
@@ -229,6 +337,59 @@ export default function GalleryPage() {
         }
     }, [selectedPhotoId, orderedPhotoIds]);
 
+    const gallery = useMemo(() => {
+        switch (menu) {
+            case "Duplicates":
+                return (
+                    <GroupedGallery
+                        groups={duplicates}
+                        collapsed={duplicatesCollapsed}
+                        keyFn={duplicateKey}
+                        selectedPhotoId={selectedPhotoId}
+                        favorites={favoriteIds}
+                        showAddGroup={false}
+                        deletable={false}
+                        emptyMessage="No duplicates found."
+                        onSelect={setSelectedPhotoId}
+                        onToggle={toggleDuplicates}
+                        onRefresh={refresh}
+                    />
+                );
+            case "Location Issues":
+                return (
+                    <GroupedGallery
+                        groups={locationIssues}
+                        collapsed={locationIssuesCollapsed}
+                        keyFn={locationIssueKey}
+                        selectedPhotoId={selectedPhotoId}
+                        favorites={favoriteIds}
+                        showAddGroup={false}
+                        deletable={false}
+                        emptyMessage="No location issues found."
+                        onSelect={setSelectedPhotoId}
+                        onToggle={toggleLocationIssues}
+                        onRefresh={refresh}
+                    />
+                );
+            default:
+                return (
+                    <GroupedGallery
+                        groups={groups}
+                        collapsed={collapsed}
+                        keyFn={groupKey}
+                        selectedPhotoId={selectedPhotoId}
+                        favorites={favoriteIds}
+                        showAddGroup
+                        deletable
+                        emptyMessage="No groups yet."
+                        onSelect={setSelectedPhotoId}
+                        onToggle={toggleCollapsed}
+                        onRefresh={refresh}
+                    />
+                );
+        }
+    }, [menu, groups, duplicates, duplicatesCollapsed, locationIssues, collapsed, locationIssuesCollapsed, selectedPhotoId, favoriteIds, toggleCollapsed, toggleDuplicates, toggleLocationIssues]);
+
     return (
         <Box sx={{ flex: 1, minHeight: 0, display: "flex" }}>
             <Box
@@ -261,15 +422,46 @@ export default function GalleryPage() {
                             flexDirection: "column",
                         }}
                     >
-                        <GroupedGallery
-                            groups={groups}
-                            collapsed={collapsed}
-                            selectedPhotoId={selectedPhotoId}
-                            favorites={favoriteIds}
-                            onSelect={setSelectedPhotoId}
-                            onToggle={toggle}
-                            onRefresh={refresh}
-                        />
+                        <Box
+                            sx={{
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "space-between",
+                                px: 0.5,
+                                py: 0.5,
+                                borderBottom: 1,
+                                borderColor: "divider",
+                            }}
+                        >
+                            <IconButton size="small" onClick={() => cycleMenu(-1)} aria-label="Previous menu">
+                                <ChevronLeftIcon fontSize="small" />
+                            </IconButton>
+                            <Button
+                                size="small"
+                                sx={{ textTransform: "none", fontWeight: 600, color: "text.primary" }}
+                                onClick={(event) => setMenuAnchor(event.currentTarget)}
+                            >
+                                {menu}
+                            </Button>
+                            <IconButton size="small" onClick={() => cycleMenu(1)} aria-label="Next menu">
+                                <ChevronRightIcon fontSize="small" />
+                            </IconButton>
+                            <Menu anchorEl={menuAnchor} open={Boolean(menuAnchor)} onClose={() => setMenuAnchor(null)}>
+                                {MENUS.map((option) => (
+                                    <MenuItem
+                                        key={option}
+                                        selected={option === menu}
+                                        onClick={() => {
+                                            setMenu(option);
+                                            setMenuAnchor(null);
+                                        }}
+                                    >
+                                        {option}
+                                    </MenuItem>
+                                ))}
+                            </Menu>
+                        </Box>
+                        {gallery}
                     </Box>
                 )}
             </Box>

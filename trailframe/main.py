@@ -26,6 +26,7 @@ from trailframe.services.core.thread_pool_service import ThreadPoolService
 from trailframe.services.map.location_service import LocationService
 from trailframe.services.map.map_service import MapService
 from trailframe.services.map.tile_service import TileService
+from trailframe.services.photos.duplicates_service import DuplicatesService
 from trailframe.services.photos.folder_service import FolderService
 from trailframe.services.photos.photo_service import PhotoService
 from trailframe.services.photos.thumbnail_service import ThumbnailService
@@ -81,6 +82,7 @@ def create_app(args: argparse.Namespace) -> FastAPI:
         TileService.configure(root_node)
         StatisticsService.configure(general_node)
         ThreadPoolService.configure(general_node)
+        DuplicatesService.configure(general_node)
         ConfigurationService.save()
 
         # Tables must exist before the pipelines consume items

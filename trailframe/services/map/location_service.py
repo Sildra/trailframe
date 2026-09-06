@@ -1,19 +1,192 @@
+import bisect
 import json
+import logging
 import math
 import re
 import threading
+from datetime import timedelta
 from pathlib import Path
 from typing import ClassVar
 
 import requests
 from shapely.geometry import MultiPolygon, Point, Polygon, shape
 
-from trailframe.models.photo import Photo
+from trailframe.models.group import PhotoGroupSummary
+from trailframe.models.photo import LocationEstimate, Photo
 from trailframe.services.core.configuration_service import Node
 from trailframe.services.core.thread_pool_service import ThreadPoolService
 from trailframe.services.service import Service
 
 _INVALID_FILENAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+
+_ESTIMATE_WINDOW = timedelta(days=1)
+_MIN_INTERPOLATION_GAP = timedelta(minutes=1)
+_MAX_INTERPOLATION_GAP = timedelta(hours=1)
+_MAX_SPEED_KMH = 5.0
+_MIN_RADIUS_M = 5_000.0
+_MAX_RADIUS_M = 250_000.0
+
+
+def _estimate_countries(rows: list[tuple]) -> dict[int, str]:
+    """Country for photos without one, from the nearest dated photo within ±1 day."""
+    sources = sorted(
+        (photo_date, country) for _, photo_date, country, _, _ in rows if photo_date is not None and country is not None
+    )
+    dates = [photo_date for photo_date, _ in sources]
+    window_s = _ESTIMATE_WINDOW.total_seconds()
+    estimated: dict[int, str] = {}
+
+    for photo_id, photo_date, country, _, _ in rows:
+        if country is not None or photo_date is None:
+            continue
+
+        index = bisect.bisect_left(dates, photo_date)
+        best: str | None = None
+        best_delta: float | None = None
+
+        if index < len(sources):
+            candidate_date, candidate_country = sources[index]
+            delta = abs((candidate_date - photo_date).total_seconds())
+
+            if delta <= window_s:
+                best = candidate_country
+                best_delta = delta
+
+        if index > 0:
+            candidate_date, candidate_country = sources[index - 1]
+            delta = abs((photo_date - candidate_date).total_seconds())
+
+            if delta <= window_s and (best_delta is None or delta < best_delta):
+                best = candidate_country
+
+        if best is not None:
+            estimated[photo_id] = best
+
+    return estimated
+
+
+def _find_discrepancies(rows: list[tuple]) -> set[int]:
+    """Photos whose position deviates from the time-interpolated path between
+    their nearest geotagged neighbors beyond the implied-speed bound."""
+    geo = sorted(
+        (photo_date, latitude, longitude, photo_id)
+        for photo_id, photo_date, _, latitude, longitude in rows
+        if photo_date is not None and latitude is not None and longitude is not None
+    )
+    min_gap_s = _MIN_INTERPOLATION_GAP.total_seconds()
+    max_gap_s = _MAX_INTERPOLATION_GAP.total_seconds()
+    discrepant: set[int] = set()
+
+    for i, (photo_date, latitude, longitude, photo_id) in enumerate(geo):
+        if i == 0 or i == len(geo) - 1:
+            continue
+
+        prev_date, prev_lat, prev_lon, _ = geo[i - 1]
+        next_date, next_lat, next_lon, _ = geo[i + 1]
+        span_s = (next_date - prev_date).total_seconds()
+
+        if not (min_gap_s <= span_s <= max_gap_s):
+            continue
+
+        fraction = (photo_date - prev_date).total_seconds() / span_s
+        expected_lat = prev_lat + fraction * (next_lat - prev_lat)
+        expected_lon = prev_lon + fraction * (next_lon - prev_lon)
+        deviation_m = LocationService.haversine(latitude, longitude, expected_lat, expected_lon)
+        speed_kmh = deviation_m / 1000.0 / (span_s / 3600.0)
+
+        if speed_kmh > _MAX_SPEED_KMH:
+            discrepant.add(photo_id)
+
+    return discrepant
+
+
+def _compute_groups(rows: list[tuple]) -> list[PhotoGroupSummary]:
+    """Group location-issue photos (estimated country or interpolated-path
+    mismatch) by 'Year - Country'."""
+    estimated = _estimate_countries(rows)
+    discrepant = _find_discrepancies(rows)
+    buckets: dict[tuple[int, str], list[int]] = {}
+
+    for photo_id, photo_date, country, _, _ in rows:
+        if photo_date is None:
+            continue
+
+        resolved = country if country is not None else estimated.get(photo_id)
+
+        if resolved is None:
+            continue
+
+        if photo_id not in estimated and photo_id not in discrepant:
+            continue
+
+        buckets.setdefault((photo_date.year, resolved), []).append(photo_id)
+
+    groups = [
+        PhotoGroupSummary(name=f"{year} - {country}", automatic=True, photo_ids=sorted(photo_ids))
+        for (year, country), photo_ids in buckets.items()
+    ]
+    groups.sort(key=lambda group: group.name)
+
+    return groups
+
+
+def _estimate_location(photo_id: int, rows: list[tuple]) -> LocationEstimate | None:
+    """Estimated area for a photo without GPS whose country was guessed."""
+    target = next((row for row in rows if row[0] == photo_id), None)
+
+    if target is None:
+        return None
+
+    _, photo_date, country, latitude, longitude = target
+
+    if country is not None or photo_date is None or (latitude is not None and longitude is not None):
+        return None
+
+    geo = [
+        (row_date, row_lat, row_lon)
+        for _, row_date, _, row_lat, row_lon in rows
+        if row_date is not None and row_lat is not None and row_lon is not None and row_date != photo_date
+    ]
+    prev = None
+    nxt = None
+
+    for row_date, row_lat, row_lon in geo:
+        if row_date <= photo_date:
+            if prev is None or row_date > prev[0]:
+                prev = (row_date, row_lat, row_lon)
+        elif nxt is None or row_date < nxt[0]:
+            nxt = (row_date, row_lat, row_lon)
+
+    window_s = _ESTIMATE_WINDOW.total_seconds()
+
+    if prev is not None and (photo_date - prev[0]).total_seconds() > window_s:
+        prev = None
+
+    if nxt is not None and (nxt[0] - photo_date).total_seconds() > window_s:
+        nxt = None
+
+    if prev is not None and nxt is not None:
+        span_s = (nxt[0] - prev[0]).total_seconds()
+
+        if span_s <= 0:
+            return None
+
+        fraction = (photo_date - prev[0]).total_seconds() / span_s
+        center_lat = prev[1] + fraction * (nxt[1] - prev[1])
+        center_lon = prev[2] + fraction * (nxt[2] - prev[2])
+        radius_m = max(_MIN_RADIUS_M, LocationService.haversine(prev[1], prev[2], nxt[1], nxt[2]) / 2)
+    elif prev is not None:
+        center_lat, center_lon = prev[1], prev[2]
+        gap_hours = (photo_date - prev[0]).total_seconds() / 3600.0
+        radius_m = max(_MIN_RADIUS_M, min(_MAX_RADIUS_M, gap_hours * 10_000.0))
+    elif nxt is not None:
+        center_lat, center_lon = nxt[1], nxt[2]
+        gap_hours = (nxt[0] - photo_date).total_seconds() / 3600.0
+        radius_m = max(_MIN_RADIUS_M, min(_MAX_RADIUS_M, gap_hours * 10_000.0))
+    else:
+        return None
+
+    return LocationEstimate(lat=center_lat, lon=center_lon, radius_m=round(radius_m))
 
 
 class LocationService(Service):
@@ -429,3 +602,32 @@ class LocationService(Service):
                 return geometry, name, iso
 
         return None
+
+    @classmethod
+    async def get_groups(cls) -> list[PhotoGroupSummary]:
+        """Location-issue groups: estimated-country or interpolated-path photos
+        grouped by 'Year - Country'."""
+        try:
+            rows = await cls._fetch_photos()
+            return await ThreadPoolService.run(_compute_groups, rows)
+        except Exception:
+            logging.getLogger("LocationService").exception("Failed to compute location issues")
+            return []
+
+    @classmethod
+    async def get_estimate(cls, photo_id: int) -> LocationEstimate | None:
+        rows = await cls._fetch_photos()
+        return await ThreadPoolService.run(_estimate_location, photo_id, rows)
+
+    @classmethod
+    async def _fetch_photos(cls) -> list[tuple]:
+        from sqlalchemy import select
+
+        from trailframe.models.photo import Photo
+        from trailframe.services.core.database_service import DatabaseService
+
+        async def _fetch(session) -> list[tuple]:
+            result = await session.execute(select(Photo.id, Photo.date, Photo.country, Photo.latitude, Photo.longitude))
+            return [row for row in result.all()]
+
+        return await DatabaseService.execute(_fetch)

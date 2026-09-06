@@ -11,6 +11,7 @@ from trailframe.models.group import PhotoGroup, PhotoGroupSummary
 from trailframe.models.photo import Photo, PhotoDetail, RelatedPhotoGroup
 from trailframe.services.core.database_service import DatabaseService
 from trailframe.services.map.location_service import LocationService
+from trailframe.services.photos.duplicates_service import DuplicatesService
 from trailframe.services.photos.folder_service import FolderService
 from trailframe.services.photos.photo_service import PhotoService
 from trailframe.services.photos.thumbnail_service import ThumbnailService
@@ -116,6 +117,20 @@ async def get_photo_count() -> int:
         return result.scalar_one()
 
     return await DatabaseService.execute(_count)
+
+
+@router.get("/duplicates", response_model=list[PhotoGroupSummary])
+async def get_duplicates() -> list[PhotoGroupSummary]:
+    clusters = await DuplicatesService.get_clusters()
+
+    return [
+        PhotoGroupSummary(name=f"Duplicate {ids[0]}", automatic=True, photo_ids=ids) for ids in clusters
+    ]
+
+
+@router.get("/location-issues", response_model=list[PhotoGroupSummary])
+async def get_location_issues() -> list[PhotoGroupSummary]:
+    return await LocationService.get_groups()
 
 
 @router.get("/groups", response_model=list[PhotoGroupSummary])
@@ -250,6 +265,7 @@ async def delete_photo(photo_id: int):
         stored = (await session.execute(select(Photo).where(Photo.id == photo_id))).scalar_one()
         await session.delete(stored)
         await session.commit()
+        DuplicatesService.mark_deleted(photo_id)
         return {"deleted": True}
 
     return await DatabaseService.execute(_delete)
@@ -299,9 +315,40 @@ async def get_photo(photo_id: int) -> PhotoDetail:
             if similar_ids:
                 groups.append(RelatedPhotoGroup(name="Similar", photo_ids=similar_ids))
 
+        if photo.latitude is not None and photo.longitude is not None:
+            near_distance = 500
+            near_delta_lat = 0.005
+            near_delta_lon = 0.005
+
+            result = await session.execute(
+                select(Photo.id, Photo.latitude, Photo.longitude).where(
+                    Photo.id != photo_id,
+                    Photo.latitude.isnot(None),
+                    Photo.longitude.isnot(None),
+                    Photo.latitude.between(photo.latitude - near_delta_lat, photo.latitude + near_delta_lat),
+                    Photo.longitude.between(photo.longitude - near_delta_lon, photo.longitude + near_delta_lon),
+                )
+            )
+
+            near = []
+            for row in result.all():
+                distance = LocationService.haversine(photo.latitude, photo.longitude, row[1], row[2])
+                if distance <= near_distance:
+                    near.append((row[0], distance))
+
+            near.sort(key=lambda item: item[1])
+
+            near_ids = [item[0] for item in near]
+
+            if near_ids:
+                groups.append(RelatedPhotoGroup(name="Near", photo_ids=near_ids))
+
         return PhotoDetail.from_photo(photo, groups=groups)
 
-    return await DatabaseService.execute(_get)
+    detail = await DatabaseService.execute(_get)
+    detail.location_estimate = await LocationService.get_estimate(photo_id)
+
+    return detail
 
 
 @router.get("/{photo_id}/image")

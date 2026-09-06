@@ -40,6 +40,12 @@ class PhotoMap(BaseModel):
     point: GeoPoint | None = None
 
 
+class LocationEstimate(BaseModel):
+    lat: float
+    lon: float
+    radius_m: float
+
+
 class RelatedPhotoGroup(BaseModel):
     name: str
     photo_ids: list[int] = []
@@ -66,6 +72,7 @@ class PhotoDetail(BaseModel):
     phash: str | None = None
     map: PhotoMap | None = None
     groups: list[RelatedPhotoGroup] = []
+    location_estimate: LocationEstimate | None = None
 
     @staticmethod
     def from_photo(photo: "Photo", *, groups: list["RelatedPhotoGroup"] | None = None) -> "PhotoDetail":

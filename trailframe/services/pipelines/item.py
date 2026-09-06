@@ -10,6 +10,7 @@ class Item:
     def __init__(self, photo: Photo):
         self.photo = photo
         self.updated = False
+        self.phash_changed = False
         self._image: Image.Image | None = None
 
     @property

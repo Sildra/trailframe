@@ -6,6 +6,7 @@ import allure
 import pytest
 
 from trailframe.models.activity import Activity, GarminActivity, GpxActivity
+from trailframe.services.map.location_service import LocationService
 
 
 class TestActivityTrace:
@@ -210,9 +211,9 @@ class TestGpxActivity:
     @allure.title("Computes haversine distances between coordinates")
     def test_haversine_known_distance(self):
         # Same point -> 0
-        assert GpxActivity._haversine(0.0, 0.0, 0.0, 0.0) == 0.0
+        assert LocationService.haversine(0.0, 0.0, 0.0, 0.0) == 0.0
         # Roughly one degree of latitude ~ 111 km
-        distance = GpxActivity._haversine(0.0, 0.0, 1.0, 0.0)
+        distance = LocationService.haversine(0.0, 0.0, 1.0, 0.0)
         assert 110000 < distance < 112000
 
     @allure.title("Parses timestamps, handling naive and timezone-aware values")

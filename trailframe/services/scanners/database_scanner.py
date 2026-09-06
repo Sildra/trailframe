@@ -2,6 +2,7 @@ from sqlalchemy import select
 
 from trailframe.models.photo import Photo
 from trailframe.services.core.database_service import DatabaseService
+from trailframe.services.photos.duplicates_service import DuplicatesService
 from trailframe.services.pipelines.item import Item
 from trailframe.services.scanners.scanner import Scanner
 
@@ -19,6 +20,7 @@ class DatabaseScanner(Scanner):
             return False
 
         photo = item.photo
+        phash_changed = item.phash_changed
 
         async def _save(session) -> None:
             result = await session.execute(select(Photo).where(Photo.path == photo.path))
@@ -32,8 +34,12 @@ class DatabaseScanner(Scanner):
 
             await session.commit()
 
+            if phash_changed and photo.phash is not None and photo.id is not None:
+                DuplicatesService.mark_added(photo.id, photo.phash)
+
         DatabaseService.execute_detached(_save)
 
         item.updated = False
+        item.phash_changed = False
 
         return False

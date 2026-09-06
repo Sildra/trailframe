@@ -17,7 +17,6 @@ import DeleteIcon from "@mui/icons-material/Delete";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import { api } from "../api/client";
 import type { components } from "../api/generated/schema";
-import { groupKey } from "../lib/groups";
 import ThumbnailGallery from "./ThumbnailGallery";
 
 type PhotoGroupSummary = components["schemas"]["PhotoGroupSummary"];
@@ -33,8 +32,12 @@ function formatDate(date: Date): string {
 interface GroupedGalleryProps {
     groups: PhotoGroupSummary[] | null;
     collapsed: Set<string>;
+    keyFn: (group: PhotoGroupSummary) => string;
     selectedPhotoId: number | null;
     favorites?: Set<number>;
+    showAddGroup: boolean;
+    deletable: boolean;
+    emptyMessage: string;
     onSelect: (photoId: number) => void;
     onToggle: (key: string) => void;
     onRefresh: () => Promise<void>;
@@ -43,8 +46,12 @@ interface GroupedGalleryProps {
 export default function GroupedGallery({
     groups,
     collapsed,
+    keyFn,
     selectedPhotoId,
     favorites,
+    showAddGroup,
+    deletable,
+    emptyMessage,
     onSelect,
     onToggle,
     onRefresh,
@@ -130,18 +137,83 @@ export default function GroupedGallery({
         }
     };
 
+    const renderGroup = (group: PhotoGroupSummary) => {
+        const key = keyFn(group);
+        const isCollapsed = collapsed.has(key);
+        const photoCount = group.photo_ids?.length ?? 0;
+
+        return (
+            <Accordion
+                key={key}
+                expanded={!isCollapsed}
+                onChange={() => onToggle(key)}
+                disableGutters
+                sx={{
+                    "&::before": { display: "none" },
+                    boxShadow: "none",
+                    borderTop: 1,
+                    borderColor: "divider",
+                }}
+            >
+                <AccordionSummary
+                    expandIcon={<ExpandMoreIcon />}
+                    sx={{
+                        "&:hover": { bgcolor: "action.hover" },
+                        "& .MuiAccordionSummary-content": { alignItems: "center", gap: 1 },
+                    }}
+                >
+                    <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                        {group.name} ({photoCount})
+                    </Typography>
+                    {deletable && !group.automatic && group.id !== null && group.id !== undefined && (
+                        <IconButton
+                            size="small"
+                            color="error"
+                            sx={{ ml: "auto" }}
+                            onClick={(event) => {
+                                event.stopPropagation();
+                                setPendingDelete(group);
+                                setConfirmOpen(true);
+                            }}
+                        >
+                            <DeleteIcon fontSize="small" />
+                        </IconButton>
+                    )}
+                </AccordionSummary>
+                <AccordionDetails sx={{ p: 0 }}>
+                    <ThumbnailGallery
+                        photoIds={group.photo_ids ?? []}
+                        selectedPhotoId={selectedPhotoId}
+                        favorites={favorites}
+                        onSelect={onSelect}
+                    />
+                </AccordionDetails>
+            </Accordion>
+        );
+    };
+
     return (
         <>
-            <Button
-                variant="outlined"
-                size="small"
-                color="success"
-                startIcon={<AddIcon />}
-                onClick={openDialog}
-                sx={{ m: 1 }}
-            >
-                Add group
-            </Button>
+            {showAddGroup && (
+                <Button
+                    variant="outlined"
+                    size="small"
+                    color="success"
+                    startIcon={<AddIcon />}
+                    onClick={openDialog}
+                    sx={{ m: 1 }}
+                >
+                    Add group
+                </Button>
+            )}
+
+            {groups.length === 0 && (
+                <Typography variant="body2" color="text.secondary" sx={{ px: 1 }}>
+                    {emptyMessage}
+                </Typography>
+            )}
+
+            {groups.map(renderGroup)}
 
             <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)}>
                 <DialogTitle>New group</DialogTitle>
@@ -192,61 +264,6 @@ export default function GroupedGallery({
                     <Button color="error" onClick={confirmDelete}>Delete</Button>
                 </DialogActions>
             </Dialog>
-
-            {groups.map((group) => {
-                const key = groupKey(group);
-                const isCollapsed = collapsed.has(key);
-                const photoCount = group.photo_ids?.length ?? 0;
-
-                return (
-                    <Accordion
-                        key={key}
-                        expanded={!isCollapsed}
-                        onChange={() => onToggle(key)}
-                        disableGutters
-                        sx={{
-                            "&::before": { display: "none" },
-                            boxShadow: "none",
-                            borderTop: 1,
-                            borderColor: "divider",
-                        }}
-                    >
-                        <AccordionSummary
-                            expandIcon={<ExpandMoreIcon />}
-                            sx={{
-                                "&:hover": { bgcolor: "action.hover" },
-                                "& .MuiAccordionSummary-content": { alignItems: "center", gap: 1 },
-                            }}
-                        >
-                            <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                                {group.name} ({photoCount})
-                            </Typography>
-                            {!group.automatic && group.id !== null && group.id !== undefined && (
-                                <IconButton
-                                    size="small"
-                                    color="error"
-                                    sx={{ ml: "auto" }}
-                                    onClick={(event) => {
-                                        event.stopPropagation();
-                                        setPendingDelete(group);
-                                        setConfirmOpen(true);
-                                    }}
-                                >
-                                    <DeleteIcon fontSize="small" />
-                                </IconButton>
-                            )}
-                        </AccordionSummary>
-                        <AccordionDetails sx={{ p: 0 }}>
-                            <ThumbnailGallery
-                                photoIds={group.photo_ids ?? []}
-                                selectedPhotoId={selectedPhotoId}
-                                favorites={favorites}
-                                onSelect={onSelect}
-                            />
-                        </AccordionDetails>
-                    </Accordion>
-                );
-            })}
         </>
     );
 }

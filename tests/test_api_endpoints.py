@@ -4,6 +4,7 @@ from datetime import datetime
 from io import BytesIO
 
 import allure
+import pytest
 from PIL import Image
 
 from trailframe.models.activity import Activity
@@ -146,6 +147,300 @@ class TestPhotoPhashSimilar:
         similar = [group for group in detail["groups"] if group["name"] == "Similar"]
         assert len(similar) == 1
         assert similar[0]["photo_ids"] == [2]
+
+
+class TestPhotoNear:
+    @allure.title("Groups geo-tagged photos by proximity")
+    def test_data_reports_near_photos(self, app):
+        _add_photos(
+            app,
+            [
+                Photo(path="a.jpg", filename="a.jpg", latitude=45.0, longitude=6.0),
+                Photo(path="b.jpg", filename="b.jpg", latitude=45.001, longitude=6.001),
+                Photo(path="c.jpg", filename="c.jpg", latitude=45.1, longitude=6.1),
+            ],
+        )
+
+        detail = app.get("/api/photos/1/data").json()
+        near = [group for group in detail["groups"] if group["name"] == "Near"]
+        assert len(near) == 1
+        assert near[0]["photo_ids"] == [2]
+        assert [g["name"] for g in detail["groups"]] == ["Near"]
+
+    @allure.title("Returns no Near group for photos without GPS")
+    def test_data_no_near_without_gps(self, app):
+        _add_photos(app, [Photo(path="a.jpg", filename="a.jpg"), Photo(path="b.jpg", filename="b.jpg")])
+
+        detail = app.get("/api/photos/1/data").json()
+        assert [g["name"] for g in detail["groups"]] == []
+
+
+class TestPhotoDuplicates:
+    @allure.title("Clusters near-duplicate photos across the library")
+    def test_duplicates_reports_clusters(self, app):
+        _add_photos(
+            app,
+            [
+                Photo(path="a.jpg", filename="a.jpg", phash=bytes([0] * 8)),
+                Photo(path="b.jpg", filename="b.jpg", phash=bytes([0] * 7 + [1])),
+                Photo(path="c.jpg", filename="c.jpg", phash=bytes([0] * 6 + [1, 1])),
+                Photo(path="d.jpg", filename="d.jpg", phash=bytes([255] * 8)),
+            ],
+        )
+
+        response = app.get("/api/photos/duplicates")
+        assert response.status_code == 200
+
+        body = response.json()
+        assert len(body) == 1
+        assert body[0]["name"] == "Duplicate 1"
+        assert body[0]["automatic"] is True
+        assert body[0]["id"] is None
+        assert body[0]["start_date"] is None
+        assert body[0]["end_date"] is None
+        assert body[0]["photo_ids"] == [1, 2, 3]
+
+    @allure.title("Reports no groups when no duplicates exist")
+    def test_duplicates_empty(self, app):
+        _add_photos(
+            app,
+            [
+                Photo(path="a.jpg", filename="a.jpg", phash=bytes([0] * 8)),
+                Photo(path="b.jpg", filename="b.jpg", phash=bytes([255] * 8)),
+            ],
+        )
+
+        body = app.get("/api/photos/duplicates").json()
+        assert body == []
+
+    @allure.title("Clusters transitively through a chain of near duplicates")
+    def test_duplicates_transitive_chain(self, app):
+        _add_photos(
+            app,
+            [
+                Photo(path="a.jpg", filename="a.jpg", phash=bytes([0] * 8)),
+                Photo(path="b.jpg", filename="b.jpg", phash=bytes([0] * 7 + [0x7F])),
+                Photo(path="c.jpg", filename="c.jpg", phash=bytes([0] * 7 + [0xFF])),
+            ],
+        )
+
+        body = app.get("/api/photos/duplicates").json()
+        assert len(body) == 1
+        assert sorted(body[0]["photo_ids"]) == [1, 2, 3]
+
+    @allure.title("Ignores photos without a perceptual hash")
+    def test_duplicates_ignore_unhashed(self, app):
+        _add_photos(
+            app,
+            [
+                Photo(path="a.jpg", filename="a.jpg", phash=bytes([0] * 8)),
+                Photo(path="b.jpg", filename="b.jpg", phash=bytes([0] * 7 + [1])),
+                Photo(path="c.jpg", filename="c.jpg"),
+            ],
+        )
+
+        body = app.get("/api/photos/duplicates").json()
+        assert len(body) == 1
+        assert body[0]["photo_ids"] == [1, 2]
+
+    @allure.title("Skips malformed perceptual hashes instead of failing")
+    def test_duplicates_skip_malformed_phash(self, app):
+        _add_photos(
+            app,
+            [
+                Photo(path="a.jpg", filename="a.jpg", phash=bytes([0] * 8)),
+                Photo(path="b.jpg", filename="b.jpg", phash=bytes([0] * 8 + [1])),
+                Photo(path="c.jpg", filename="c.jpg", phash=b"short"),
+            ],
+        )
+
+        response = app.get("/api/photos/duplicates")
+        assert response.status_code == 200
+        assert response.json() == []
+
+    @allure.title("Deleting a duplicate drops it from the clusters")
+    def test_duplicates_delete_removes_photo(self, app, tmp_path):
+        a = _make_image(_photos_folder(tmp_path) / "a.jpg")
+        b = _make_image(_photos_folder(tmp_path) / "b.jpg")
+        _add_photos(
+            app,
+            [
+                Photo(path="a.jpg", filename="a.jpg", file_size=a.stat().st_size, phash=bytes([0] * 8)),
+                Photo(path="b.jpg", filename="b.jpg", file_size=b.stat().st_size, phash=bytes([0] * 7 + [1])),
+            ],
+        )
+
+        assert len(app.get("/api/photos/duplicates").json()) == 1
+
+        assert app.delete("/api/photos/1").json() == {"deleted": True}
+
+        assert app.get("/api/photos/duplicates").json() == []
+
+    @allure.title("New perceptual hashes are folded into the existing clusters")
+    def test_duplicates_new_phash_joins_cluster(self, app):
+        from trailframe.services.photos.duplicates_service import DuplicatesService
+
+        _add_photos(
+            app,
+            [
+                Photo(path="a.jpg", filename="a.jpg", phash=bytes([0] * 8)),
+                Photo(path="c.jpg", filename="c.jpg", phash=bytes([255] * 8)),
+            ],
+        )
+
+        assert app.get("/api/photos/duplicates").json() == []
+
+        _add_photos(app, [Photo(path="b.jpg", filename="b.jpg", phash=bytes([0] * 7 + [1]))])
+
+        DuplicatesService.mark_added(3, bytes([0] * 7 + [1]))
+
+        body = app.get("/api/photos/duplicates").json()
+        assert len(body) == 1
+        assert sorted(body[0]["photo_ids"]) == [1, 3]
+
+    @allure.title("A changed perceptual hash moves a photo into a new cluster")
+    def test_duplicates_changed_phash_reclusters(self, app):
+        from trailframe.services.photos.duplicates_service import DuplicatesService
+
+        _add_photos(
+            app,
+            [
+                Photo(path="a.jpg", filename="a.jpg", phash=bytes([0] * 8)),
+                Photo(path="b.jpg", filename="b.jpg", phash=bytes([0] * 7 + [1])),
+                Photo(path="c.jpg", filename="c.jpg", phash=bytes([255] * 8)),
+            ],
+        )
+
+        assert len(app.get("/api/photos/duplicates").json()) == 1
+
+        DuplicatesService.mark_added(1, bytes([255] * 8))
+
+        body = app.get("/api/photos/duplicates").json()
+        assert len(body) == 1
+        assert sorted(body[0]["photo_ids"]) == [1, 3]
+
+    @allure.title("Groups photos with estimated countries by year and country")
+    def test_location_issues_estimated_countries(self, app):
+        _add_photos(
+            app,
+            [
+                Photo(path="a.jpg", filename="a.jpg", date=datetime(2023, 3, 1, 12, 0, 0), country="France"),
+                Photo(path="b.jpg", filename="b.jpg", date=datetime(2023, 3, 1, 12, 30, 0)),
+                Photo(path="c.jpg", filename="c.jpg", date=datetime(2023, 3, 5, 12, 0, 0)),
+                Photo(path="d.jpg", filename="d.jpg", date=datetime(2024, 7, 1, 9, 0, 0), country="Spain"),
+                Photo(path="e.jpg", filename="e.jpg", date=datetime(2024, 7, 1, 12, 0, 0)),
+            ],
+        )
+
+        body = app.get("/api/photos/location-issues").json()
+
+        assert len(body) == 2
+        assert body[0]["name"] == "2023 - France"
+        assert body[0]["automatic"] is True
+        assert body[0]["id"] is None
+        assert body[0]["photo_ids"] == [2]
+        assert body[1]["name"] == "2024 - Spain"
+        assert body[1]["photo_ids"] == [5]
+
+    @allure.title("Flags geotagged photos that deviate from the interpolated path")
+    def test_location_issues_interpolated_mismatch(self, app):
+        _add_photos(
+            app,
+            [
+                Photo(
+                    path="p1.jpg",
+                    filename="p1.jpg",
+                    date=datetime(2023, 1, 1, 10, 0, 0),
+                    country="France",
+                    latitude=48.0,
+                    longitude=2.0,
+                ),
+                Photo(
+                    path="p2.jpg",
+                    filename="p2.jpg",
+                    date=datetime(2023, 1, 1, 10, 30, 0),
+                    country="France",
+                    latitude=48.0,
+                    longitude=20.0,
+                ),
+                Photo(
+                    path="p3.jpg",
+                    filename="p3.jpg",
+                    date=datetime(2023, 1, 1, 11, 0, 0),
+                    country="France",
+                    latitude=49.0,
+                    longitude=4.0,
+                ),
+            ],
+        )
+
+        body = app.get("/api/photos/location-issues").json()
+
+        assert len(body) == 1
+        assert body[0]["name"] == "2023 - France"
+        assert body[0]["photo_ids"] == [2]
+
+    @allure.title("Reports an estimated area for photos without GPS in the detail")
+    def test_location_estimate_in_photo_detail(self, app):
+        _add_photos(
+            app,
+            [
+                Photo(
+                    path="a.jpg",
+                    filename="a.jpg",
+                    date=datetime(2023, 1, 1, 10, 0, 0),
+                    country="France",
+                    latitude=48.0,
+                    longitude=2.0,
+                ),
+                Photo(
+                    path="b.jpg",
+                    filename="b.jpg",
+                    date=datetime(2023, 1, 1, 11, 0, 0),
+                    country="France",
+                    latitude=49.0,
+                    longitude=2.0,
+                ),
+                Photo(path="c.jpg", filename="c.jpg", date=datetime(2023, 1, 1, 10, 30, 0)),
+            ],
+        )
+
+        detail = app.get("/api/photos/3/data").json()
+        estimate = detail["location_estimate"]
+
+        assert estimate is not None
+        assert estimate["lat"] == pytest.approx(48.5, abs=0.01)
+        assert estimate["lon"] == pytest.approx(2.0, abs=0.01)
+        assert estimate["radius_m"] > 5000
+
+        reference = app.get("/api/photos/1/data").json()
+        assert reference["location_estimate"] is None
+
+    @allure.title("Returns no groups when every photo has a known, consistent location")
+    def test_location_issues_empty(self, app):
+        _add_photos(
+            app,
+            [
+                Photo(
+                    path="a.jpg",
+                    filename="a.jpg",
+                    date=datetime(2023, 3, 1, 12, 0, 0),
+                    country="France",
+                    latitude=48.0,
+                    longitude=2.0,
+                ),
+                Photo(
+                    path="b.jpg",
+                    filename="b.jpg",
+                    date=datetime(2023, 3, 1, 12, 30, 0),
+                    country="France",
+                    latitude=49.0,
+                    longitude=2.0,
+                ),
+            ],
+        )
+
+        assert app.get("/api/photos/location-issues").json() == []
 
 
 class TestMapDataApi:

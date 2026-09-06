@@ -6,8 +6,8 @@ import StarBorderIcon from "@mui/icons-material/StarBorder";
 import { api } from "../api/client";
 import type { components } from "../api/generated/schema";
 import { formatDateTime } from "../lib/format";
+import PhotoLocationMap from "./PhotoLocationMap";
 import ThumbnailGallery from "./ThumbnailGallery";
-import WireframeMap from "./WireframeMap";
 
 type Photo = components["schemas"]["PhotoDetail"];
 
@@ -112,6 +112,9 @@ export default function PhotoMetadata({ photoId, favorite = false, onToggleFavor
     if (photo.country) {
         dataEntries.push(["Country", photo.country]);
     }
+    if (photo.location_estimate) {
+        dataEntries.push(["Estimated radius", `${Math.round(photo.location_estimate.radius_m / 1000)} km`]);
+    }
     const scanners = (photo.scanners ?? []).filter((scanner) => scanner !== "");
     if (scanners.length > 0) {
         dataEntries.push(["Scanners", scanners.join(", ")]);
@@ -129,7 +132,9 @@ export default function PhotoMetadata({ photoId, favorite = false, onToggleFavor
     );
     const tags = (photo.tags ?? []).filter((tag) => tag !== "");
     const groups = (photo.groups ?? []).filter((g) => g.photo_ids.length > 0);
-    const mapShown = Boolean(photo.wireframe && photo.map);
+    const mapShown = (photo.latitude != null && photo.longitude != null) || photo.location_estimate != null;
+    const mapLatitude = photo.latitude != null ? photo.latitude : photo.location_estimate?.lat;
+    const mapLongitude = photo.longitude != null ? photo.longitude : photo.location_estimate?.lon;
 
     return (
         <Box sx={{ width: "100%", textAlign: "left" }}>
@@ -233,11 +238,13 @@ export default function PhotoMetadata({ photoId, favorite = false, onToggleFavor
                         Location map
                     </AccordionSummary>
                     <AccordionDetails>
-                        <WireframeMap
-                            photoId={photoId}
-                            wireframe={photo?.wireframe ?? null}
-                            map={photo?.map ?? null}
-                        />
+                        {mapLatitude != null && mapLongitude != null && (
+                            <PhotoLocationMap
+                                latitude={mapLatitude}
+                                longitude={mapLongitude}
+                                estimate={photo.location_estimate ?? undefined}
+                            />
+                        )}
                     </AccordionDetails>
                 </Accordion>
             )}

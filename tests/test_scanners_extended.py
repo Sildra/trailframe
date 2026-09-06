@@ -88,6 +88,7 @@ class TestPerceptualHashScanner:
         assert result.value == "success"
         assert item.photo.phash is not None
         assert "PerceptualHash" in (item.photo.scanners or [])
+        assert item.phash_changed is True
         assert item.updated is True
 
 
