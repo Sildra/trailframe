@@ -22,6 +22,7 @@ function computeDims(img: HTMLImageElement) {
 
 export default function ImageViewer({ photoId, hoveredBox }: ImageViewerProps) {
     const imgRef = useRef<HTMLImageElement>(null);
+    const containerRef = useRef<HTMLDivElement>(null);
     const [dims, setDims] = useState<ReturnType<typeof computeDims> | null>(null);
 
     const recalc = useCallback(() => {
@@ -31,13 +32,17 @@ export default function ImageViewer({ photoId, hoveredBox }: ImageViewerProps) {
     }, []);
 
     useEffect(() => {
-        window.addEventListener("resize", recalc);
+        const observer = new ResizeObserver(recalc);
 
-        return () => window.removeEventListener("resize", recalc);
-    }, [recalc]);
+        if (containerRef.current) {
+            observer.observe(containerRef.current);
+        }
+
+        return () => observer.disconnect();
+    }, [recalc, photoId]);
 
     return (
-        <Box sx={{ width: "100%", height: "100%", position: "relative" }}>
+        <Box ref={containerRef} sx={{ width: "100%", height: "100%", position: "relative" }}>
             {photoId === null ? (
                 <Box sx={{ display: "flex", alignItems: "center", justifyContent: "center", width: "100%", height: "100%" }}>
                     <Typography color="text.secondary">Select a photo</Typography>

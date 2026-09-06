@@ -142,7 +142,6 @@ export default function ActivityList({ onSelect, showDelete = false }: ActivityL
                 disableColumnFilter={false}
                 disableRowSelectionOnClick
                 disableColumnResize
-                hideFooter
                 onRowClick={(_params) => onSelect(_params.row)}
                 sx={{ flex: 1, minHeight: 300, "& .MuiDataGrid-row": { cursor: "pointer" } }}
             />

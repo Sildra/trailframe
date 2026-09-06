@@ -33,7 +33,11 @@ class ExifScanner(Scanner):
 
         photo = item.photo
 
-        photo.exif = {TAGS[tag_id]: str(value) for tag_id, value in exif.items() if tag_id in TAGS and tag_id is not ExifTags.Base.MakerNote}
+        photo.exif = {
+            TAGS[tag_id]: str(value)
+            for tag_id, value in exif.items()
+            if tag_id in TAGS and tag_id is not ExifTags.Base.MakerNote
+        }
 
         self._update_ifds(photo, exif)
         self._update_date(photo)

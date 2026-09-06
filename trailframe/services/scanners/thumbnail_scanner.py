@@ -1,4 +1,3 @@
-
 from trailframe.models.photo import Photo
 from trailframe.services.photos.thumbnail_service import ThumbnailService
 from trailframe.services.pipelines.item import Item

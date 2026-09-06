@@ -151,7 +151,6 @@ export default function GarminActivity() {
                 }}
                 disableRowSelectionOnClick
                 disableColumnResize
-                hideFooter
                 sx={{ flex: 1, minHeight: 300, "& .MuiDataGrid-row": { cursor: "pointer" } }}
             />
             <Dialog open={open} onClose={() => !busy && setOpen(false)}>

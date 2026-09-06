@@ -27,7 +27,6 @@ class Pipeline:
         self._success = 0
         self._failure = 0
         self._reset_timestamp: datetime | None = None
-    
 
     def configure(self, config: Node) -> None:
         for scanner in self._scanners:
@@ -55,13 +54,12 @@ class Pipeline:
         self._thread.join(timeout=5)
         self._thread = None
 
-
     async def add(self, item: Any) -> None:
         self._queue.put(item)
 
     def _previous_pipeline_empty(self) -> None:
         pass
-        
+
     def get_queue_size(self) -> int:
         return self._queue.qsize()
 
@@ -113,7 +111,7 @@ class Pipeline:
 
                 from trailframe.services.pipelines.pipeline_service import PipelineService
 
-                #await PipelineService.next(PipelineEmpty, self)
+                # await PipelineService.next(PipelineEmpty, self)
 
     async def _process_item(self, item: Any) -> bool:
         if isinstance(item, Photo):
@@ -124,13 +122,12 @@ class Pipeline:
             item.image.close()
 
         return success
-        
 
     async def _run_scanners(self, item: Any) -> bool:
         success: bool = True
         for scanner in self._scanners:
             scanner_result = await scanner.execute(item)
-            success &= (scanner_result is ScannerResult.SUCCESS)
+            success &= scanner_result is ScannerResult.SUCCESS
 
         return success
 

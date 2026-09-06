@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-import math
 from datetime import UTC, datetime
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
 from sqlmodel import JSON, Column, Field, SQLModel
+
+from trailframe.services.map.location_service import LocationService
 
 
 def coerce_trace(trace: list | None) -> list[list]:
@@ -321,7 +322,7 @@ class GpxActivity(SQLModel, table=True):
         distance = 0.0
 
         for index in range(1, len(points)):
-            distance += cls._haversine(
+            distance += LocationService.haversine(
                 points[index - 1]["lat"], points[index - 1]["lon"], points[index]["lat"], points[index]["lon"]
             )
 
@@ -419,19 +420,6 @@ class GpxActivity(SQLModel, table=True):
             parsed = parsed.replace(tzinfo=UTC)
 
         return parsed
-
-    @staticmethod
-    def _haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-        radius = 6371000.0
-
-        phi1 = math.radians(lat1)
-        phi2 = math.radians(lat2)
-        delta_phi = math.radians(lat2 - lat1)
-        delta_lambda = math.radians(lon2 - lon1)
-
-        a = math.sin(delta_phi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2) ** 2
-
-        return 2 * radius * math.asin(math.sqrt(a))
 
 
 class GpxActivitySummary(SQLModel):

@@ -92,7 +92,9 @@ class TileService(Service):
         url = cls._tile_url(z, x, y)
 
         try:
-            response = await ThreadPoolService.run(lambda: requests.get(url, timeout=10, headers={"User-Agent": _USER_AGENT}))
+            response = await ThreadPoolService.run(
+                lambda: requests.get(url, timeout=10, headers={"User-Agent": _USER_AGENT})
+            )
         except requests.RequestException as exception:
             cls._log(f"fetch failed for {z}/{x}/{y}: {exception}")
             return path if path.exists() else None

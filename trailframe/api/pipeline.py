@@ -11,7 +11,12 @@ class ForcedScanRequest(BaseModel):
 
 
 def _known_scanners() -> list[str]:
-    return [scanner.name for pipeline in PipelineService._pipelines for scanner in pipeline._scanners if scanner._can_be_disabled]
+    return [
+        scanner.name
+        for pipeline in PipelineService._pipelines
+        for scanner in pipeline._scanners
+        if scanner._can_be_disabled
+    ]
 
 
 @router.get("/scanners")

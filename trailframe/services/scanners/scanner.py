@@ -41,7 +41,6 @@ class Scanner(ABC):
             pass
         self.configure_(config)
 
-
     def configure_(self, config: Node) -> None:
         pass
 

@@ -166,7 +166,6 @@ export default function GpxActivity() {
                 }}
                 disableRowSelectionOnClick
                 disableColumnResize
-                hideFooter
                 sx={{ flex: 1, minHeight: 300, "& .MuiDataGrid-row": { cursor: "pointer" } }}
             />
         </Box>

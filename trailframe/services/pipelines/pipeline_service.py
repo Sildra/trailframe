@@ -26,12 +26,14 @@ class PipelineService(Service):
     def _configure(cls, config: Node) -> None:
         if not cls._pipelines:
             cls._pipelines = [
-                Pipeline("CreationPipeline", [ ExifScanner(), ThumbnailScanner() ]),
-                Pipeline("BasicPipeline", [ ActivityScanner(), LocationScanner(), ObjectScanner(), PerceptualHashScanner() ])
+                Pipeline("CreationPipeline", [ExifScanner(), ThumbnailScanner()]),
+                Pipeline(
+                    "BasicPipeline", [ActivityScanner(), LocationScanner(), ObjectScanner(), PerceptualHashScanner()]
+                ),
             ]
-            cls._pipelines[0]._scanners = [ FileScanner() ] + cls._pipelines[0]._scanners
+            cls._pipelines[0]._scanners = [FileScanner()] + cls._pipelines[0]._scanners
             for pipeline in cls._pipelines:
-                pipeline._scanners += [ DatabaseScanner() ]
+                pipeline._scanners += [DatabaseScanner()]
 
         for pipeline in cls._pipelines:
             pipeline.configure(config)
@@ -84,8 +86,7 @@ class PipelineService(Service):
     @classmethod
     def get_snapshot(cls) -> dict[str, Any]:
         message: dict[str, Any] = {
-            f"{pipeline._name.removesuffix('Pipeline')}": pipeline.get_status_message()
-            for pipeline in cls._pipelines
+            f"{pipeline._name.removesuffix('Pipeline')}": pipeline.get_status_message() for pipeline in cls._pipelines
         }
 
         return message

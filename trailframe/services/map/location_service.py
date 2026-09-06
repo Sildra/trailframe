@@ -30,6 +30,19 @@ class LocationService(Service):
     _EARTH_RADIUS = 6378137.0
     _GEOBOUNDARIES_API = "https://www.geoboundaries.org/api/current/gbOpen"
 
+    @staticmethod
+    def haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+        radius = 6371000.0
+
+        phi1 = math.radians(lat1)
+        phi2 = math.radians(lat2)
+        delta_phi = math.radians(lat2 - lat1)
+        delta_lambda = math.radians(lon2 - lon1)
+
+        a = math.sin(delta_phi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2) ** 2
+
+        return 2 * radius * math.asin(math.sqrt(a))
+
     @classmethod
     def _configure(cls, config: Node) -> None:
         cls._folder = Path(config.get_path_value("maps_folder", "Folder where location maps are stored", "maps"))

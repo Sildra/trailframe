@@ -21,7 +21,7 @@ class ActivityScanner(Scanner):
         )
 
     def accept_(self, photo: Photo) -> bool:
-        return (photo.location_source != "Manual" and photo.date is not None)
+        return photo.location_source != "Manual" and photo.date is not None
 
     async def executePhoto(self, item: Item) -> bool:
         photo = item.photo

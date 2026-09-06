@@ -92,7 +92,9 @@ class FolderService(Service):
             config.get_path_value("trash_folder", "Folder where deleted photos are moved", "trash")
         )
         cls._trash_folder.mkdir(parents=True, exist_ok=True)
-        cls._creation_throttle = config.get_path_value("creation_throttle", "Throttle items simultaneously added to the pipeline", 0)
+        cls._creation_throttle = config.get_path_value(
+            "creation_throttle", "Throttle items simultaneously added to the pipeline", 0
+        )
 
     @classmethod
     async def _start(cls) -> None:
@@ -131,6 +133,7 @@ class FolderService(Service):
     @classmethod
     async def scan(cls) -> None:
         from trailframe.services.pipelines.pipeline_service import PipelineService
+
         items = 0
         for path in cls._folder.rglob("*"):
             if not cls._is_image(path):
