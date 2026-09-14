@@ -10,7 +10,7 @@ from trailframe.models.photo import Photo
 from trailframe.services.core.configuration_service import Node
 from trailframe.services.pipelines.pipeline_service import PipelineService
 from trailframe.services.scanners.remote_scanner import RemoteScanner
-from trailframe.services.scanners.scanner import ScannerResult
+from trailframe.services.scanners.scanner import ForceFlag, ScannerResult
 from trailframe.services.service import ServiceState
 
 
@@ -204,6 +204,50 @@ class TestRemoteScanner:
         photo.phash = bytes.fromhex("00" * 8)
         assert scanner.accept(photo) is False
 
+    @allure.title("Forces named delegated scanners on the remote server from a ForceFlag")
+    def test_force_flag_sets_forced_delegated_names(self):
+        scanner = RemoteScanner("localhost:8000", ["Object"])
+
+        assert scanner.accept(ForceFlag(["Object"])) is False
+        assert scanner._forced is True
+        assert scanner._forced_names == ["Object"]
+
+        photo = Photo(path="/tmp/a.jpg", scanners=["Object"])
+        assert scanner.accept(photo) is True
+
+        assert scanner.accept(ForceFlag(["PerceptualHash"])) is False
+        assert scanner._forced is False
+        assert scanner._forced_names == []
+        assert scanner.accept(photo) is False
+
+        assert scanner.accept(ForceFlag([])) is False
+        assert scanner._forced is False
+        assert scanner._forced_names == []
+
+    @allure.title("Forwards the forced scanner names to the remote server")
+    @pytest.mark.asyncio
+    async def test_execute_photo_sends_forced_names(self, monkeypatch: MonkeyPatch, tmp_path):
+        source = tmp_path / "photo.jpg"
+        source.write_bytes(b"data")
+
+        from trailframe.services.pipelines.item import Item
+
+        async def fake_run(_, url: str, path, scanner_names, forced) -> dict:
+            assert path == source
+            assert forced == ["Object"]
+            return {}
+
+        monkeypatch.setattr("trailframe.services.scanners.remote_scanner.ThreadPoolService.run", fake_run)
+
+        scanner = RemoteScanner("localhost:8000", ["Object", "EXIF"])
+        scanner._forced = True
+        scanner._forced_names = ["Object"]
+        item = Item(Photo(path=str(source)))
+
+        result = await scanner.execute(item)
+
+        assert result is ScannerResult.SUCCESS
+
     @allure.title("Applies remote results to the photo")
     @pytest.mark.asyncio
     async def test_execute_photo_applies_results(self, monkeypatch: MonkeyPatch, tmp_path):
@@ -212,9 +256,10 @@ class TestRemoteScanner:
 
         from trailframe.services.pipelines.item import Item
 
-        async def fake_run(_, url: str, path, scanner_names) -> dict:
+        async def fake_run(_, url: str, path, scanner_names, forced) -> dict:
             assert path == source
             assert scanner_names == ["Object", "EXIF", "PerceptualHash"]
+            assert forced == []
             assert url.endswith("/api/pipeline/remote-scan")
 
             return {
@@ -258,6 +303,71 @@ class TestRemoteScanner:
 
 
 class TestRemotePipelineApi:
+    @allure.title("Reuses scanner instances across remote scans so heavy models stay loaded")
+    def test_remote_scan_reuses_scanner_instances(self, app):
+        import trailframe.api.pipeline as pipeline_api
+        from trailframe.services.scanners.object_scanner import ObjectScanner
+
+        first = pipeline_api._get_scanner_by_name("Object")
+        second = pipeline_api._get_scanner_by_name("Object")
+
+        assert isinstance(first, ObjectScanner)
+        assert first is second
+
+    @allure.title("Executes scanners past their gating only for the forced names, then clears the flag")
+    def test_remote_scan_forces_execution(self):
+        from PIL import Image as PILImage
+
+        from trailframe.api.pipeline import _execute_remote_scanners
+        from trailframe.services.pipelines.item import Item
+        from trailframe.services.scanners.object_scanner import ObjectScanner
+
+        scanner = ObjectScanner()
+        calls: list = []
+        scanner._model = lambda image, verbose=False: calls.append(image) or []
+
+        image = PILImage.new("RGB", (16, 16))
+        photo = Photo(path="shot.jpg", source="Remote", scanners=["Object"])
+        item = Item(photo, image=image)
+
+        _execute_remote_scanners(item, [scanner], [])
+
+        assert calls == []
+        assert scanner._forced is False
+
+        photo.objects = [{"label": "person", "confidence": 0.9, "box": [1, 2, 3, 4]}]
+        photo.scanners = ["Object"]
+
+        _execute_remote_scanners(item, [scanner], ["Object"])
+
+        assert calls == [image]
+        assert photo.objects == []
+        assert photo.scanners == ["Object"]
+        assert scanner._forced is False
+
+    @allure.title("Routes remote-scan uploads through in-memory items without a temp file")
+    def test_remote_scan_uses_in_memory_image(self, app):
+        from io import BytesIO
+
+        from PIL import ExifTags, Image
+
+        buffer = BytesIO()
+        exif = Image.Exif()
+        exif[ExifTags.Base.DateTimeOriginal] = "2023:06:01 12:34:56"
+        Image.new("RGB", (40, 40), (120, 40, 40)).save(buffer, format="JPEG", exif=exif)
+        content = buffer.getvalue()
+
+        response = app.post(
+            "/api/pipeline/remote-scan", files={"file": ("shot.jpg", content, "image/jpeg")}, data={"scanners": "EXIF"}
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["filename"] == "shot.jpg"
+        assert payload["file_size"] == len(content)
+        assert payload["exif"].get("DateTimeOriginal") == "2023:06:01 12:34:56"
+        assert payload["date"] is not None
+
     @allure.title("Lists configured remote pipelines")
     def test_list_remote_pipelines(self, app):
         PipelineService._configure(Node("root"))

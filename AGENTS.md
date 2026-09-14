@@ -55,9 +55,9 @@ Trailframe — photo gallery app: Python/FastAPI backend + React/TS/Vite fronten
 
 ### Photos & Pipelines
 
-- **PhotoService** (`photos/photo_service.py`): routes photo-source ops (resolve → local path, delete) to `PhotoProvider` keyed by `photo.source` (default `FolderService`, `SOURCE = "File"`); extensible to network/NAS backends; upload/scan/folder-watching stay in `FolderService`
+- **PhotoService** (`photos/photo_service.py`): routes photo-source ops (resolve → local path, delete) to `PhotoProvider` keyed by `photo.source` (default `FolderService`, `SOURCE = "File"`, plus `RemoteProvider` `SOURCE = "Remote"` for in-memory photos with no disk file); extensible to network/NAS backends; upload/scan/folder-watching stay in `FolderService`
 
-- **Pipelines** (`pipelines/pipeline_service.py`): explicitly registers `CreationPipeline`/`BasicPipeline` (not auto-discovered); `next(item, pipeline=None)` routes to first accepting pipeline
+- **Pipelines** (`pipelines/pipeline_service.py`): explicitly registers `CreationPipeline`/`BasicPipeline` (not auto-discovered); `next(item, pipeline=None)` routes to first accepting pipeline — without a `pipeline` arg to the whole list, else after it; when the handing-off pipeline vanished from the list during reconfigure it continues from `pipeline._index` (stored position), so remote photos never re-enter the standard pipeline at index 0
   - External items: `Photo` (`FolderService.to_photo`) → `Item` (`photo` + `updated` flag + lazily-cached PIL `image`)
   - `_run_scanners`: runs every scanner's `execute(item)`; last scanner `DatabaseScanner` merges/commits on `item.updated`
   - `CreationPipeline`: `FileScanner`/`ExifScanner`/`ThumbnailScanner`/`DatabaseScanner`
@@ -72,7 +72,7 @@ Trailframe — photo gallery app: Python/FastAPI backend + React/TS/Vite fronten
   - `configure`: reads `enabled`; `accept`: handles `ForceFlag` (`_forced` toggle), `enabled`, `_forced`, else `accept_`; `execute`: calls `accept` first (declined → `ScannerResult.SUCCESS`), stashes `self._item`, runs `executePhoto` (sync on `ThreadPoolService`), returns `SUCCESS`/`ERROR`, sets `item.updated` if photo changed
   - `DatabaseScanner.accept` = `isinstance(item, Item) and item.updated`
 
-- **Scanner tracking**: `self.add_scanner(photo)` appends name to `photo.scanners` (JSON column, NULL-safe; read via `photo.scanners or []`); `ObjectScanner` runs YOLO (`yolo26n.pt`/`yolo26m.pt`), model in `general.models_folder`, stores `photo.objects` (`[{label, confidence, box}]`), gates on `"Object" not in photo.scanners`
+- **Scanner tracking**: `self.add_scanner(photo)` appends name to `photo.scanners` (JSON column, NULL-safe; read via `photo.scanners or []`); `ObjectScanner` runs YOLO on `item.image` (in-memory PIL, no path needed; model `yolo26n.pt`/`yolo26m.pt` in `general.models_folder`), stores `photo.objects` (`[{label, confidence, box}]`), gates on `"Object" not in photo.scanners`; image-bearing scanners (`EXIF`/`PerceptualHash`/`Object`) all consume `item.image`, which can be preloaded via `Item(photo, image=...)` for in-memory sources
 
 ### Database & Storage
 
@@ -89,6 +89,8 @@ Trailframe — photo gallery app: Python/FastAPI backend + React/TS/Vite fronten
 - **Maps/tiles**: `TileService` + `/api/tiles/{z}/{x}/{y}.png` proxy/cache (`general.tiles_folder`, TTL/size under `maps:`)
 
 - **Forced scans** (Tools page): `POST /api/pipeline/scan {"scanners": [...]}`, `GET /api/pipeline/scanners`; `forced_scan(names)`: `ForceFlag(names)` → re-push every `Photo` as `Item`s → `ForceFlag([])`; forced beats `accept_` but honors `enabled`
+
+- **Remote scan**: `RemoteScanner` (host side) uploads the photo to `POST /api/pipeline/remote-scan` on the remote server, which runs the delegated scanners on an in-memory `Item(photo, image=...)` (no tmp file) with `photo.source = "Remote"` and returns the enriched fields; force flags propagate via a `forced` form field. Host side: `RemoteScanner.accept` intercepts `ForceFlag` (sets `_forced_names` = flag ∩ `_scanner_names`, then forces locally) and folds them into the request. Remote side: `_scanner_cache` reuses cached instances (`_get_scanner_by_name` re-runs `configure`); `_execute_remote_scanners` runs on the shared `ThreadPoolService` and feeds each cached scanner `ForceFlag(forced_names)` before executing then `ForceFlag([])` in `finally`
 
 - **Statistics** (`core/statistics_service.py`): `Scanner._record` times scans; `Pipeline._flush_stats` persists `ScannerStat` row per scanner via `record_run`; `GET /api/statistics/scanners` (items/s); `GET /api/statistics/storage` (DB + folder sizes); `FolderStat`/`StorageStats` are pydantic shapes in `api/statistics.py`, not DB tables; for tests: insert mock `ScannerStat` rows, don't run real scans
 

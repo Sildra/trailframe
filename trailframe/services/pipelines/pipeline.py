@@ -21,6 +21,7 @@ class Pipeline:
     def __init__(self, name: str, scanners: list[Scanner]):
         super().__init__()
         self._name = name
+        self._index = 0
         self._queue: queue.Queue[Any] = queue.Queue()
         self._thread: threading.Thread | None = None
         self._scanners: list[Scanner] = scanners

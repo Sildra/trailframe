@@ -131,6 +131,11 @@ def main() -> None:
     server = uvicorn.Server(config)
     events._server = server
 
+    from trailframe.log import get_logger
+
+    get_logger().info("Gallery:   http://localhost:%s", config.port)
+    get_logger().info("Swagger:   http://localhost:%s/docs", config.port)
+
     try:
         server.run()
     except KeyboardInterrupt:

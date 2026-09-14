@@ -839,6 +839,11 @@ export interface components {
              * @default
              */
             scanners: string;
+            /**
+             * Forced
+             * @default
+             */
+            forced: string;
         };
         /** Body_upload_gpx_api_activities_gpx_upload_post */
         Body_upload_gpx_api_activities_gpx_upload_post: {

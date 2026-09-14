@@ -7,11 +7,11 @@ from trailframe.services.photos.photo_service import PhotoService
 class Item:
     """Wrapper carrying a Photo plus per-pipeline-run state (updated flag and cached bitmap)."""
 
-    def __init__(self, photo: Photo):
+    def __init__(self, photo: Photo, image: Image.Image | None = None):
         self.photo = photo
         self.updated = False
         self.phash_changed = False
-        self._image: Image.Image | None = None
+        self._image = image
 
     @property
     def image(self) -> Image.Image | None:

@@ -21,6 +21,20 @@ class PhotoProvider(Protocol):
         """Remove the source file."""
 
 
+class RemoteProvider:
+    """In-memory photo source with no file on disk; resolution is a no-op."""
+
+    SOURCE: ClassVar[str] = "Remote"
+
+    @classmethod
+    def resolve(cls, stored: str | Path) -> Path:
+        return Path(stored)
+
+    @classmethod
+    def delete(cls, path: Path) -> None:
+        return None
+
+
 class PhotoService(Service):
     """Routes photo source operations to a provider based on the photo's source type."""
 
@@ -30,6 +44,7 @@ class PhotoService(Service):
     @classmethod
     def _configure(cls, config: Node) -> None:
         cls.register(FolderService)
+        cls.register(RemoteProvider)
 
     @classmethod
     def register(cls, provider: type[PhotoProvider]) -> None:

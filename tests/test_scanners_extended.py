@@ -136,7 +136,8 @@ class TestObjectScanner:
 
         scanner._model = Model()
 
-        item = Item(Photo(path=str(tmp_path / "obj.jpg")))
+        image = Image.new("RGB", (40, 40), (120, 40, 40))
+        item = Item(Photo(path=str(tmp_path / "obj.jpg")), image=image)
 
         result = await scanner.execute(item)
 

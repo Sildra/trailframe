@@ -154,6 +154,11 @@ class PipelineService(Service):
         return pipeline._name, remote, tuple(scanners)
 
     @classmethod
+    def _reindex(cls) -> None:
+        for index, pipeline in enumerate(cls._pipelines):
+            pipeline._index = index
+
+    @classmethod
     def _configure(cls, config: Node) -> None:
         if cls.get_state() is ServiceState.STARTED:
             cls._reconfigure_live(config)
@@ -168,6 +173,7 @@ class PipelineService(Service):
             ]
 
         cls._pipelines = [cls._build_pipeline(entry, index) for index, entry in enumerate(entries)]
+        cls._reindex()
         cls._log(f"Loaded {len(cls._pipelines)} pipeline(s) from config")
 
         for pipeline in cls._pipelines:
@@ -231,6 +237,7 @@ class PipelineService(Service):
             applied["removed"].append(name)
 
         cls._pipelines = replacement
+        cls._reindex()
         cls._reconfigure_summary = applied
         cls._log(f"reconfigured live pipelines {applied!r}")
 
@@ -252,7 +259,7 @@ class PipelineService(Service):
             try:
                 index = cls._pipelines.index(pipeline)
             except ValueError:
-                candidates = []
+                candidates = cls._pipelines[pipeline._index :]
             else:
                 candidates = cls._pipelines[index + 1 :]
 

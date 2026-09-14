@@ -1,5 +1,6 @@
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import requests
 
@@ -7,7 +8,7 @@ from trailframe.models.photo import Photo
 from trailframe.services.core.thread_pool_service import ThreadPoolService
 from trailframe.services.photos.photo_service import PhotoService
 from trailframe.services.pipelines.item import Item
-from trailframe.services.scanners.scanner import Scanner
+from trailframe.services.scanners.scanner import ForceFlag, Scanner
 
 
 class RemoteScanner(Scanner):
@@ -16,6 +17,8 @@ class RemoteScanner(Scanner):
     `accept` runs locally first (same gating as the delegated scanners); only when
     accepted is the photo uploaded to the remote `/api/pipeline/remote-scan`
     endpoint, which executes the delegated scanners and returns the enriched photo.
+    A `ForceFlag` naming any delegated scanner forces that scanner on the remote
+    server (by-passing its `accept_` gating there).
     """
 
     _can_be_disabled = False
@@ -24,6 +27,7 @@ class RemoteScanner(Scanner):
         super().__init__("Remote")
         self._remote = self._normalize(remote)
         self._scanner_names = [name for name in (scanner_names or []) if name not in ("File", "Database")]
+        self._forced_names: list[str] = []
 
     @staticmethod
     def _normalize(remote: str) -> str:
@@ -39,6 +43,23 @@ class RemoteScanner(Scanner):
         from trailframe.services.scanners import create_scanner
 
         return create_scanner(name)
+
+    def accept(self, item: Any) -> bool:
+        if isinstance(item, ForceFlag):
+            forced = set(item.scanners or [])
+            self._forced_names = [name for name in self._scanner_names if name in forced]
+            self._forced = bool(self._forced_names)
+            return False
+
+        if self._forced:
+            return True
+
+        if isinstance(item, Photo):
+            return self.accept_(item)
+        if isinstance(item, Item):
+            return self.accept_(item.photo)
+
+        return False
 
     def accept_(self, photo: Photo) -> bool:
         for name in self._scanner_names:
@@ -57,17 +78,17 @@ class RemoteScanner(Scanner):
             return False
 
         url = f"{self._remote}/api/pipeline/remote-scan"
-        result = await ThreadPoolService.run(self._post, url, source, self._scanner_names)
+        result = await ThreadPoolService.run(self._post, url, source, self._scanner_names, self._forced_names)
 
         return self._apply(photo, item, result)
 
     @staticmethod
-    def _post(url: str, path: Path, scanner_names: list[str]) -> dict | None:
+    def _post(url: str, path: Path, scanner_names: list[str], forced: list[str] | None = None) -> dict | None:
         with path.open("rb") as handle:
             response = requests.post(
                 url,
                 files={"file": (path.name, handle, "application/octet-stream")},
-                data={"scanners": ",".join(scanner_names)},
+                data={"scanners": ",".join(scanner_names), "forced": ",".join(forced or [])},
                 timeout=120,
             )
             response.raise_for_status()

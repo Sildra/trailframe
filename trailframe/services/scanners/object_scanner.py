@@ -3,7 +3,6 @@ from threading import Lock
 
 from trailframe.models.photo import Photo
 from trailframe.services.core.configuration_service import Node
-from trailframe.services.photos.photo_service import PhotoService
 from trailframe.services.pipelines.item import Item
 from trailframe.services.scanners.scanner import Scanner
 
@@ -44,9 +43,13 @@ class ObjectScanner(Scanner):
 
     async def executePhoto(self, item: Item) -> bool:
         photo = item.photo
+        image = item.image
+
+        if image is None:
+            return False
 
         model = self._get_model()
-        results = model(str(PhotoService.resolve(photo)), verbose=False)
+        results = model(image, verbose=False)
         detections = []
 
         for result in results:
