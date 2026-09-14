@@ -51,6 +51,26 @@ def create_scanner(name: str) -> Scanner | None:
     return definition.cls() if definition is not None else None
 
 
+def remote_enabled(name: str) -> bool:
+    """Whether a scanable scanner may be executed by a remote pipeline.
+
+    Gates remote-capable scanners behind `scanners.<Name>.enable_remote`
+    (default off); local execution is unaffected.
+    """
+    from trailframe.services.core.configuration_service import ConfigurationService
+
+    definition = SCANNERS.get(name)
+
+    if definition is None or not definition.can_be_remote:
+        return False
+
+    return bool(
+        ConfigurationService.root().get_path_value(
+            f"scanners.{name}.enable_remote", f"Enable {name} scanner for remote execution", False
+        )
+    )
+
+
 def get_scanner_definitions() -> list[dict]:
     return [
         {

@@ -10,7 +10,7 @@ from trailframe.services.core.configuration_service import ConfigurationService
 from trailframe.services.core.thread_pool_service import ThreadPoolService
 from trailframe.services.pipelines.item import Item
 from trailframe.services.pipelines.pipeline_service import PipelineService
-from trailframe.services.scanners import create_scanner, get_scanner_definitions
+from trailframe.services.scanners import create_scanner, get_scanner_definitions, remote_enabled
 from trailframe.services.scanners.scanner import ForceFlag
 
 router = APIRouter(prefix="/api/pipeline", tags=["pipeline"])
@@ -29,6 +29,9 @@ def _known_scanners() -> list[str]:
 
 
 def _get_scanner_by_name(name: str):
+    if not remote_enabled(name):
+        return None
+
     scanner = _scanner_cache.get(name)
 
     if scanner is None:

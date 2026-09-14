@@ -14,6 +14,27 @@ from trailframe.services.scanners.scanner import ForceFlag, ScannerResult
 from trailframe.services.service import ServiceState
 
 
+def _enable_remote(*names: str) -> None:
+    from trailframe.services.core.configuration_service import ConfigurationService
+
+    for name in names:
+        ConfigurationService.root().get_node("scanners").get_node(name).get_node("enable_remote").set_value(True)
+
+
+@pytest.fixture()
+def remote_enabled_names():
+    from pathlib import Path as _Path
+
+    from trailframe.services.core.configuration_service import ConfigurationService, Node
+
+    ConfigurationService.configure(_Path("remote-enabled.yaml"))
+    _enable_remote("Object", "EXIF", "Location", "PerceptualHash")
+
+    yield
+
+    ConfigurationService._root = Node("root")
+
+
 class TestPipelineConfig:
     @allure.title("Builds default pipelines from an empty config")
     def test_default_pipelines(self):
@@ -47,7 +68,7 @@ class TestPipelineConfig:
         assert [pipeline._name for pipeline in PipelineService._pipelines] == ["CreationPipeline", "BasicPipeline"]
 
     @allure.title("Builds pipelines from the documented YAML pipelines list")
-    def test_yaml_pipelines_list(self, tmp_path):
+    def test_yaml_pipelines_list(self, tmp_path, remote_enabled_names):
         from trailframe.services.core.configuration_service import ConfigurationService
 
         config_file = tmp_path / "config.yaml"
@@ -67,6 +88,7 @@ class TestPipelineConfig:
 
         ConfigurationService.configure(config_file)
         ConfigurationService.load()
+        _enable_remote("Object", "Location")
 
         PipelineService._configure(ConfigurationService.root())
 
@@ -118,7 +140,7 @@ class TestPipelineConfig:
         assert [scanner.name for scanner in PipelineService._pipelines[0]._scanners] == ["File", "EXIF", "Database"]
 
     @allure.title("Builds a remote pipeline with a RemoteScanner delegating listed scanners")
-    def test_remote_pipeline(self):
+    def test_remote_pipeline(self, remote_enabled_names):
         config = Node("root")
         config.get_node("pipelines").set_value(
             [{"Remote": {"remote": "localhost:8000", "scanners": ["Object", "EXIF"]}}]
@@ -134,7 +156,7 @@ class TestPipelineConfig:
         assert entry == {"name": "Remote", "remote": "http://localhost:8000", "scanners": ["Object", "EXIF"]}
 
     @allure.title("Builds multiple pipelines from a list")
-    def test_multiple_pipelines(self):
+    def test_multiple_pipelines(self, remote_enabled_names):
         config = Node("root")
         config.get_node("pipelines").set_value(
             [
@@ -170,7 +192,7 @@ class TestScannerDefinitionsApi:
 
 class TestRemoteScanner:
     @allure.title("Filters File and Database out of delegated scanners")
-    def test_filters_internal_scanners(self):
+    def test_filters_internal_scanners(self, remote_enabled_names):
         scanner = RemoteScanner("localhost:8000", ["Object", "File", "Database"])
 
         assert scanner._scanner_names == ["Object"]
@@ -182,7 +204,7 @@ class TestRemoteScanner:
         assert RemoteScanner("", [])._remote == ""
 
     @allure.title("Accepts locally when any delegated scanner accepts the photo")
-    def test_accept_local_gating(self):
+    def test_accept_local_gating(self, remote_enabled_names):
         scanner = RemoteScanner("localhost:8000", ["Object"])
 
         photo = Photo(path="/tmp/a.jpg")
@@ -192,7 +214,7 @@ class TestRemoteScanner:
         assert scanner.accept(photo) is False
 
     @allure.title("Accepts locally using the same gating as the delegated scanners")
-    def test_accept_delegates_gating(self):
+    def test_accept_delegates_gating(self, remote_enabled_names):
         scanner = RemoteScanner("localhost:8000", ["EXIF", "PerceptualHash"])
 
         photo = Photo(path="/tmp/a.jpg")
@@ -205,7 +227,7 @@ class TestRemoteScanner:
         assert scanner.accept(photo) is False
 
     @allure.title("Forces named delegated scanners on the remote server from a ForceFlag")
-    def test_force_flag_sets_forced_delegated_names(self):
+    def test_force_flag_sets_forced_delegated_names(self, remote_enabled_names):
         scanner = RemoteScanner("localhost:8000", ["Object"])
 
         assert scanner.accept(ForceFlag(["Object"])) is False
@@ -226,7 +248,7 @@ class TestRemoteScanner:
 
     @allure.title("Forwards the forced scanner names to the remote server")
     @pytest.mark.asyncio
-    async def test_execute_photo_sends_forced_names(self, monkeypatch: MonkeyPatch, tmp_path):
+    async def test_execute_photo_sends_forced_names(self, monkeypatch: MonkeyPatch, tmp_path, remote_enabled_names):
         source = tmp_path / "photo.jpg"
         source.write_bytes(b"data")
 
@@ -250,7 +272,7 @@ class TestRemoteScanner:
 
     @allure.title("Applies remote results to the photo")
     @pytest.mark.asyncio
-    async def test_execute_photo_applies_results(self, monkeypatch: MonkeyPatch, tmp_path):
+    async def test_execute_photo_applies_results(self, monkeypatch: MonkeyPatch, tmp_path, remote_enabled_names):
         source = tmp_path / "photo.jpg"
         source.write_bytes(b"data")
 
@@ -308,6 +330,7 @@ class TestRemotePipelineApi:
         import trailframe.api.pipeline as pipeline_api
         from trailframe.services.scanners.object_scanner import ObjectScanner
 
+        _enable_remote("Object")
         first = pipeline_api._get_scanner_by_name("Object")
         second = pipeline_api._get_scanner_by_name("Object")
 
@@ -351,6 +374,7 @@ class TestRemotePipelineApi:
 
         from PIL import ExifTags, Image
 
+        _enable_remote("EXIF")
         buffer = BytesIO()
         exif = Image.Exif()
         exif[ExifTags.Base.DateTimeOriginal] = "2023:06:01 12:34:56"
@@ -486,7 +510,7 @@ class TestPipelineLiveReconfigure:
             await PipelineService.stop()
 
     @allure.title("Keeps running instances when pipelines are only reordered")
-    async def test_keeps_instances_on_reorder_without_restart(self, db_session):
+    async def test_keeps_instances_on_reorder_without_restart(self, db_session, remote_enabled_names):
         config = Node("root")
         config.get_node("pipelines").set_value(
             [

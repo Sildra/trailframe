@@ -27,6 +27,7 @@ class Scanner(ABC):
     def __init__(self, name: str):
         self.name = name
         self._enabled = True
+        self._enable_remote = False
         self._forced = False
         self._run_count = 0
         self._run_total_ms = 0.0
@@ -39,7 +40,9 @@ class Scanner(ABC):
         if self._can_be_disabled:
             self._enabled = config.get_path_value(f"scanners.{self.name}.enabled", f"Enable {self.name} scanner", True)
         if self._can_be_remote:
-            pass
+            self._enable_remote = config.get_path_value(
+                f"scanners.{self.name}.enable_remote", f"Enable {self.name} scanner for remote execution", False
+            )
         self.configure_(config)
 
     def configure_(self, config: Node) -> None:
