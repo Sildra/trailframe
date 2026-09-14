@@ -18,6 +18,7 @@ if TYPE_CHECKING:
 
 
 class GarminConnectService(Service):
+    _requires = ("DatabaseService", "ThreadPoolService")
     _tasks: ClassVar[set[asyncio.Task]] = set()
 
     @classmethod

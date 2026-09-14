@@ -57,6 +57,7 @@ class DuplicatesService(Service):
     """
 
     _name = "Duplicates"
+    _requires = ("DatabaseService", "ThreadPoolService")
 
     _lock: ClassVar[threading.Lock] = threading.Lock()
     _db_path: ClassVar[Path | None] = None

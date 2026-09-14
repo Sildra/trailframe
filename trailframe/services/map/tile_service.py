@@ -16,6 +16,9 @@ _EVICTION_INTERVAL = 200
 
 
 class TileService(Service):
+    _reconfig_safe = False
+    _requires = ("ThreadPoolService",)
+
     _folder: Path | None = None
     _url_template: str = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
     _subdomains: ClassVar[list[str]] = ["a", "b", "c"]

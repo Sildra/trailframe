@@ -13,6 +13,8 @@ from trailframe.services.service import Service
 
 
 class MapService(Service):
+    _reconfig_safe = False
+
     _folder: Path | None = None
     _margin: float | None = None
 
@@ -24,10 +26,11 @@ class MapService(Service):
 
     @classmethod
     def _configure(cls, config: Node) -> None:
+        general_node = config.get_node("general", "General parameters")
         cls._folder = Path(
-            config.get_path_value("activities_folder", "Folder where activity maps are stored", "activities")
+            general_node.get_path_value("activities_folder", "Folder where activity maps are stored", "activities")
         )
-        cls._margin = config.get_path_value("maps_margin", "Margins for the generated map", 0.1)
+        cls._margin = general_node.get_path_value("maps_margin", "Margins for the generated map", 0.1)
         cls._folder.mkdir(parents=True, exist_ok=True)
 
     @classmethod

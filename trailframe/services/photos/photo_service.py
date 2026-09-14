@@ -24,6 +24,7 @@ class PhotoProvider(Protocol):
 class PhotoService(Service):
     """Routes photo source operations to a provider based on the photo's source type."""
 
+    _requires = ("DatabaseService",)
     _providers: ClassVar[dict[str, type[PhotoProvider]]] = {}
 
     @classmethod

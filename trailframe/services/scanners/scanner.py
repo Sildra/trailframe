@@ -21,10 +21,11 @@ class ForceFlag:
 
 
 class Scanner(ABC):
+    _can_be_disabled: bool = True
+    _can_be_remote: bool = False
+
     def __init__(self, name: str):
         self.name = name
-        self._can_be_disabled = True
-        self._can_be_remote = False
         self._enabled = True
         self._forced = False
         self._run_count = 0

@@ -16,8 +16,12 @@ class FolderService(Service):
 
     IMAGE_EXTENSIONS: ClassVar[set[str]] = {".jpg", ".jpeg", ".png", ".webp", ".tiff", ".bmp"}
 
+    _reconfig_safe = False
+    _requires = ("DatabaseService", "PipelineService")
+
     _folder: Path | None = None
     _trash_folder: Path | None = None
+    _failsafe = False
     _interval = 10
     _known_files: ClassVar[set[Path]] = set()
     _task: asyncio.Task | None = None
@@ -86,20 +90,28 @@ class FolderService(Service):
 
     @classmethod
     def _configure(cls, config: Node) -> None:
-        cls._folder = Path(config.get_path_value("photos_folder", "Folder where photos are stored", "photos"))
+        general_node = config.get_node("general", "General parameters")
+        cls._folder = Path(general_node.get_path_value("photos_folder", "Folder where photos are stored", "photos"))
         cls._folder.mkdir(parents=True, exist_ok=True)
         cls._trash_folder = Path(
-            config.get_path_value("trash_folder", "Folder where deleted photos are moved", "trash")
+            general_node.get_path_value("trash_folder", "Folder where deleted photos are moved", "trash")
         )
         cls._trash_folder.mkdir(parents=True, exist_ok=True)
-        cls._creation_throttle = config.get_path_value(
+        cls._creation_throttle = general_node.get_path_value(
             "creation_throttle", "Throttle items simultaneously added to the pipeline", 0
+        )
+        cls._failsafe = general_node.get_path_value(
+            "failsafe", "Start without scanning or watching the photos folder", False
         )
 
     @classmethod
     async def _start(cls) -> None:
         if cls._folder is None:
             raise RuntimeError("FolderService is not configured")
+
+        if cls._failsafe:
+            cls._log("failsafe: skipping folder scan and watch")
+            return
 
         cls._running = True
 

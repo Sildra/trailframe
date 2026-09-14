@@ -17,6 +17,8 @@ YOLO_MODELS = {
 
 
 class ObjectScanner(Scanner):
+    _can_be_remote = True
+
     def __init__(self) -> None:
         super().__init__("Object")
         self._model = None
@@ -25,12 +27,17 @@ class ObjectScanner(Scanner):
         self._models_folder = Path("models")
 
     def configure_(self, config: Node) -> None:
-        self._model_name = config.get_path_value(
+        model_name = config.get_path_value(
             "scanners.Object.model", "YOLO model to use for object detection", "yolo26n.pt"
         )
-        self._models_folder = Path(
-            config.get_path_value("general.models_folder", "Folder where models are stored", "models")
-        )
+        models_folder = Path(config.get_path_value("general.models_folder", "Folder where models are stored", "models"))
+
+        if (model_name, models_folder) != (self._model_name, self._models_folder):
+            with self._model_lock:
+                self._model = None
+
+        self._model_name = model_name
+        self._models_folder = models_folder
 
     def accept_(self, photo: Photo) -> bool:
         return self.name not in (photo.scanners or [])

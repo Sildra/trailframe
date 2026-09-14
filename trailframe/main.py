@@ -14,23 +14,11 @@ from trailframe.api.map_data import router as map_data_router
 from trailframe.api.models import router as models_router
 from trailframe.api.photos import router as photos_router
 from trailframe.api.pipeline import router as pipeline_router
+from trailframe.api.remote_pipeline import router as remote_pipeline_router
 from trailframe.api.statistics import router as statistics_router
 from trailframe.api.tiles import router as tiles_router
-from trailframe.services.activities.activity_service import ActivityService
-from trailframe.services.activities.garmin_connect_service import GarminConnectService
-from trailframe.services.activities.gpx_service import GpxService
 from trailframe.services.core.configuration_service import ConfigurationService
-from trailframe.services.core.database_service import DatabaseService
-from trailframe.services.core.statistics_service import StatisticsService
-from trailframe.services.core.thread_pool_service import ThreadPoolService
-from trailframe.services.map.location_service import LocationService
-from trailframe.services.map.map_service import MapService
-from trailframe.services.map.tile_service import TileService
-from trailframe.services.photos.duplicates_service import DuplicatesService
-from trailframe.services.photos.folder_service import FolderService
-from trailframe.services.photos.photo_service import PhotoService
-from trailframe.services.photos.thumbnail_service import ThumbnailService
-from trailframe.services.pipelines.pipeline_service import PipelineService
+from trailframe.services.service_registry import ServiceRegistry
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -65,42 +53,21 @@ def create_app(args: argparse.Namespace) -> FastAPI:
         api_port_node.set_value(args.port)
     if args.database:
         database_node.set_value(str(args.database))
+    if args.failsafe:
+        general_node.get_node("failsafe").set_value(True)
+
+    ServiceRegistry.configure(root_node)
+    ConfigurationService.save()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
 
-        FolderService.configure(general_node)
-        PhotoService.configure(general_node)
-        PipelineService.configure(root_node)
-        ThumbnailService.configure(general_node)
-        DatabaseService.configure(general_node)
-        GarminConnectService.configure(general_node)
-        GpxService.configure(general_node)
-        ActivityService.configure(general_node)
-        LocationService.configure(general_node)
-        MapService.configure(general_node)
-        TileService.configure(root_node)
-        StatisticsService.configure(general_node)
-        ThreadPoolService.configure(general_node)
-        DuplicatesService.configure(general_node)
-        ConfigurationService.save()
-
         # Tables must exist before the pipelines consume items
-        await ThreadPoolService.start()
-        await DatabaseService.start()
-        await PhotoService.start()
-        await PipelineService.start()
-
-        if not args.failsafe:
-            await FolderService.start()
+        await ServiceRegistry.start()
 
         yield
 
-        await FolderService.stop()
-        await PhotoService.stop()
-        await PipelineService.stop()
-        await ThreadPoolService.stop()
-        await DatabaseService.stop()
+        await ServiceRegistry.stop()
 
     app = FastAPI(title="Trailframe", version="0.1.0", lifespan=lifespan)
 
@@ -108,6 +75,7 @@ def create_app(args: argparse.Namespace) -> FastAPI:
     app.include_router(photos_router)
     app.include_router(models_router)
     app.include_router(pipeline_router)
+    app.include_router(remote_pipeline_router)
     app.include_router(map_data_router)
     app.include_router(configuration_router)
     app.include_router(activities_router)

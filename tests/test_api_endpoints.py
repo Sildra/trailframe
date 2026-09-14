@@ -485,3 +485,15 @@ class TestConfigurationApi:
     def test_get_configuration(self, app):
         payload = app.get("/api/configuration").json()
         assert "general" in payload["children"]
+
+    @allure.title("Exposes the pipelines section as a list node")
+    def test_get_configuration_pipelines(self, app):
+        payload = app.get("/api/configuration").json()
+        pipelines = payload["children"]["pipelines"]
+        assert {next(iter(entry)) for entry in pipelines["value"]} == {"CreationPipeline", "BasicPipeline"}
+        assert all(
+            "File" not in next(iter(entry.values()))["scanners"]
+            and "Database" not in next(iter(entry.values()))["scanners"]
+            for entry in pipelines["value"]
+        )
+        assert pipelines["item"]["kind"] == "named-map"

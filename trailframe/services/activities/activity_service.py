@@ -13,6 +13,8 @@ from trailframe.services.service import Service
 
 
 class ActivityService(Service):
+    _requires = ("DatabaseService", "ThreadPoolService", "GarminConnectService", "MapService")
+
     @classmethod
     async def list_activities(cls) -> list[ActivitySummary]:
         async def _list(session) -> list[ActivitySummary]:

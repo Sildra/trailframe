@@ -21,7 +21,7 @@ class Pipeline:
     def __init__(self, name: str, scanners: list[Scanner]):
         super().__init__()
         self._name = name
-        self._queue: queue.Queue | None = None
+        self._queue: queue.Queue[Any] = queue.Queue()
         self._thread: threading.Thread | None = None
         self._scanners: list[Scanner] = scanners
         self._success = 0
@@ -32,8 +32,7 @@ class Pipeline:
         for scanner in self._scanners:
             scanner.configure(config)
 
-    async def start(self) -> None:
-        self._queue = queue.Queue()
+    def start(self) -> None:
         self._success = 0
         self._failure = 0
         self._reset_timestamp = None
@@ -48,13 +47,34 @@ class Pipeline:
         finally:
             loop.close()
 
-    async def stop(self) -> None:
+    def stop(self) -> None:
+        if self._thread is None:
+            return
+
         self._queue.put(_STOP)
 
         self._thread.join(timeout=5)
         self._thread = None
+        self._flush_stats()
 
-    async def add(self, item: Any) -> None:
+    def take_pending(self) -> list[Any]:
+        """Collect items still queued after a stop so they can be carried into a replacement pipeline."""
+        pending: list[Any] = []
+
+        while True:
+            try:
+                item = self._queue.get_nowait()
+            except queue.Empty:
+                break
+
+            if isinstance(item, (ForceFlag, PipelineEmpty)) or item is _STOP:
+                continue
+
+            pending.append(item)
+
+        return pending
+
+    def add(self, item: Any) -> None:
         self._queue.put(item)
 
     def _previous_pipeline_empty(self) -> None:
@@ -119,7 +139,7 @@ class Pipeline:
 
         success = await self._run_scanners(item)
         if isinstance(item, Item):
-            item.image.close()
+            item.close()
 
         return success
 

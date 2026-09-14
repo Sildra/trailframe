@@ -8,9 +8,10 @@ from trailframe.services.scanners.scanner import Scanner
 
 
 class DatabaseScanner(Scanner):
+    _can_be_disabled = False
+
     def __init__(self) -> None:
         super().__init__("Database")
-        self._can_be_disabled = False
 
     def accept(self, item) -> bool:
         return isinstance(item, Item) and item.updated

@@ -4,6 +4,7 @@ import allure
 import pytest
 
 from trailframe.services.core.configuration_service import ConfigurationService, Node
+from trailframe.services.pipelines.pipeline_service import PipelineService
 
 
 class TestNode:
@@ -62,6 +63,51 @@ class TestNode:
         node = Node("root")
         assert Node.from_json("root", node.to_json()).to_dict() is None
 
+    @allure.title("Describes scalar lists with an item descriptor")
+    def test_json_describes_scalar_list(self):
+        node = Node("general")
+        node.get_node("thumbnail_sizes").set_value([160, 400])
+
+        descriptor = node.to_json()["children"]["thumbnail_sizes"]["item"]
+        assert descriptor["kind"] == "scalar"
+        assert descriptor["scalar_type"] == "number"
+        assert descriptor["template"] == 0
+
+    @allure.title("Describes named-map lists with keys and a template")
+    def test_json_describes_named_map_list(self):
+        node = Node("root")
+        node.get_node("pipelines").set_value([{"Basic": {"remote": "", "scanners": ["Object"]}}])
+
+        descriptor = node.to_json()["children"]["pipelines"]["item"]
+        assert descriptor["kind"] == "named-map"
+        assert descriptor["keys"] == {"remote": "string", "scanners": "list-str"}
+        assert descriptor["template"] == {"": {"remote": "", "scanners": []}}
+
+    @allure.title("Omits untouched leaves from JSON output")
+    def test_json_omits_untouched(self):
+        node = Node("root")
+        node.children["stale"] = Node("stale", value=1)
+        node.get_node("kept").set_value(2)
+
+        result = node.to_json(filter_touched=True)["children"]
+        assert set(result) == {"kept"}
+
+    @allure.title("Keeps structural parents of touched nodes in JSON output")
+    def test_json_keeps_touched_descendants(self):
+        node = Node("root")
+        node.get_node("parent.child").set_value(1)
+
+        result = node.to_json(filter_touched=True)["children"]
+        assert set(result) == {"parent"}
+
+    @allure.title("Includes all nodes without the touched filter")
+    def test_json_includes_stale_without_filter(self):
+        node = Node("root")
+        node.children["stale"] = Node("stale", value=1)
+
+        result = node.to_json()["children"]
+        assert set(result) == {"stale"}
+
 
 class TestConfigurationService:
     @allure.title("Loads YAML config and persists a changed value back to disk")
@@ -77,6 +123,38 @@ class TestConfigurationService:
         ConfigurationService.save()
         result = tmp_path / "config.yaml"
         assert "5656" in result.read_text(encoding="utf-8")
+
+    @allure.title("Does not send stale nodes to the frontend")
+    def test_to_json_filters_stale(self, tmp_path):
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("general:\n  port: 1234\nlegacy:\n  old_key: true\nstray: 5\n", encoding="utf-8")
+
+        ConfigurationService.configure(config_file)
+        ConfigurationService.load()
+        assert ConfigurationService.root().get_path_value("general.port") == 1234
+
+        children = ConfigurationService.to_json()["children"]
+        assert "general" in children
+        assert "legacy" not in children
+        assert "stray" not in children
+
+        assert "stray: 5" in config_file.read_text(encoding="utf-8")
+
+    @allure.title("Stale nodes leave the file when the frontend saves the filtered tree")
+    def test_ui_save_drops_stale_nodes(self, tmp_path):
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("general:\n  port: 1234\nstray: 5\n", encoding="utf-8")
+
+        ConfigurationService.configure(config_file)
+        ConfigurationService.load()
+        assert ConfigurationService.root().get_path_value("general.port") == 1234
+
+        ConfigurationService.from_json(ConfigurationService.to_json())
+        ConfigurationService.save()
+
+        text = config_file.read_text(encoding="utf-8")
+        assert "port: 1234" in text
+        assert "stray" not in text
 
     @allure.title("Yields an empty root when the config file is missing")
     def test_load_missing_file_yields_empty_root(self, tmp_path):
@@ -99,6 +177,69 @@ class TestConfigurationService:
         ConfigurationService.root().get_node("x").set_value(1)
         ConfigurationService.configure(tmp_path / "b.yaml")
         assert ConfigurationService.root().to_dict() is None
+
+    @allure.title("Exposes a pipelines section even when not configured")
+    def test_to_json_injects_pipelines(self, tmp_path):
+        ConfigurationService.configure(tmp_path / "c.yaml")
+        ConfigurationService.load()
+
+        assert "pipelines" not in ConfigurationService.to_json().get("children", {})
+
+        payload = ConfigurationService.to_json()
+        PipelineService.add_pipelines_payload(payload)
+        children = payload["children"]
+
+        value = children["pipelines"]["value"]
+
+        assert {next(iter(entry)) for entry in value} == {"CreationPipeline", "BasicPipeline"}
+        assert all(
+            "File" not in next(iter(entry.values()))["scanners"]
+            and "Database" not in next(iter(entry.values()))["scanners"]
+            for entry in value
+        )
+        assert all(next(iter(entry.values()))["remote"] == "" for entry in value)
+
+        scanners = children["pipelines"]["item"]["fields"]["scanners"]
+        assert scanners["editor"] == "scanner"
+        assert {option["name"] for option in scanners["options"]} == {
+            "Activity",
+            "EXIF",
+            "Location",
+            "Object",
+            "PerceptualHash",
+            "Thumbnail",
+        }
+
+    @allure.title("Exposes the configured pipelines instead of the defaults")
+    def test_to_json_roundtrips_custom_pipelines(self):
+        ConfigurationService._root = Node.from_dict(
+            "root", {"pipelines": [{"Basic": {"remote": "", "scanners": ["Object"]}}]}
+        )
+        ConfigurationService._file = None
+
+        PipelineService._parse_pipelines_config(ConfigurationService.root())
+
+        payload = ConfigurationService.to_json()
+        PipelineService.add_pipelines_payload(payload)
+        children = payload["children"]
+
+        assert children["pipelines"]["value"] == [{"Basic": {"remote": "", "scanners": ["Object"]}}]
+
+        item = children["pipelines"]["item"]
+        assert item["kind"] == "named-map"
+        assert item["fields"]["scanners"]["editor"] == "scanner"
+
+    @allure.title("Persists the pipelines section when the configuration is saved")
+    def test_save_persists_pipelines(self, tmp_path):
+        config_file = tmp_path / "config.yaml"
+        ConfigurationService.configure(config_file)
+
+        payload = ConfigurationService.to_json()
+        PipelineService.add_pipelines_payload(payload)
+        ConfigurationService.from_json(payload)
+        ConfigurationService.save()
+
+        assert "pipelines" in config_file.read_text(encoding="utf-8")
 
     @allure.title("Raises when saving before configuring")
     def test_save_without_configure_raises(self):

@@ -17,6 +17,7 @@ class Node:
         self.value = value
         self.default_value = default_value
         self.children: dict[str, Node] = {}
+        self._touched = False
 
     @property
     def has_value(self) -> bool:
@@ -54,6 +55,7 @@ class Node:
 
     def get_value(self, default_value: Any = _UNDEFINED) -> Any:
         self.set_default_value(default_value)
+        self._touched = True
 
         return self.value
 
@@ -62,6 +64,13 @@ class Node:
 
     def set_value(self, value: Any) -> None:
         self.value = value
+        self._touched = True
+
+    def _is_kept(self) -> bool:
+        if self._touched:
+            return True
+
+        return any(child._is_kept() for child in self.children.values())
 
     def to_dict(self) -> Any:
         if not self.children:
@@ -69,7 +78,69 @@ class Node:
 
         return {name: child.to_dict() for name, child in self.children.items()}
 
-    def to_json(self) -> dict[str, Any]:
+    @staticmethod
+    def _value_type(value: Any) -> str:
+        if isinstance(value, bool):
+            return "bool"
+        if isinstance(value, (int, float)):
+            return "number"
+        if isinstance(value, list):
+            return "list-str" if all(isinstance(item, str) for item in value) else "list"
+        return "string"
+
+    @staticmethod
+    def _default_value(value_type: str) -> Any:
+        return {"bool": False, "number": 0, "list": [], "list-str": [], "string": ""}.get(value_type, "")
+
+    def _item_descriptor(self) -> dict[str, Any] | None:
+        value = self.value
+
+        if not isinstance(value, list) or not value:
+            return None
+
+        kind = "scalar"
+        scalar_type = self._value_type(value[0])
+        keys: dict[str, str] = {}
+        named_key: str | None = None
+
+        for item in value:
+            if isinstance(item, dict):
+                if len(item) == 1 and isinstance(next(iter(item.values())), dict):
+                    name, settings = next(iter(item.items()))
+
+                    if named_key is None:
+                        named_key = name
+                    elif named_key != name:
+                        named_key = ""
+                    kind = "named-map"
+
+                    for key, field in settings.items():
+                        keys[key] = self._value_type(field)
+                else:
+                    kind = "map"
+
+                    for key, field in item.items():
+                        keys[key] = self._value_type(field)
+            elif isinstance(item, list):
+                kind = "array"
+            elif kind == "scalar":
+                scalar_type = self._value_type(item)
+
+        descriptor: dict[str, Any] = {"kind": kind}
+
+        if kind == "scalar":
+            descriptor["scalar_type"] = scalar_type
+            descriptor["template"] = self._default_value(scalar_type)
+        elif kind == "named-map":
+            descriptor["keys"] = keys
+            descriptor["template"] = {"": {key: self._default_value(item_type) for key, item_type in keys.items()}}
+        else:
+            descriptor["keys"] = keys
+            descriptor["template"] = {key: self._default_value(item_type) for key, item_type in keys.items()}
+
+        return descriptor
+
+    def to_json(self, filter_touched: bool = False) -> dict[str, Any]:
         result: dict[str, Any] = {}
 
         if self.has_value:
@@ -78,8 +149,23 @@ class Node:
         if self.description is not None:
             result["description"] = self.description
 
+        if isinstance(self.value, list):
+            descriptor = self._item_descriptor()
+
+            if descriptor is not None:
+                result["item"] = descriptor
+
         if self.children:
-            result["children"] = {name: child.to_json() for name, child in self.children.items()}
+            children = {}
+
+            for name, child in self.children.items():
+                if filter_touched and not child._is_kept():
+                    continue
+
+                children[name] = child.to_json(filter_touched)
+
+            if filter_touched or children:
+                result["children"] = children
 
         return result
 
@@ -160,7 +246,7 @@ class ConfigurationService:
 
     @classmethod
     def to_json(cls) -> dict[str, Any]:
-        return cls._root.to_json()
+        return cls._root.to_json(filter_touched=True)
 
     @classmethod
     def from_json(cls, data: dict[str, Any]) -> None:

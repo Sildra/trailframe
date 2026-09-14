@@ -2,40 +2,120 @@
 
 Trailframe — photo gallery app: Python/FastAPI backend + React/TS/Vite frontend, pip-installable as `trailframe` (wheels on GitHub releases; single server serving the built frontend).
 
+## Quick Reference
+
+| Task | Command |
+|------|---------|
+| Run backend | `python -m trailframe.main` |
+| Build frontend | `cd frontend && npm run build` |
+| Lint backend | `ruff check .` |
+| Format backend | `ruff format .` |
+| Lint frontend | `cd frontend && npm run lint` |
+| Run tests | `python -m pytest` |
+| Build package | `npm run build && python -m build` |
+| Kill backend | `netstat -ano \| findstr :8000` then `taskkill -PID <pid> -F` |
+
 ## Layout
-- `trailframe/` — FastAPI app. `frontend/` — Vite + React app. Root `pyproject.toml` — metadata, deps, ruff config, hatchling build (force-includes `frontend/dist` into wheel), console script `trailframe = trailframe.main:main`. `supervisor.py` — restarts `python -m trailframe.main`.
+
+- `trailframe/` — FastAPI app
+- `frontend/` — Vite + React app
+- `pyproject.toml` — metadata, deps, ruff config, hatchling build, console script `trailframe = trailframe.main:main`
+- `supervisor.py` — restarts `python -m trailframe.main`
 
 ## Backend (FastAPI, Python 3.12)
-- **Run**: `python -m trailframe.main` from repo root. `main.py` serves `frontend/dist` from CWD if present, else the packaged copy. Flags: `--config` (default `config.yaml`), `--folder` (sets `*_folder` subdirs), `--database`, `--port` (8000), `--failsafe` (skip `FolderService.start()`, no scan/watch), `--openapi FILE`.
-- **Artifacts written to CWD** (all gitignored, don't commit): `config.yaml` (auto-saved), `gallery.db`, `photos/`, `thumbnails/`, `trash/`, `maps/`, `activities/`, `models/`, `tiles/`.
-- **Style**: ruff (`ruff check`, `ruff format`) from root `pyproject.toml`.
-- **pip**: `torch` can't extract into site-packages (Win long-path limit) — installed to `C:\pylibs` via `.pth`. For packages with deep dirs use `pip install --target C:/pylibs <pkg>`.
-- **Releases**: build web UI first (`npm run build` in `frontend/`, force-include fails without `dist`), then `python -m build`; attach wheel to GitHub release (no PyPI).
-- **Services** (`trailframe/services/`, class-based `Service` singletons wired in `main.py` lifespan): `service.py` (base `Service`), `core/` (`ConfigurationService`, `DatabaseService`, `StatisticsService`, `ThreadPoolService`), `photos/` (`FolderService`, `ThumbnailService`, `PhotoService`), `activities/` (`ActivityService`, `GarminConnectService`, `GpxService`), `map/` (`MapService`, `LocationService`, `TileService`), plus `pipelines/`, `scanners/`. `Service`: non-virtual `configure/start/stop` → virtual `_configure/_start/_stop`, `_log` (`[Name] message`, uvicorn-style `HH:MM:SS.SSS INFO:     `-prefixed on stderr via `log.py` `get_logger()`), state tracking; `_name` overrides. `Pipeline` base: async queue (`add`, `get_queue_size`, `accepts`, `start`, `stop`); `PipelineEmpty` sentinel is accepted everywhere and dropped. **Start order**: `ThreadPoolService` → `DatabaseService` (creates tables) → `PipelineService` → `FolderService`.
-- **Concurrency**: one shared pool (`ThreadPoolService`, size `general.thread_pool_size`, default 2); all heavy work (scanners, maps, Garmin, tiles, geo). Each pipeline = **1 worker task** (`Pipeline._worker_count = 1`) — bounds memory (one YOLO inference at a time). DB work stays on the event loop.
-- **Call hierarchy**: content/enrichment = `Pipeline -> Scanner -> Service`; API content = `API -> Service`, **never** a Scanner (map/wireframe via `LocationService`/`MapService`).
-- **PhotoService** (`photos/photo_service.py`, `photos/` provider registry): routes photo-source ops (resolve → local path, delete) to a `PhotoProvider` keyed by `photo.source` (default `FolderService`, `SOURCE = "File"`); extensible to network/NAS backends. `upload`/scan/folder-watching stay in `FolderService` — don't abstract those.
-- **Pipelines**: `PipelineService` (`pipelines/pipeline_service.py`) explicitly registers `CreationPipeline`/`BasicPipeline` (scanners, not auto-discovered). `next(item, pipeline=None)` routes to first accepting pipeline; handoff via `PipelineService.next(item, cls)`. External items enter as `Photo` (`FolderService.to_photo`), wrapped into `Item` (`pipelines/item.py`: `photo` + `updated` flag + lazily-cached PIL `image`). `_run_scanners` runs every scanner's `execute(item)`; last scanner, `DatabaseScanner` (`scanners/database_scanner.py`), merges/commits on `item.updated`. `CreationPipeline`: `FileScanner`/`ExifScanner`/`ThumbnailScanner`/`DatabaseScanner`. `BasicPipeline`: `ActivityScanner`/`LocationScanner`/`ObjectScanner`/`PerceptualHashScanner`/`DatabaseScanner`; gates routing on `any(scanner.accept(item))`.
-- **Scanner contract** (`scanners/scanner.py`): non-virtual `configure/accept/execute` → overloadable `configure_/accept_/executePhoto`. `configure` reads `enabled`; `accept` handles `ForceFlag` (`_forced` toggle), `enabled`, `_forced`, else `accept_`. `execute` always calls `accept` first (declined → `ScannerResult.SUCCESS`), stashes `self._item` (reach the wrapper, e.g. `self._item.image`), runs `executePhoto` (sync runs on `ThreadPoolService`), returns `SUCCESS`/`ERROR`, sets `item.updated` if photo changed. `DatabaseScanner.accept` = `isinstance(item, Item) and item.updated`.
-- **Scanner tracking**: applied-ness not deducible from fields → call `self.add_scanner(photo)` (appends name to `photo.scanners`, JSON column, NULL-safe — read via `photo.scanners or []`). `ObjectScanner` runs YOLO (`scanners.Object.model`, default `yolo26n.pt`, live `yolo26m.pt`), model in `general.models_folder` (`models/`, also in storage stats), stores `photo.objects` (`[{label, confidence, box}]`), gates on `"Object" not in photo.scanners`.
-- **DB models**: SQLModel classes in `trailframe/models/` (converter classmethods, e.g. `GarminActivity.to_activity`); tables auto-created at startup, no migrations.
-- **Thumbnails** (`photos/thumbnail_service.py`): multi-size via `general.thumbnail_sizes` (default `[160, 400]`); files at `{safe_filename[:2]}/{safe_filename}_{file_size}_{size}.webp` (fallback `{safe_filename}_{size}.webp`). `generate_all` writes all; `exists` = all present; `select_size` picks lowest ≥ preferred when ≤ 2×preferred else highest below (fallback smallest). `GET /api/photos/{id}/thumbnail?size=<p>`.
-- **Favorites**: `Photo.is_favorite` (`_add_missing_columns`); `PUT /api/photos/{id}/favorite`, `GET /api/photos?favorites=true`, `GET /api/photos/favorites`.
-- **Maps/tiles**: `TileService` + `/api/tiles/{z}/{x}/{y}.png` proxy/cache (`general.tiles_folder`, TTL/size under `maps:`).
-- **Forced scans** (Tools page): `POST /api/pipeline/scan {"scanners": [...]}`, `GET /api/pipeline/scanners`. `forced_scan(names)`: `ForceFlag(names)` → re-push every `Photo` (as `Item`s) → `ForceFlag([])`; forced beats `accept_` but honors `enabled`.
-- **Deletion** (`api/photos.py`): move source to `general.trash_folder` via `FolderService.delete()`, remove thumbnail, delete DB row.
-- **Statistics** (`core/statistics_service.py`): `Scanner._record` times scans; `Pipeline._flush_stats` (queue drained, run ended) persists one `ScannerStat` row per scanner via `record_run`. `GET /api/statistics/scanners` (items/s); `GET /api/statistics/storage` (DB file + folder sizes; `FolderStat`/`StorageStats` are pydantic shapes in `api/statistics.py`, not DB tables). For tests: insert mock `ScannerStat` rows, don't run real scans.
+
+### Core
+
+- **Run**: `python -m trailframe.main` from repo root
+  - `main.py` serves `frontend/dist` from CWD if present, else packaged copy
+  - Flags: `--config` (default `config.yaml`), `--folder` (sets `*_folder` subdirs), `--database`, `--port` (8000), `--failsafe` (skip `FolderService.start()`, no scan/watch), `--openapi FILE`
+
+- **Artifacts** (CWD, all gitignored): `config.yaml`, `gallery.db`, `photos/`, `thumbnails/`, `trash/`, `maps/`, `activities/`, `models/`, `tiles/`
+
+- **Style**: ruff from root `pyproject.toml`
+
+- **pip**: `torch` installed to `C:\pylibs` via `.pth` (Win long-path limit); use `pip install --target C:/pylibs <pkg>` for deep dirs
+
+- **Releases**: build frontend first, then `python -m build`; attach wheel to GitHub release (no PyPI)
+
+### Architecture
+
+- **Services** (`trailframe/services/`): class-based `Service` singletons wired in `main.py` lifespan
+  - `service.py` (base), `core/` (Configuration, Database, Statistics, ThreadPool), `photos/` (Folder, Thumbnail, Photo), `activities/` (Activity, GarminConnect, Gpx), `map/` (Map, Location, Tile), plus `pipelines/`, `scanners/`
+  - `Service`: non-virtual `configure/start/stop` → virtual `_configure/_start/_stop`, `_log` (`[Name]` prefixed on stderr via `log.py`), state tracking; `_name` overrides
+  - `_requires`: each service declares its direct dependencies as names (resolved against `ServiceRegistry` at start); `start()` verifies them — on violation logs an `ERROR` and raises (`Service._require_started`)
+
+- **Pipeline** base: eager thread-safe queue (sync `add`/`start`/`stop`, `get_queue_size`, `accepts`); `stop()` drains worker and flushes run stats; `take_pending()` returns leftover items; `PipelineEmpty` sentinel accepted everywhere and dropped
+
+- **Start order**: `ThreadPoolService` → `DatabaseService` (creates tables) → `PhotoService` → `PipelineService` → `FolderService` → `ThumbnailService` → `MapService` → `GarminConnectService` → `GpxService` → `ActivityService` → `LocationService` → `TileService` → `StatisticsService` → `DuplicatesService` (order must satisfy `_requires`: DB→TP, Photos→DB, Pipeline→DB, Folder→DB+Pipeline, Thumbnail→Photos, Garmin→DB+TP, Gpx→DB, Activity→DB+TP+Garmin+Map, Location→DB+TP, Tile→TP, Statistics→DB, Duplicates→DB+TP)
+
+- **Concurrency**: one shared pool (`ThreadPoolService`, size `general.thread_pool_size`, default 2); all heavy work (scanners, maps, Garmin, tiles, geo); each pipeline = 1 worker task (`Pipeline._worker_count = 1`) — bounds memory (one YOLO inference at a time); DB work stays on event loop
+
+- **Call hierarchy**: content/enrichment = `Pipeline → Scanner → Service`; API content = `API → Service`, never a Scanner (map/wireframe via `LocationService`/`MapService`)
+
+### Photos & Pipelines
+
+- **PhotoService** (`photos/photo_service.py`): routes photo-source ops (resolve → local path, delete) to `PhotoProvider` keyed by `photo.source` (default `FolderService`, `SOURCE = "File"`); extensible to network/NAS backends; upload/scan/folder-watching stay in `FolderService`
+
+- **Pipelines** (`pipelines/pipeline_service.py`): explicitly registers `CreationPipeline`/`BasicPipeline` (not auto-discovered); `next(item, pipeline=None)` routes to first accepting pipeline
+  - External items: `Photo` (`FolderService.to_photo`) → `Item` (`photo` + `updated` flag + lazily-cached PIL `image`)
+  - `_run_scanners`: runs every scanner's `execute(item)`; last scanner `DatabaseScanner` merges/commits on `item.updated`
+  - `CreationPipeline`: `FileScanner`/`ExifScanner`/`ThumbnailScanner`/`DatabaseScanner`
+  - `BasicPipeline`: `ActivityScanner`/`LocationScanner`/`ObjectScanner`/`PerceptualHashScanner`/`DatabaseScanner`; gates routing on `any(scanner.accept(item))`
+  - **Defaults**: `DEFAULT_PIPELINES` in `PipelineService`; editor template (`PIPELINES_TEMPLATE`) assembled into API payloads by `add_pipelines_payload` (called from `api/configuration.py`); `ConfigurationService` is purely structural
+  - **Cold `_configure`**: materializes defaults into `pipelines` config node when absent/empty; persists to `config.yaml` and round-trips to frontend
+  - **Live reconfigure**: `POST /api/configuration` → `_reconfigure_live` (only when `STARTED`); matches pipelines to config by name; unchanged kept (params re-read), changed migrated (old worker stopped, items carried with `take_pending()`, new started), new added, missing removed; response includes `applied` summary via `get_last_reconfigure()`
+
+### Scanners
+
+- **Scanner contract** (`scanners/scanner.py`): non-virtual `configure/accept/execute` → overloadable `configure_/accept_/executePhoto`
+  - `configure`: reads `enabled`; `accept`: handles `ForceFlag` (`_forced` toggle), `enabled`, `_forced`, else `accept_`; `execute`: calls `accept` first (declined → `ScannerResult.SUCCESS`), stashes `self._item`, runs `executePhoto` (sync on `ThreadPoolService`), returns `SUCCESS`/`ERROR`, sets `item.updated` if photo changed
+  - `DatabaseScanner.accept` = `isinstance(item, Item) and item.updated`
+
+- **Scanner tracking**: `self.add_scanner(photo)` appends name to `photo.scanners` (JSON column, NULL-safe; read via `photo.scanners or []`); `ObjectScanner` runs YOLO (`yolo26n.pt`/`yolo26m.pt`), model in `general.models_folder`, stores `photo.objects` (`[{label, confidence, box}]`), gates on `"Object" not in photo.scanners`
+
+### Database & Storage
+
+- **DB models**: SQLModel classes in `trailframe/models/` (converter classmethods, e.g. `GarminActivity.to_activity`); tables auto-created at startup, no migrations
+
+- **Thumbnails** (`photos/thumbnail_service.py`): multi-size via `general.thumbnail_sizes` (default `[160, 400]`); files at `{safe_filename[:2]}/{safe_filename}_{file_size}_{size}.webp` (fallback `{safe_filename}_{size}.webp`); `generate_all` writes all; `exists` = all present; `select_size` picks lowest ≥ preferred when ≤ 2×preferred else highest below; `GET /api/photos/{id}/thumbnail?size=<p>`
+
+- **Favorites**: `Photo.is_favorite` (`_add_missing_columns`); `PUT /api/photos/{id}/favorite`, `GET /api/photos?favorites=true`, `GET /api/photos/favorites`
+
+- **Deletion** (`api/photos.py`): move source to `general.trash_folder` via `FolderService.delete()`, remove thumbnail, delete DB row
+
+### API Endpoints
+
+- **Maps/tiles**: `TileService` + `/api/tiles/{z}/{x}/{y}.png` proxy/cache (`general.tiles_folder`, TTL/size under `maps:`)
+
+- **Forced scans** (Tools page): `POST /api/pipeline/scan {"scanners": [...]}`, `GET /api/pipeline/scanners`; `forced_scan(names)`: `ForceFlag(names)` → re-push every `Photo` as `Item`s → `ForceFlag([])`; forced beats `accept_` but honors `enabled`
+
+- **Statistics** (`core/statistics_service.py`): `Scanner._record` times scans; `Pipeline._flush_stats` persists `ScannerStat` row per scanner via `record_run`; `GET /api/statistics/scanners` (items/s); `GET /api/statistics/storage` (DB + folder sizes); `FolderStat`/`StorageStats` are pydantic shapes in `api/statistics.py`, not DB tables; for tests: insert mock `ScannerStat` rows, don't run real scans
 
 ## Frontend (Vite + React 19 + TS)
-- Entries: `index.html` (`/?page=...&section=`), `slideshow.html` (`src/SlideshowApp.tsx`, `?section=&activity=`/`?photos=&name=&thumbs=`); params canonicalized in `src/lib/slideshowSections.ts`.
-- `node`/`npm`/`npx` on PATH (`/c/Program Files/nodejs`): lint = `npm run lint`, build = `npm run build`, dev = `npm run dev`.
-- `src/api/generated/schema.ts` generated by `openapi-typescript` — **do not hand-edit**; regenerate via `--openapi` (no server): from root `python -m trailframe.main --openapi ./openapi_local.json`, then from `frontend/` `npx openapi-typescript ../openapi_local.json -o src/api/generated/schema.ts`; delete the temp file.
-- API calls are relative same-origin; dev proxy `/api` → `http://localhost:8000` (backend must run for dev server).
+
+- **Entries**: `index.html` (`/?page=...&section=`), `slideshow.html` (`src/SlideshowApp.tsx`, `?section=&activity=`/`?photos=&name=&thumbs=`); params canonicalized in `src/lib/slideshowSections.ts`
+
+- **Commands**: `npm run lint`, `npm run build`, `npm run dev` (node/npm/npx on PATH at `/c/Program Files/nodejs`)
+
+- **Schema generation**: `src/api/generated/schema.ts` generated by `openapi-typescript` — never hand-edit; regenerate: from root `python -m trailframe.main --openapi ./openapi_local.json`, then from `frontend/` `npx openapi-typescript ../openapi_local.json -o src/api/generated/schema.ts`; delete temp file
+
+- **API calls**: relative same-origin; dev proxy `/api` → `http://localhost:8000` (backend must run)
 
 ## Verification
-- **Tests**: pytest + pytest-asyncio + httpx in `tests/`; run `python -m pytest` from repo root. Fixtures: `app` (TestClient, full lifespan; `.db(coro)` for inserts on the app's event-loop thread) and `db_session` (standalone configured `DatabaseService`). Coverage via `addopts`; gitignored `.coverage`/`coverage.xml`/`htmlcov/`.
-- **Allure 3**: `addopts = --alluredir=allure-results --clean-alluredir`; groups by class (`feature`)/method (`story`). GlCanvas CLI via npm. View: `allure generate ./allure-results` + `allure open ./allure-report` (or `allure generate ./allure-results --open`; `allure watch`). Results/report gitignored.
-- **CI** (`.github/workflows/publish.yml`, on `v*` tags): `Test` job runs ruff, pytest, frontend lint (deps from `requirements-dev.txt`, pip cached) → `Release` builds web UI + wheel, publishes to PyPI/GitHub → `Notify` dispatches `trailframe-release` to hassio-trailframe. Local verification: Test against `http://localhost:8000` — confirm the frontend is up first (else ask the user). **NEVER test Garmin Connect against the live service/login — always mock the `garminconnect` client** (pattern in `tests/test_garmin_connect_service.py`).
-- **Backend changes**: kill the port-8000 process (`netstat -ano | findstr :8000`, `taskkill -PID <pid> -F`), wait auto-restart.
-- **API changes**: regenerate instead of hitting the live server (see regenerate note in Frontend section).
-- **Frontend changes**: build from `frontend/`: `npm run build`.
+
+- **Tests**: pytest + pytest-asyncio + httpx in `tests/`; `python -m pytest` from root
+  - Fixtures: `app` (TestClient, full lifespan; `.db(coro)` for inserts on app's event-loop thread) and `db_session` (standalone configured `DatabaseService`)
+  - Coverage: via `addopts`; gitignored `.coverage`/`coverage.xml`/`htmlcov/`
+
+- **Allure 3**: `addopts = --alluredir=allure-results --clean-alluredir`; groups by class (`feature`)/method (`story`); `allure generate ./allure-results` + `allure open ./allure-report`; results/report gitignored
+
+- **CI** (`.github/workflows/publish.yml`, on `v*` tags): Test → Release → Notify; local verification: test against `http://localhost:8000` (confirm frontend is up first); **never** test Garmin Connect against live service — always mock `garminconnect` client (see `tests/test_garmin_connect_service.py`)
+
+### Change Types
+
+| Change | Action |
+|--------|--------|
+| Backend | Kill port-8000 (`netstat -ano \| findstr :8000`, `taskkill -PID <pid> -F`), wait auto-restart |
+| API | Regenerate schema (don't hit live server) |
+| Frontend | Build from `frontend/`: `npm run build` |

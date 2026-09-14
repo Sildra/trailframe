@@ -40,6 +40,7 @@ dependencies = [
     "garminconnect",
     "ultralytics",
     "opencv-python",
+    "httpx",
 ]
 
 [project.optional-dependencies]

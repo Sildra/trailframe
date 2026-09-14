@@ -5,6 +5,8 @@ from trailframe.services.scanners.scanner import Scanner
 
 
 class LocationScanner(Scanner):
+    _can_be_remote = True
+
     def __init__(self) -> None:
         super().__init__("Location")
 

@@ -13,16 +13,22 @@ _INVALID_FILENAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
 
 class ThumbnailService(Service):
+    _reconfig_safe = False
+    _requires = ("PhotoService",)
+
     _folder: Path | None = None
     _sizes: ClassVar[list[int]] = []
 
     @classmethod
     def _configure(cls, config: Node) -> None:
+        general_node = config.get_node("general", "General parameters")
         cls._folder = Path(
-            config.get_path_value("thumbnails_folder", "Folder where thumbnails are stored", "thumbnails")
+            general_node.get_path_value("thumbnails_folder", "Folder where thumbnails are stored", "thumbnails")
         )
         cls._folder.mkdir(parents=True, exist_ok=True)
-        sizes = config.get_path_value("thumbnail_sizes", "Thumbnail heights (px) generated for each photo", [160, 400])
+        sizes = general_node.get_path_value(
+            "thumbnail_sizes", "Thumbnail heights (px) generated for each photo", [160, 400]
+        )
         cls._sizes = sorted({int(size) for size in sizes})
 
     @classmethod

@@ -11,6 +11,8 @@ from trailframe.services.service import Service
 
 
 class GpxService(Service):
+    _requires = ("DatabaseService",)
+
     @classmethod
     async def save(cls, content: str, filename: str) -> GpxActivity | None:
         activity = GpxActivity.from_gpx(content, filename)

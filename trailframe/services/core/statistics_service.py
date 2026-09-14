@@ -11,18 +11,24 @@ from trailframe.services.service import Service
 
 
 class StatisticsService(Service):
+    _reconfig_safe = False
+    _requires = ("DatabaseService",)
+
     _folders: ClassVar[dict[str, Path]] = {}
 
     @classmethod
     def _configure(cls, config: Node) -> None:
+        general_node = config.get_node("general", "General parameters")
         cls._folders = {
-            "Photos": Path(config.get_path_value("photos_folder")),
-            "Thumbnails": Path(config.get_path_value("thumbnails_folder")),
-            "Maps": Path(config.get_path_value("maps_folder")),
-            "Activities": Path(config.get_path_value("activities_folder")),
-            "Models": Path(config.get_path_value("models_folder", default_value="models")),
-            "Tiles": Path(config.get_path_value("tiles_folder", "Folder where cached map tiles are stored", "tiles")),
-            "Trash": Path(config.get_path_value("trash_folder")),
+            "Photos": Path(general_node.get_path_value("photos_folder")),
+            "Thumbnails": Path(general_node.get_path_value("thumbnails_folder")),
+            "Maps": Path(general_node.get_path_value("maps_folder")),
+            "Activities": Path(general_node.get_path_value("activities_folder")),
+            "Models": Path(general_node.get_path_value("models_folder", default_value="models")),
+            "Tiles": Path(
+                general_node.get_path_value("tiles_folder", "Folder where cached map tiles are stored", "tiles")
+            ),
+            "Trash": Path(general_node.get_path_value("trash_folder")),
         }
 
     @classmethod

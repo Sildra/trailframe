@@ -345,6 +345,91 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/pipeline/remote-scan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Remote Scan */
+        post: operations["remote_scan_api_pipeline_remote_scan_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipeline/remote": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Remote Pipelines */
+        get: operations["list_remote_pipelines_api_pipeline_remote_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipeline/remote/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Remote Pipeline */
+        get: operations["get_remote_pipeline_api_pipeline_remote__name__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipeline/remote/{name}/push": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Push To Remote Pipeline */
+        post: operations["push_to_remote_pipeline_api_pipeline_remote__name__push_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipeline/remote/{name}/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Remote Pipeline Status */
+        get: operations["get_remote_pipeline_status_api_pipeline_remote__name__status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/map-data": {
         parameters: {
             query?: never;
@@ -740,6 +825,21 @@ export interface components {
             /** Overlay */
             overlay?: string | null;
         };
+        /** Body_push_to_remote_pipeline_api_pipeline_remote__name__push_post */
+        Body_push_to_remote_pipeline_api_pipeline_remote__name__push_post: {
+            /** File */
+            file: string;
+        };
+        /** Body_remote_scan_api_pipeline_remote_scan_post */
+        Body_remote_scan_api_pipeline_remote_scan_post: {
+            /** File */
+            file: string;
+            /**
+             * Scanners
+             * @default
+             */
+            scanners: string;
+        };
         /** Body_upload_gpx_api_activities_gpx_upload_post */
         Body_upload_gpx_api_activities_gpx_upload_post: {
             /** File */
@@ -1000,6 +1100,15 @@ export interface components {
              * @default []
              */
             photo_ids: number[];
+        };
+        /** RemotePipelineInfo */
+        RemotePipelineInfo: {
+            /** Name */
+            name: string;
+            /** Remote */
+            remote: string;
+            /** Scanners */
+            scanners: string[];
         };
         /** ScannerStatSummary */
         ScannerStatSummary: {
@@ -1599,6 +1708,162 @@ export interface operations {
                 "application/json": components["schemas"]["ForcedScanRequest"];
             };
         };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: string;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    remote_scan_api_pipeline_remote_scan_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_remote_scan_api_pipeline_remote_scan_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_remote_pipelines_api_pipeline_remote_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RemotePipelineInfo"][];
+                };
+            };
+        };
+    };
+    get_remote_pipeline_api_pipeline_remote__name__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RemotePipelineInfo"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    push_to_remote_pipeline_api_pipeline_remote__name__push_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_push_to_remote_pipeline_api_pipeline_remote__name__push_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: string;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_remote_pipeline_status_api_pipeline_remote__name__status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {

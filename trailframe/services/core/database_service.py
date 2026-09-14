@@ -49,6 +49,9 @@ class DatabaseService(Service):
       result (writes); exceptions are logged.
     """
 
+    _reconfig_safe = False
+    _requires = ("ThreadPoolService",)
+
     _database_path: ClassVar[Path] = Path("gallery.db")
     _engine: ClassVar[AsyncEngine | None] = None
     _thread: ClassVar[threading.Thread | None] = None
@@ -58,7 +61,8 @@ class DatabaseService(Service):
 
     @classmethod
     def _configure(cls, config: Node) -> None:
-        cls._database_path = Path(config.get_path_value("database", "SQLite database file", "gallery.db"))
+        general_node = config.get_node("general", "General parameters")
+        cls._database_path = Path(general_node.get_path_value("database", "SQLite database file", "gallery.db"))
 
     @classmethod
     async def _start(cls) -> None:

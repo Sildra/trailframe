@@ -190,6 +190,9 @@ def _estimate_location(photo_id: int, rows: list[tuple]) -> LocationEstimate | N
 
 
 class LocationService(Service):
+    _requires = ("DatabaseService", "ThreadPoolService")
+    _reconfig_safe = False
+
     _folder: Path | None = None
     _cache_folder: Path | None = None
 
@@ -218,7 +221,8 @@ class LocationService(Service):
 
     @classmethod
     def _configure(cls, config: Node) -> None:
-        cls._folder = Path(config.get_path_value("maps_folder", "Folder where location maps are stored", "maps"))
+        general_node = config.get_node("general", "General parameters")
+        cls._folder = Path(general_node.get_path_value("maps_folder", "Folder where location maps are stored", "maps"))
         cls._cache_folder = cls._folder / "_cache"
         cls._folder.mkdir(parents=True, exist_ok=True)
         cls._cache_folder.mkdir(parents=True, exist_ok=True)

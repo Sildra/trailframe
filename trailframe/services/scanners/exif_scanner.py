@@ -14,6 +14,8 @@ class ExifScanner(Scanner):
     Extract EXIF metadata and enrich a Photo object.
     """
 
+    _can_be_remote = True
+
     def __init__(self):
         super().__init__("EXIF")
 

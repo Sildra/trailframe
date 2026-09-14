@@ -9,7 +9,9 @@ from PIL import ExifTags, Image
 
 from trailframe.models.activity import Activity
 from trailframe.models.photo import Photo
+from trailframe.services.core.configuration_service import Node
 from trailframe.services.pipelines.item import Item
+from trailframe.services.pipelines.pipeline import Pipeline
 from trailframe.services.scanners.activity_scanner import ActivityScanner
 from trailframe.services.scanners.exif_scanner import ExifScanner
 from trailframe.services.scanners.file_scanner import FileScanner
@@ -91,6 +93,20 @@ class TestPerceptualHashScanner:
         assert item.phash_changed is True
         assert item.updated is True
 
+    @allure.title("Hashes an image after the item image was closed by a pipeline run")
+    @pytest.mark.asyncio
+    async def test_phash_after_pipeline_close(self, tmp_path):
+        source = _make_image(tmp_path / "hash-reuse.jpg")
+        item = Item(Photo(path=str(source)))
+        pipeline = Pipeline("Test", [])
+
+        await pipeline._process_item(item)
+
+        result = await PerceptualHashScanner().execute(item)
+
+        assert result.value == "success"
+        assert item.photo.phash is not None
+
 
 class TestObjectScanner:
     @allure.title("Stores YOLO detections and records the scanner")
@@ -128,6 +144,29 @@ class TestObjectScanner:
         assert item.photo.objects == [{"label": "person", "confidence": 0.95, "box": [1.0, 2.0, 3.0, 4.0]}]
         assert "Object" in (item.photo.scanners or [])
         assert item.updated is True
+
+    @allure.title("Invalidates the cached model when the configured model changes")
+    def test_reconfiguring_model_invalidates_cache(self):
+        config = Node("root")
+        config.get_node("scanners.Object.model").set_value("yolo26m.pt")
+
+        scanner = ObjectScanner()
+        scanner._model = object()
+
+        scanner.configure(config)
+
+        assert scanner._model is None
+        assert scanner._model_name == "yolo26m.pt"
+
+    @allure.title("Keeps the cached model when the configured model is unchanged")
+    def test_reconfiguring_same_model_keeps_cache(self):
+        scanner = ObjectScanner()
+        model = object()
+        scanner._model = model
+
+        scanner.configure(Node("root"))
+
+        assert scanner._model is model
 
 
 class TestActivityScanner:

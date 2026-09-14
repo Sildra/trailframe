@@ -119,13 +119,16 @@ class _DbSession:
 
 @pytest.fixture()
 async def db_session(tmp_path):
-    """Configure and start a standalone DatabaseService against a temp file."""
+    """Configure and start standalone ThreadPool + DatabaseService against a temp file."""
     from trailframe.services.core.configuration_service import Node
     from trailframe.services.core.database_service import DatabaseService
+    from trailframe.services.core.thread_pool_service import ThreadPoolService
 
-    config = Node("general")
-    config.get_node("database").set_value(":memory:")
+    config = Node("root")
+    config.get_node("general", "General parameters").get_node("database").set_value(":memory:")
 
+    ThreadPoolService.configure(config)
+    await ThreadPoolService.start()
     DatabaseService.configure(config)
     await DatabaseService.start()
 
@@ -134,3 +137,4 @@ async def db_session(tmp_path):
     # Drain any fire-and-forget writes before stopping so nothing is dropped.
     await DatabaseService.sync()
     await DatabaseService.stop()
+    await ThreadPoolService.stop()

@@ -123,9 +123,7 @@ async def get_photo_count() -> int:
 async def get_duplicates() -> list[PhotoGroupSummary]:
     clusters = await DuplicatesService.get_clusters()
 
-    return [
-        PhotoGroupSummary(name=f"Duplicate {ids[0]}", automatic=True, photo_ids=ids) for ids in clusters
-    ]
+    return [PhotoGroupSummary(name=f"Duplicate {ids[0]}", automatic=True, photo_ids=ids) for ids in clusters]
 
 
 @router.get("/location-issues", response_model=list[PhotoGroupSummary])

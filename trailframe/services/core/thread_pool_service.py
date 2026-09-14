@@ -17,13 +17,16 @@ class ThreadPoolService(Service):
     the process.
     """
 
+    _reconfig_safe = False
+
     _pool: ClassVar[ThreadPoolExecutor | None] = None
     _max_workers: ClassVar[int] = 2
 
     @classmethod
     def _configure(cls, config: Node) -> None:
+        general_node = config.get_node("general", "General parameters")
         cls._max_workers = int(
-            config.get_path_value("thread_pool_size", "Number of threads in the shared worker pool", 4)
+            general_node.get_path_value("thread_pool_size", "Number of threads in the shared worker pool", 4)
         )
 
     @classmethod

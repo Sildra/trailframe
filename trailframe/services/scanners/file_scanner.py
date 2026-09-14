@@ -7,9 +7,10 @@ from trailframe.services.scanners.scanner import Scanner
 
 
 class FileScanner(Scanner):
+    _can_be_disabled = False
+
     def __init__(self):
         super().__init__("File")
-        self._can_be_disabled = False
 
     def accept_(self, photo: Photo) -> bool:
         return True
