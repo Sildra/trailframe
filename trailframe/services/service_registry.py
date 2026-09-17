@@ -15,6 +15,7 @@ from trailframe.services.photos.folder_service import FolderService
 from trailframe.services.photos.photo_service import PhotoService
 from trailframe.services.photos.thumbnail_service import ThumbnailService
 from trailframe.services.pipelines.pipeline_service import PipelineService
+from trailframe.services.scanners import SCANNERS
 from trailframe.services.service import Service
 
 
@@ -49,6 +50,9 @@ class ServiceRegistry(Service):
 
     @classmethod
     def _configure(cls, config: Node) -> None:
+        for _, definition in sorted(SCANNERS.items()):
+            definition.cls().configure(config)
+
         for service in cls._services:
             service.configure(config)
 

@@ -6,6 +6,7 @@ from trailframe.services.scanners.scanner import Scanner
 
 class LocationScanner(Scanner):
     _can_be_remote = True
+    _definition = "Reverse-geocode photo coordinates into a place name and wireframe map"
 
     def __init__(self) -> None:
         super().__init__("Location")

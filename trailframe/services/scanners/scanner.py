@@ -23,6 +23,7 @@ class ForceFlag:
 class Scanner(ABC):
     _can_be_disabled: bool = True
     _can_be_remote: bool = False
+    _definition: str | None = None
 
     def __init__(self, name: str):
         self.name = name
@@ -37,6 +38,8 @@ class Scanner(ABC):
         get_logger().log(level, message)
 
     def configure(self, config: Node) -> None:
+        if self._definition:
+            config.get_node(f"scanners.{self.name}", self._definition)
         if self._can_be_disabled:
             self._enabled = config.get_path_value(f"scanners.{self.name}.enabled", f"Enable {self.name} scanner", True)
         if self._can_be_remote:

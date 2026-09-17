@@ -11,6 +11,8 @@ from trailframe.services.scanners.scanner import Scanner
 
 
 class ActivityScanner(Scanner):
+    _definition = "Match photos to nearby activities and use their GPS traces as positions"
+
     def __init__(self):
         super().__init__("Activity")
         self.use_activity_position = False

@@ -189,6 +189,21 @@ class TestPipelineApi:
         assert response.json()["status"].startswith("unknown scanners")
 
 
+class TestConfigurationApi:
+    @allure.title("Exposes scanner config nodes for every flag-bearing scanner")
+    def test_configuration_includes_scanner_nodes(self, app):
+        from trailframe.services.scanners.object_scanner import ObjectScanner
+
+        scanners = app.get("/api/configuration").json()["children"]["scanners"]["children"]
+
+        assert list(scanners) == ["Activity", "EXIF", "Location", "Object", "PerceptualHash", "Thumbnail"]
+        assert "File" not in scanners
+        assert "Database" not in scanners
+        assert scanners["Object"]["description"] == ObjectScanner._definition
+        assert scanners["Object"]["children"]["enabled"]["value"] is True
+        assert scanners["Object"]["children"]["enable_remote"]["value"] is False
+
+
 class TestAboutApi:
     @allure.title("Lists imported packages with name, version and license")
     def test_packages_returns_list(self, app):

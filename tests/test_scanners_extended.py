@@ -12,6 +12,7 @@ from trailframe.models.photo import Photo
 from trailframe.services.core.configuration_service import Node
 from trailframe.services.pipelines.item import Item
 from trailframe.services.pipelines.pipeline import Pipeline
+from trailframe.services.scanners import read_scanner_configs
 from trailframe.services.scanners.activity_scanner import ActivityScanner
 from trailframe.services.scanners.exif_scanner import ExifScanner
 from trailframe.services.scanners.file_scanner import FileScanner
@@ -31,6 +32,43 @@ def _make_image(path, exif_date=None):
         image.save(path)
 
     return path
+
+
+class TestScannerConfigPreRead:
+    @allure.title("Materializes a scanners node for every flag-bearing scanner, alphabetically")
+    def test_materializes_flag_bearing_scanners(self):
+        config = Node("root")
+        read_scanner_configs(config)
+
+        scanners = config.get_node("scanners").children
+        assert list(scanners) == ["Activity", "EXIF", "Location", "Object", "PerceptualHash", "Thumbnail"]
+
+    @allure.title("Skips internal scanners without configurable flags")
+    def test_skips_flagless_scanners(self):
+        config = Node("root")
+        read_scanner_configs(config)
+
+        assert not {"File", "Database"} & set(config.get_node("scanners").children)
+
+    @allure.title("Reads enabled and enable_remote flags with their defaults")
+    def test_reads_flags_with_defaults(self):
+        config = Node("root")
+        read_scanner_configs(config)
+
+        assert config.get_path_value("scanners.Object.enabled") is True
+        assert config.get_path_value("scanners.Object.enable_remote") is False
+        assert config.get_path_value("scanners.Thumbnail.enabled") is True
+        assert "enable_remote" not in config.get_node("scanners.Thumbnail").children
+        assert "use_activity_position" in config.get_node("scanners.Activity").children
+
+    @allure.title("Tags each scanner node with its definition")
+    def test_sets_node_definitions(self):
+        config = Node("root")
+        read_scanner_configs(config)
+
+        assert config.get_node("scanners.Object").description == ObjectScanner._definition
+        assert config.get_node("scanners.Activity").description == ActivityScanner._definition
+        assert config.get_node("scanners.EXIF").description is not None
 
 
 class TestFileScanner:

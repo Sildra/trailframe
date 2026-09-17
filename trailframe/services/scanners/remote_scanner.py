@@ -8,7 +8,7 @@ from trailframe.models.photo import Photo
 from trailframe.services.core.thread_pool_service import ThreadPoolService
 from trailframe.services.photos.photo_service import PhotoService
 from trailframe.services.pipelines.item import Item
-from trailframe.services.scanners import remote_enabled
+from trailframe.services.scanners import can_run_remotely
 from trailframe.services.scanners.scanner import ForceFlag, Scanner
 
 
@@ -27,9 +27,7 @@ class RemoteScanner(Scanner):
     def __init__(self, remote: str = "", scanner_names: list[str] | None = None):
         super().__init__("Remote")
         self._remote = self._normalize(remote)
-        self._scanner_names = [
-            name for name in (scanner_names or []) if name not in ("File", "Database") and remote_enabled(name)
-        ]
+        self._scanner_names = [name for name in (scanner_names or []) if can_run_remotely(name)]
         self._forced_names: list[str] = []
 
     @staticmethod

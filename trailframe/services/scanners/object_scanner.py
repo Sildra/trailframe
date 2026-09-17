@@ -17,6 +17,7 @@ YOLO_MODELS = {
 
 class ObjectScanner(Scanner):
     _can_be_remote = True
+    _definition = "Detect objects in photos using a YOLO model"
 
     def __init__(self) -> None:
         super().__init__("Object")

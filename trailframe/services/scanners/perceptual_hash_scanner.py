@@ -7,6 +7,7 @@ from trailframe.services.scanners.scanner import Scanner
 
 class PerceptualHashScanner(Scanner):
     _can_be_remote = True
+    _definition = "Compute a perceptual hash to detect duplicate photos"
 
     def __init__(self) -> None:
         super().__init__("PerceptualHash")

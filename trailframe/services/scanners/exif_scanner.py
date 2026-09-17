@@ -15,6 +15,7 @@ class ExifScanner(Scanner):
     """
 
     _can_be_remote = True
+    _definition = "Extract EXIF metadata such as capture date, camera settings and GPS coordinates"
 
     def __init__(self):
         super().__init__("EXIF")

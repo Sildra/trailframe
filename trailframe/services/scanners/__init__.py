@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 
+from trailframe.services.core.configuration_service import Node
 from trailframe.services.scanners.activity_scanner import ActivityScanner
 from trailframe.services.scanners.database_scanner import DatabaseScanner
 from trailframe.services.scanners.exif_scanner import ExifScanner
@@ -45,17 +46,46 @@ def get_scanner_definition(name: str) -> ScannerDefinition | None:
     return SCANNERS.get(name)
 
 
+def read_scanner_configs(config: Node) -> None:
+    """Materialize the `scanners` configuration subtree from every registered scanner.
+
+    Creates a `scanners.<Name>` node for each flag-bearing scanner (one that can be
+    disabled or run remotely), in registration order, tagging it with the scanner
+    definition and populating its enabled/remote flags and per-scanner options with
+    their defaults so the config surface is visible before pipelines are read.
+    """
+    for definition in SCANNER_DEFINITIONS:
+        if not definition.can_be_disabled and not definition.can_be_remote:
+            continue
+
+        definition.cls().configure(config)
+
+
 def create_scanner(name: str) -> Scanner | None:
     definition = SCANNERS.get(name)
 
     return definition.cls() if definition is not None else None
 
 
+def can_run_remotely(name: str) -> bool:
+    """Whether a scanner type is code-capable of remote execution.
+
+    A static capability shared by every instance; it does not consult any
+    configuration. The per-instance opt-in (`scanners.<Name>.enable_remote`)
+    is enforced only by the server that actually executes the scanner
+    (see `remote_enabled`), never by a host that merely delegates to it.
+    """
+    definition = SCANNERS.get(name)
+
+    return definition is not None and definition.can_be_remote
+
+
 def remote_enabled(name: str) -> bool:
-    """Whether a scanable scanner may be executed by a remote pipeline.
+    """Whether a scanable scanner may be executed on this server via remote-scan.
 
     Gates remote-capable scanners behind `scanners.<Name>.enable_remote`
-    (default off); local execution is unaffected.
+    (default off) on the *remote* instance that runs the scanner; checked by
+    the remote-scan endpoint only, never by a delegating host.
     """
     from trailframe.services.core.configuration_service import ConfigurationService
 

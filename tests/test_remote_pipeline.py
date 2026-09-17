@@ -197,6 +197,12 @@ class TestRemoteScanner:
 
         assert scanner._scanner_names == ["Object"]
 
+    @allure.title("Keeps delegated scanners even when remote execution is not enabled on the local instance")
+    def test_keeps_scanners_without_local_enable_remote(self):
+        scanner = RemoteScanner("localhost:8000", ["Object", "EXIF", "Thumbnail"])
+
+        assert scanner._scanner_names == ["Object", "EXIF"]
+
     @allure.title("Normalizes remote targets to URLs")
     def test_normalize_remote(self):
         assert RemoteScanner("localhost:8000", [])._remote == "http://localhost:8000"

@@ -5,6 +5,8 @@ from trailframe.services.scanners.scanner import Scanner
 
 
 class ThumbnailScanner(Scanner):
+    _definition = "Generate thumbnails for the gallery"
+
     def __init__(self):
         super().__init__("Thumbnail")
 
