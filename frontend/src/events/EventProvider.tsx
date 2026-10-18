@@ -46,6 +46,10 @@ export function EventProvider({ children }: { children: ReactNode }) {
         [],
     );
 
+    const removeCategory = useCallback((category: string) => {
+        setCategories((previous) => previous.filter((item) => item.category !== category));
+    }, []);
+
     const pushText = useCallback(
         (message: string, level: "info" | "error" = "info") => {
             setTexts((previous) => {
@@ -79,6 +83,13 @@ export function EventProvider({ children }: { children: ReactNode }) {
                     continue;
                 }
 
+                // An empty message means the category no longer applies
+                // (e.g. a boundary download finished): drop it from the bar.
+                if (!value) {
+                    removeCategory(key);
+                    continue;
+                }
+
                 setCategory(key, {
                     message: value,
                     status: categoryStatus(value),
@@ -88,7 +99,7 @@ export function EventProvider({ children }: { children: ReactNode }) {
         });
 
         return () => source.close();
-    }, [setCategory, pushText]);
+    }, [setCategory, pushText, removeCategory]);
 
     return (
         <EventContext.Provider value={{ categories, setCategory, texts, pushText }}>

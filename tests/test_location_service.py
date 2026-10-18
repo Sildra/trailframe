@@ -26,6 +26,7 @@ def clean_location_state(tmp_path, monkeypatch):
     LocationService._adm0 = None
     LocationService._adm1 = OrderedDict()
     LocationService._adm2 = OrderedDict()
+    LocationService._download = None
 
     monkeypatch.setattr(LocationService, "_fetch_json", staticmethod(lambda url: pytest.fail(f"network call: {url}")))
 
@@ -36,6 +37,7 @@ def clean_location_state(tmp_path, monkeypatch):
     LocationService._adm0 = None
     LocationService._adm1 = OrderedDict()
     LocationService._adm2 = OrderedDict()
+    LocationService._download = None
 
 
 def _square(lon: float, lat: float, size: float = 1.0) -> Polygon:
@@ -387,3 +389,97 @@ class TestWireframe:
     def test_returns_none_without_folder(self):
         LocationService._folder = None
         assert LocationService.create_wireframe(1, [], ("x", "x", "x"), ["A"]) is None
+
+
+@allure.feature("Location download progress")
+class TestDownloadProgress:
+    def test_adm0_reports_per_country_progress(self, monkeypatch):
+        seen: list[dict] = []
+
+        def fake_fetch(url):
+            progress = LocationService.get_download_progress()
+
+            if progress is not None:
+                seen.append(progress)
+
+            if url.endswith("/ALL/ADM0"):
+                return [
+                    {"simplifiedGeometryGeoJSON": f"https://example.test/{i}.json", "boundaryName": f"Country{i}"}
+                    for i in range(4)
+                ]
+
+            index = int(url.rsplit("/", 1)[1].split(".")[0])
+
+            if index == 2:
+                return None  # one failed download
+
+            return {
+                "features": [
+                    {
+                        "type": "Feature",
+                        "geometry": mapping(_square(index * 2, 0)),
+                        "properties": {"shapeISO": f"C{index}"},
+                    }
+                ]
+            }
+
+        monkeypatch.setattr(LocationService, "_fetch_json", staticmethod(fake_fetch))
+
+        index = LocationService._get_adm0()
+
+        assert len(index.entries) == 3
+        assert LocationService.get_download_progress() is None
+        # The metadata fetch happens before any progress is set; each country
+        # fetch observes its own (position, failures so far, total).
+        assert [(p["current"], p["failed"], p["total"]) for p in seen] == [(1, 0, 4), (2, 0, 4), (3, 0, 4), (4, 1, 4)]
+
+    def test_adm_single_level_progress_and_clear(self, monkeypatch):
+        seen: list[dict | None] = []
+
+        def fake_fetch(url):
+            seen.append(LocationService.get_download_progress())
+
+            if url.endswith("/ADM1"):
+                return {"simplifiedGeometryGeoJSON": "https://example.test/geo.json"}
+
+            return {
+                "features": [
+                    {
+                        "type": "Feature",
+                        "geometry": mapping(_square(0, 0)),
+                        "properties": {"shapeName": "Region", "shapeISO": "XX-01"},
+                    }
+                ]
+            }
+
+        monkeypatch.setattr(LocationService, "_fetch_json", staticmethod(fake_fetch))
+
+        index = LocationService._load_adm("XX", 1)
+
+        assert len(index.entries) == 1
+        assert seen == [{"current": 0, "failed": 0, "total": 1}, {"current": 1, "failed": 0, "total": 1}]
+        assert LocationService.get_download_progress() is None
+
+    def test_progress_cleared_on_failure(self, monkeypatch):
+        def fake_fetch(url):
+            if url.endswith("/ALL/ADM0"):
+                return [{"simplifiedGeometryGeoJSON": "https://example.test/0.json", "boundaryName": "X"}]
+
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr(LocationService, "_fetch_json", staticmethod(fake_fetch))
+
+        with pytest.raises(RuntimeError):
+            LocationService._load_adm0()
+
+        assert LocationService.get_download_progress() is None
+
+    def test_cache_hit_reports_no_progress(self):
+        LocationService._write_entries(
+            LocationService._cache_folder / "xx_adm1.jsonl", [(_square(0, 0), "Region", "XX-01")]
+        )
+
+        index = LocationService._load_adm("XX", 1)
+
+        assert len(index.entries) == 1
+        assert LocationService.get_download_progress() is None

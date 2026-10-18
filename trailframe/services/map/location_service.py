@@ -218,6 +218,10 @@ class LocationService(Service):
     _adm2: ClassVar[OrderedDict[str, _GeoIndex]] = OrderedDict()
     _lock = threading.Lock()
 
+    # Written by the scanner worker during boundary downloads, polled by the
+    # events stream (whole-dict assignment, atomic under the GIL).
+    _download: ClassVar[dict[str, int] | None] = None
+
     _ADM_CACHE_SIZE = 16
 
     _VIEW = 512
@@ -482,6 +486,12 @@ class LocationService(Service):
         return safe or "location"
 
     @classmethod
+    def get_download_progress(cls) -> dict[str, int] | None:
+        """Progress of the in-flight boundaries download (current/failed/total),
+        polled by the events stream; None while idle."""
+        return cls._download
+
+    @classmethod
     def _timed_load(cls, label: str, loader):
         """Run a cache read or download, logging duration and peak memory at
         DEBUG. tracemalloc only traces the Python-side JSON churn (shapely's
@@ -550,39 +560,47 @@ class LocationService(Service):
         # immediately, so only a single raw structure is alive instead of all
         # ~250 at once (the original list(executor.map(...)) peak).
         entries: list[tuple] = []
+        total = len(metadata)
+        failed = 0
 
-        for boundary in metadata:
-            url = boundary.get("simplifiedGeometryGeoJSON")
+        try:
+            for index, boundary in enumerate(metadata, start=1):
+                cls._download = {"current": index, "failed": failed, "total": total}
+                url = boundary.get("simplifiedGeometryGeoJSON")
 
-            if not url:
-                continue
-
-            geojson = cls._fetch_json(url)
-
-            if not geojson:
-                continue
-
-            for feature in geojson.get("features", []):
-                raw = feature.get("geometry")
-
-                if not raw:
+                if not url:
+                    failed += 1
                     continue
 
-                geometry = shape(raw)
+                geojson = cls._fetch_json(url)
 
-                if geometry.is_empty:
+                if not geojson:
+                    failed += 1
                     continue
 
-                properties = feature.get("properties") or {}
-                entries.append(
-                    (
-                        geometry,
-                        boundary.get("boundaryName") or properties.get("shapeName"),
-                        properties.get("shapeISO") or boundary.get("boundaryISO"),
+                for feature in geojson.get("features", []):
+                    raw = feature.get("geometry")
+
+                    if not raw:
+                        continue
+
+                    geometry = shape(raw)
+
+                    if geometry.is_empty:
+                        continue
+
+                    properties = feature.get("properties") or {}
+                    entries.append(
+                        (
+                            geometry,
+                            boundary.get("boundaryName") or properties.get("shapeName"),
+                            properties.get("shapeISO") or boundary.get("boundaryISO"),
+                        )
                     )
-                )
 
-            del geojson
+                del geojson
+        finally:
+            cls._download = None
 
         cls._write_entries(cache_file, entries)
 
@@ -625,23 +643,29 @@ class LocationService(Service):
             if cached is not None:
                 return _GeoIndex(cached)
 
+        cls._download = {"current": 0, "failed": 0, "total": 1}
+
         try:
-            metadata = cls._fetch_json(f"{cls._GEOBOUNDARIES_API}/{iso}/ADM{level}")
-        except (requests.HTTPError, ValueError):
-            return _GeoIndex([])
+            try:
+                metadata = cls._fetch_json(f"{cls._GEOBOUNDARIES_API}/{iso}/ADM{level}")
+            except (requests.HTTPError, ValueError):
+                return _GeoIndex([])
 
-        if not metadata or "simplifiedGeometryGeoJSON" not in metadata:
-            return _GeoIndex([])
+            if not metadata or "simplifiedGeometryGeoJSON" not in metadata:
+                return _GeoIndex([])
 
-        geojson = cls._fetch_json(metadata["simplifiedGeometryGeoJSON"])
+            cls._download = {"current": 1, "failed": 0, "total": 1}
+            geojson = cls._fetch_json(metadata["simplifiedGeometryGeoJSON"])
 
-        if not geojson:
-            return _GeoIndex([])
+            if not geojson:
+                return _GeoIndex([])
 
-        entries = cls._parse_geojson(geojson)
-        cls._write_entries(cache_file, entries)
+            entries = cls._parse_geojson(geojson)
+            cls._write_entries(cache_file, entries)
 
-        return _GeoIndex(entries)
+            return _GeoIndex(entries)
+        finally:
+            cls._download = None
 
     @classmethod
     def _fetch_json(cls, url: str):
