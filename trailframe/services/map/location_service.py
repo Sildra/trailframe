@@ -29,7 +29,9 @@ _ESTIMATE_WINDOW = timedelta(days=1)
 _MIN_INTERPOLATION_GAP = timedelta(minutes=1)
 _MAX_INTERPOLATION_GAP = timedelta(hours=1)
 _MAX_SPEED_KMH = 5.0
-_MIN_RADIUS_M = 5_000.0
+_ESTIMATE_SPEED_KMH = 5.0  # walking pace bounding how far a photo without GPS can be
+_ESTIMATE_SLACK = 1.25  # tolerated deviation from the speed implied by the neighbors
+_MIN_RADIUS_M = 100.0  # below this a circle on the map is meaningless noise
 _MAX_RADIUS_M = 250_000.0
 
 
@@ -147,8 +149,35 @@ def _compute_groups(rows: list[tuple]) -> list[PhotoGroupSummary]:
     return groups
 
 
+def _lens_radius(distance_m: float, reach_prev_m: float, reach_next_m: float, fraction: float) -> float:
+    """Radius around the interpolated point covering every spot the photo could
+    have been taken from: within reach of both geotagged neighbors, the origin
+    lies in the intersection (lens) of the two reachable disks."""
+    if distance_m < 1.0:
+        return min(reach_prev_m, reach_next_m)
+
+    # The origin is always within reach of the nearer neighbor, so the answer
+    # can never exceed that disk. When the two disks fail to overlap (a fast
+    # implied speed inflating one gap while the other stays short) there is no
+    # real lens — fall back to that nearer reach rather than the degenerate
+    # lens below, which would report a radius larger than either disk.
+    nearest_m = reach_prev_m + fraction * distance_m
+    nearest_m = min(nearest_m, reach_next_m + (1.0 - fraction) * distance_m)
+
+    if reach_prev_m + reach_next_m < distance_m:
+        return nearest_m
+
+    offset = (reach_prev_m**2 - reach_next_m**2 + distance_m**2) / (2 * distance_m)
+    height = math.sqrt(max(reach_prev_m**2 - offset**2, 0.0))
+
+    return min(math.sqrt((offset - fraction * distance_m) ** 2 + height**2), nearest_m)
+
+
 def _estimate_location(photo_id: int, rows: list[tuple]) -> LocationEstimate | None:
-    """Estimated area for a photo without GPS whose country was guessed."""
+    """Estimated area for a photo without GPS whose country was guessed.
+    Bounded by walking speed: within walking reach of both neighbors, the
+    origin sits in the lens between their reachable disks — smaller than the
+    full walking distance when the neighbors are close together."""
     target = next((row for row in rows if row[0] == photo_id), None)
 
     if target is None:
@@ -191,17 +220,24 @@ def _estimate_location(photo_id: int, rows: list[tuple]) -> LocationEstimate | N
         fraction = (photo_date - prev[0]).total_seconds() / span_s
         center_lat = prev[1] + fraction * (nxt[1] - prev[1])
         center_lon = prev[2] + fraction * (nxt[2] - prev[2])
-        radius_m = max(_MIN_RADIUS_M, LocationService.haversine(prev[1], prev[2], nxt[1], nxt[2]) / 2)
+        distance_m = LocationService.haversine(prev[1], prev[2], nxt[1], nxt[2])
+        implied_kmh = distance_m / span_s * 3600 / 1000
+        speed_kmh = max(_ESTIMATE_SPEED_KMH, _ESTIMATE_SLACK * implied_kmh)
+        reach_prev_m = speed_kmh * (photo_date - prev[0]).total_seconds() / 3600 * 1000
+        reach_next_m = speed_kmh * (nxt[0] - photo_date).total_seconds() / 3600 * 1000
+        radius_m = _lens_radius(distance_m, reach_prev_m, reach_next_m, fraction)
     elif prev is not None:
         center_lat, center_lon = prev[1], prev[2]
         gap_hours = (photo_date - prev[0]).total_seconds() / 3600.0
-        radius_m = max(_MIN_RADIUS_M, min(_MAX_RADIUS_M, gap_hours * 10_000.0))
+        radius_m = gap_hours * _ESTIMATE_SPEED_KMH * 1000
     elif nxt is not None:
         center_lat, center_lon = nxt[1], nxt[2]
         gap_hours = (nxt[0] - photo_date).total_seconds() / 3600.0
-        radius_m = max(_MIN_RADIUS_M, min(_MAX_RADIUS_M, gap_hours * 10_000.0))
+        radius_m = gap_hours * _ESTIMATE_SPEED_KMH * 1000
     else:
         return None
+
+    radius_m = min(_MAX_RADIUS_M, max(_MIN_RADIUS_M, radius_m))
 
     return LocationEstimate(lat=center_lat, lon=center_lon, radius_m=round(radius_m))
 

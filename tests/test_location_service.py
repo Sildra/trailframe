@@ -5,13 +5,14 @@ import json
 import math
 import tracemalloc
 from collections import OrderedDict
+from datetime import datetime
 
 import allure
 import pytest
 from shapely import to_wkb
 from shapely.geometry import MultiPolygon, Point, Polygon, mapping
 
-from trailframe.services.map.location_service import LocationService, _GeoIndex
+from trailframe.services.map.location_service import LocationService, _estimate_location, _GeoIndex
 
 
 @pytest.fixture(autouse=True)
@@ -483,3 +484,81 @@ class TestDownloadProgress:
 
         assert len(index.entries) == 1
         assert LocationService.get_download_progress() is None
+
+
+@allure.feature("Location estimate")
+class TestLocationEstimate:
+    def test_radius_between_neighbors_uses_walking_speed(self):
+        # 15 min on each side: reachable disks are 1.25 km at 5 km/h; the
+        # lens between them (neighbors ~1.11 km apart) is narrower still.
+        prev = (1, datetime(2023, 1, 1, 15, 30), "France", 48.0, 2.0)
+        target = (2, datetime(2023, 1, 1, 15, 45), None, None, None)
+        nxt = (3, datetime(2023, 1, 1, 16, 0), "France", 48.010, 2.0)
+
+        estimate = _estimate_location(2, [prev, target, nxt])
+
+        assert estimate is not None
+        assert 1000 < estimate.radius_m < 1250
+        assert estimate.lat == pytest.approx(48.005, abs=0.001)
+        assert estimate.lon == pytest.approx(2.0, abs=0.001)
+
+    def test_radius_falls_back_to_implied_speed_with_slack(self):
+        # 100 km in 30 min implies driving; the lens widens with 25% slack
+        # instead of pretending the walkers stayed within walking pace.
+        prev = (1, datetime(2023, 1, 1, 10, 0), "France", 48.0, 2.0)
+        target = (2, datetime(2023, 1, 1, 10, 15), None, None, None)
+        nxt = (3, datetime(2023, 1, 1, 10, 30), "France", 48.9, 2.0)
+
+        estimate = _estimate_location(2, [prev, target, nxt])
+
+        assert estimate is not None
+        assert 30_000 < estimate.radius_m < 70_000
+
+    def test_single_neighbor_radius_is_walking_distance(self):
+        prev = (1, datetime(2023, 1, 1, 15, 30), "France", 48.0, 2.0)
+        target = (2, datetime(2023, 1, 1, 15, 45), None, None, None)
+
+        estimate = _estimate_location(2, [prev, target])
+
+        assert estimate is not None
+        assert estimate.radius_m == pytest.approx(1250, rel=0.01)
+
+    def test_disjoint_disks_cannot_report_a_wider_radius(self):
+        # Real case: neighbors at 13:30:51 and 13:53 around a 13:34 target. The
+        # implied speed (10.7 km/h x slack) inflates the far disk past the gap,
+        # so the two reachable disks do not overlap. The old lens math then
+        # clamped height to 0 and returned ~6 km — wider than either disk and
+        # larger than the origin's actual reach from the near neighbor.
+        prev = (1, datetime(2016, 8, 6, 13, 30, 51), "Czechia", 50.08938325, 14.39892658)
+        target = (2, datetime(2016, 8, 6, 13, 34, 53), None, None, None)
+
+        for nxt in (
+            (3, datetime(2016, 8, 6, 13, 53, 1), None, None, None),
+            (3, datetime(2016, 8, 6, 14, 10, 6), "Czechia", 50.09056203, 14.40828906),
+        ):
+            estimate = _estimate_location(2, [prev, target, nxt])
+
+            # Reach from the near (prev) neighbor: 3m53s at the implied 13.4 km/h.
+            assert estimate is not None
+            assert 100 < estimate.radius_m < 1000
+
+    def test_overlapping_disks_still_narrower_than_reach(self):
+        prev = (1, datetime(2016, 8, 6, 13, 30, 51), "Czechia", 50.08938325, 14.39892658)
+        target = (2, datetime(2016, 8, 6, 13, 34, 53), None, None, None)
+        nxt = (3, datetime(2016, 8, 6, 13, 35, 30), None, None, None)
+
+        estimate = _estimate_location(2, [prev, target, nxt])
+
+        # A 37s-old neighbor at implied 13.4 km/h reaches ~140 m; the lens
+        # between the two is narrower than that single-neighbor reach would be.
+        assert estimate is not None
+        assert estimate.radius_m < 400
+
+    def test_radius_never_below_floor(self):
+        prev = (1, datetime(2023, 1, 1, 15, 44, 59), "France", 48.0, 2.0)
+        target = (2, datetime(2023, 1, 1, 15, 45), None, None, None)
+
+        estimate = _estimate_location(2, [prev, target])
+
+        assert estimate is not None
+        assert estimate.radius_m == 100

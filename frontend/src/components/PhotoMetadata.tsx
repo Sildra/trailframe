@@ -113,7 +113,8 @@ export default function PhotoMetadata({ photoId, favorite = false, onToggleFavor
         dataEntries.push(["Country", photo.country]);
     }
     if (photo.location_estimate) {
-        dataEntries.push(["Estimated radius", `${Math.round(photo.location_estimate.radius_m / 1000)} km`]);
+        const radius = photo.location_estimate.radius_m;
+        dataEntries.push(["Estimated radius", radius < 1000 ? `${Math.round(radius)} m` : `${Math.round(radius / 1000)} km`]);
     }
     const scanners = (photo.scanners ?? []).filter((scanner) => scanner !== "");
     if (scanners.length > 0) {
