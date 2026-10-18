@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """Launch the gallery backend and restart it whenever it exits.
 
 - Ctrl+C (SIGINT) stops the launcher and the backend.
@@ -46,11 +47,14 @@ def main() -> int:
         except (ValueError, OSError, AttributeError):
             pass
 
+    args = sys.argv[1:]
     print(f"[launcher] backend dir: {BACKEND_DIR}", flush=True)
+    if args:
+        print(f"[launcher] forwarding args: {' '.join(args)}", flush=True)
 
     while not stop:
         print("[launcher] starting backend...", flush=True)
-        backend = subprocess.Popen([sys.executable, "-m", "trailframe.main", *sys.argv[1:]], cwd=BACKEND_DIR)
+        backend = subprocess.Popen([sys.executable, "-m", "trailframe.main", *args], cwd=BACKEND_DIR)
 
         try:
             status = backend.wait()

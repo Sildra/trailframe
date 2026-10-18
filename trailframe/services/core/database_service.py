@@ -6,8 +6,9 @@ from concurrent.futures import Future
 from pathlib import Path
 from typing import Any, ClassVar
 
-from sqlalchemy import JSON, event, inspect, text
+from sqlalchemy import JSON, MetaData, event, inspect, text
 from sqlalchemy.dialects import sqlite
+from sqlalchemy.exc import NoSuchTableError
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -15,7 +16,7 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
     create_async_engine,
 )
-from sqlalchemy.schema import CreateColumn
+from sqlalchemy.schema import CreateColumn, CreateTable
 from sqlalchemy.types import Boolean, DateTime, Float, Integer, Numeric
 from sqlmodel import SQLModel
 
@@ -90,6 +91,7 @@ class DatabaseService(Service):
         async with cls._engine.begin() as connection:
             await connection.run_sync(SQLModel.metadata.create_all)
             await connection.run_sync(cls._add_missing_columns)
+            await connection.run_sync(cls._repair_primary_keys)
             await connection.run_sync(cls._sync_indexes)
 
         await cls._worker()
@@ -208,6 +210,103 @@ class DatabaseService(Service):
 
                 connection.execute(text(f"ALTER TABLE {table.name} ADD COLUMN {ddl}"))
                 cls._log(f"added column {table.name}.{column.name}")
+
+    @classmethod
+    def _backup(cls, connection) -> None:
+        path = str(cls._database_path)
+
+        if ":memory:" in path or not cls._database_path.parent.exists():
+            return
+
+        backup = cls._free_backup_path(path)
+        backup.unlink(missing_ok=True)
+
+        try:
+            connection.exec_driver_sql("VACUUM INTO ?", (str(backup),))
+        except Exception as exception:  # noqa: BLE001
+            cls._log(f"could not back up the database before rebuilding a table: {exception}")
+            return
+
+        cls._log(f"database backup written to {backup}")
+
+    @staticmethod
+    def _free_backup_path(path: str) -> Path:
+        backup = Path(f"{path}.bak")
+        index = 1
+
+        while backup.exists():
+            backup = Path(f"{path}.{index}.bak")
+            index += 1
+
+        return backup
+
+    @classmethod
+    def _rebuild_table(cls, connection, table, primary_key: list[str]) -> None:
+        source = table.name
+        target = f"{source}__rebuild"
+
+        cls._backup(connection)
+
+        inspector = inspect(connection)
+        available = {info["name"] for info in inspector.get_columns(source)}
+        columns = [column.name for column in table.columns if column.name in available]
+        keys = ", ".join(f'"{name}"' for name in columns)
+        values = ", ".join(f'"{name}"' for name in columns if name not in primary_key)
+
+        connection.exec_driver_sql(f'DROP TABLE IF EXISTS "{target}"')
+        connection.exec_driver_sql(
+            str(CreateTable(table.to_metadata(MetaData(), name=target)).compile(dialect=sqlite.dialect()))
+        )
+        connection.exec_driver_sql(
+            f'INSERT INTO "{target}" ({keys}) SELECT {keys} FROM "{source}" WHERE "{primary_key[0]}" IS NOT NULL'
+        )
+
+        if values:
+            connection.exec_driver_sql(
+                f'INSERT INTO "{target}" ({values}) SELECT {values} FROM "{source}" WHERE "{primary_key[0]}" IS NULL'
+            )
+
+        connection.exec_driver_sql(f'DROP TABLE "{source}"')
+        connection.exec_driver_sql(f'ALTER TABLE "{target}" RENAME TO "{source}"')
+
+        cls._log(f"rebuilt table {source} with primary key ({', '.join(primary_key)})")
+
+    @classmethod
+    def _repair_primary_keys(cls, connection) -> None:
+        """Rebuild tables stored without the primary key their model declares.
+
+        Databases created before a model declared a primary key keep the `NULL`
+        id given on insert (SQLite only fills one in for an actual primary key),
+        which leaves rows without identity: the scanner then merges them as new
+        photos (`UNIQUE constraint failed: photo.path`) and every endpoint
+        returning ids fails to validate. Rebuilding copies the rows over,
+        re-keying the ones without an id.
+        """
+        inspector = inspect(connection)
+        tables = set(inspector.get_table_names())
+
+        for table in SQLModel.metadata.sorted_tables:
+            if table.name not in tables:
+                continue
+
+            primary_key = [column.name for column in table.primary_key.columns]
+
+            if not primary_key or set(primary_key) == set(cls._database_primary_keys(inspector, table.name)):
+                continue
+
+            cls._rebuild_table(connection, table, primary_key)
+
+            inspector = inspect(connection)
+            tables = set(inspector.get_table_names())
+
+    @staticmethod
+    def _database_primary_keys(inspector, name: str) -> list[str]:
+        try:
+            constraint = inspector.get_pk_constraint(name) or {}
+        except NoSuchTableError:
+            return []
+
+        return list(constraint.get("constrained_columns") or [])
 
     @classmethod
     def _sync_indexes(cls, connection) -> None:

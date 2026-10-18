@@ -1,14 +1,20 @@
+import base64
 import bisect
 import json
 import logging
 import math
 import re
 import threading
+import time
+import tracemalloc
+from collections import OrderedDict
 from datetime import timedelta
 from pathlib import Path
 from typing import ClassVar
 
 import requests
+from shapely import STRtree, from_wkb, to_wkb
+from shapely.errors import GEOSException
 from shapely.geometry import MultiPolygon, Point, Polygon, shape
 
 from trailframe.models.group import PhotoGroupSummary
@@ -25,6 +31,17 @@ _MAX_INTERPOLATION_GAP = timedelta(hours=1)
 _MAX_SPEED_KMH = 5.0
 _MIN_RADIUS_M = 5_000.0
 _MAX_RADIUS_M = 250_000.0
+
+
+class _GeoIndex:
+    """Boundary entries paired with an STRtree so point lookup only
+    exact-tests the few candidates whose bounding box contains the point."""
+
+    __slots__ = ("entries", "tree")
+
+    def __init__(self, entries: list[tuple]) -> None:
+        self.entries = entries
+        self.tree = STRtree([geometry for geometry, _, _ in entries])
 
 
 def _estimate_countries(rows: list[tuple]) -> dict[int, str]:
@@ -196,10 +213,12 @@ class LocationService(Service):
     _folder: Path | None = None
     _cache_folder: Path | None = None
 
-    _adm0: list[tuple] | None = None
-    _adm1: ClassVar[dict[str, list[tuple]]] = {}
-    _adm2: ClassVar[dict[str, list[tuple]]] = {}
+    _adm0: _GeoIndex | None = None
+    _adm1: ClassVar[OrderedDict[str, _GeoIndex]] = OrderedDict()
+    _adm2: ClassVar[OrderedDict[str, _GeoIndex]] = OrderedDict()
     _lock = threading.Lock()
+
+    _ADM_CACHE_SIZE = 16
 
     _VIEW = 512
     _PAD = 40
@@ -272,11 +291,11 @@ class LocationService(Service):
         parts.append(name)
 
         if adm2 is not None:
-            level, units, focus = 2, cls._get_adm(iso, 2), adm2
+            level, units, focus = 2, cls._get_adm(iso, 2).entries, adm2
         elif adm1 is not None:
-            level, units, focus = 1, cls._get_adm(iso, 1), adm1
+            level, units, focus = 1, cls._get_adm(iso, 1).entries, adm1
         else:
-            level, units, focus = 0, cls._get_adm0(), adm0
+            level, units, focus = 0, cls._get_adm0().entries, adm0
 
         return name, ", ".join(parts), level, units, focus, list(reversed(parts))
 
@@ -295,7 +314,8 @@ class LocationService(Service):
         transform, zoom, center_lat, center_lon, scale, cx, cy = cls._projection(focus_geometry)
 
         view = cls._viewport(scale, cx, cy, factor=1.0)
-        primary = [u for u in units if u[0].intersects(view)]
+        tree = STRtree([geometry for geometry, _, _ in units])
+        primary = [units[i] for i in sorted(tree.query(view))]
 
         paths: list[tuple[str, bool]] = []
 
@@ -462,101 +482,166 @@ class LocationService(Service):
         return safe or "location"
 
     @classmethod
-    def _get_adm0(cls) -> list[tuple]:
+    def _timed_load(cls, label: str, loader):
+        """Run a cache read or download, logging duration and peak memory at
+        DEBUG. tracemalloc only traces the Python-side JSON churn (shapely's
+        coordinate buffers live in numpy allocations it cannot see), so the
+        geometry payload is reported separately via WKB size."""
+        logger = logging.getLogger("LocationService")
+        measure = logger.isEnabledFor(logging.DEBUG)
+        already_tracing = False
+        started = time.perf_counter()
+
+        if measure:
+            already_tracing = tracemalloc.is_tracing()
+
+            if not already_tracing:
+                tracemalloc.start()
+
+        try:
+            index = loader()
+
+            if measure:
+                _, peak = tracemalloc.get_traced_memory()
+        finally:
+            if measure and not already_tracing:
+                tracemalloc.stop()
+
+        if measure:
+            wkb_bytes = sum(len(to_wkb(geometry)) for geometry, _, _ in index.entries)
+            logger.debug(
+                "%s: %d entries in %.2fs (traced peak %.1f MB, geometry %.1f MB)",
+                label,
+                len(index.entries),
+                time.perf_counter() - started,
+                peak / 1048576,
+                wkb_bytes / 1048576,
+            )
+
+        return index
+
+    @classmethod
+    def _get_adm0(cls) -> _GeoIndex:
         if cls._adm0 is not None:
             return cls._adm0
 
         with cls._lock:
             if cls._adm0 is None:
-                cls._adm0 = cls._load_adm0()
+                cls._adm0 = cls._timed_load("adm0", cls._load_adm0)
 
         return cls._adm0
 
     @classmethod
-    def _load_adm0(cls) -> list[tuple]:
-        cache_file = cls._cache_folder / "adm0.json"
+    def _load_adm0(cls) -> _GeoIndex:
+        cache_file = cls._cache_folder / "adm0.jsonl"
 
         if cache_file.exists():
             cached = cls._read_entries(cache_file)
 
             if cached is not None:
-                return cached
+                return _GeoIndex(cached)
 
         metadata = cls._fetch_json(f"{cls._GEOBOUNDARIES_API}/ALL/ADM0")
 
         if not metadata:
-            return []
+            return _GeoIndex([])
 
-        urls = [entry["simplifiedGeometryGeoJSON"] for entry in metadata]
-        geojsons = cls._fetch_geojsons(urls)
+        # One country at a time: convert to shapely and drop the raw GeoJSON
+        # immediately, so only a single raw structure is alive instead of all
+        # ~250 at once (the original list(executor.map(...)) peak).
         entries: list[tuple] = []
 
-        for entry, geojson in zip(metadata, geojsons):
+        for boundary in metadata:
+            url = boundary.get("simplifiedGeometryGeoJSON")
+
+            if not url:
+                continue
+
+            geojson = cls._fetch_json(url)
+
             if not geojson:
                 continue
 
             for feature in geojson.get("features", []):
-                geometry = shape(feature.get("geometry"))
+                raw = feature.get("geometry")
 
-                if geometry is None or geometry.is_empty:
+                if not raw:
+                    continue
+
+                geometry = shape(raw)
+
+                if geometry.is_empty:
                     continue
 
                 properties = feature.get("properties") or {}
                 entries.append(
                     (
                         geometry,
-                        entry.get("boundaryName") or properties.get("shapeName"),
-                        properties.get("shapeISO") or entry.get("boundaryISO"),
+                        boundary.get("boundaryName") or properties.get("shapeName"),
+                        properties.get("shapeISO") or boundary.get("boundaryISO"),
                     )
                 )
 
+            del geojson
+
         cls._write_entries(cache_file, entries)
 
-        return entries
+        return _GeoIndex(entries)
 
     @classmethod
-    def _get_adm(cls, iso: str, level: int) -> list[tuple]:
+    def _get_adm(cls, iso: str, level: int) -> _GeoIndex:
         cache = cls._adm1 if level == 1 else cls._adm2
 
-        if iso in cache:
-            return cache[iso]
+        index = cache.get(iso)
+
+        if index is not None:
+            with cls._lock:
+                if iso in cache:
+                    cache.move_to_end(iso)
+
+            return index
 
         with cls._lock:
-            if iso not in cache:
-                cache[iso] = cls._load_adm(iso, level)
+            index = cache.get(iso)
 
-        return cache[iso]
+            if index is None:
+                index = cls._timed_load(f"{iso.lower()}_adm{level}", lambda: cls._load_adm(iso, level))
+                cache[iso] = index
+
+                while len(cache) > cls._ADM_CACHE_SIZE:
+                    cache.popitem(last=False)
+            else:
+                cache.move_to_end(iso)
+
+        return index
 
     @classmethod
-    def _load_adm(cls, iso: str, level: int) -> list[tuple]:
-        cache_file = cls._cache_folder / f"{iso.lower()}_adm{level}.json"
+    def _load_adm(cls, iso: str, level: int) -> _GeoIndex:
+        cache_file = cls._cache_folder / f"{iso.lower()}_adm{level}.jsonl"
 
         if cache_file.exists():
             cached = cls._read_entries(cache_file)
 
             if cached is not None:
-                return cached
+                return _GeoIndex(cached)
 
         try:
             metadata = cls._fetch_json(f"{cls._GEOBOUNDARIES_API}/{iso}/ADM{level}")
         except (requests.HTTPError, ValueError):
-            return []
+            return _GeoIndex([])
 
         if not metadata or "simplifiedGeometryGeoJSON" not in metadata:
-            return []
+            return _GeoIndex([])
 
         geojson = cls._fetch_json(metadata["simplifiedGeometryGeoJSON"])
+
+        if not geojson:
+            return _GeoIndex([])
+
         entries = cls._parse_geojson(geojson)
         cls._write_entries(cache_file, entries)
 
-        return entries
-
-    @classmethod
-    def _fetch_geojsons(cls, urls: list[str]) -> list[dict | None]:
-        executor = ThreadPoolService.get_executor()
-        results = list(executor.map(cls._fetch_json, urls))
-
-        return results
+        return _GeoIndex(entries)
 
     @classmethod
     def _fetch_json(cls, url: str):
@@ -576,9 +661,14 @@ class LocationService(Service):
         entries: list[tuple] = []
 
         for feature in geojson.get("features", []):
-            geometry = shape(feature.get("geometry"))
+            raw = feature.get("geometry")
 
-            if geometry is None or geometry.is_empty:
+            if not raw:
+                continue
+
+            geometry = shape(raw)
+
+            if geometry.is_empty:
                 continue
 
             properties = feature.get("properties") or {}
@@ -588,20 +678,45 @@ class LocationService(Service):
 
     @classmethod
     def _read_entries(cls, path: Path) -> list[tuple] | None:
+        """Stream a JSONL cache one entry per line: only the current raw entry
+        and the growing shapely list are in memory, instead of the whole file
+        text plus the fully parsed JSON structure (the old 300+ MB peak)."""
+        entries: list[tuple] = []
+
         try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-            return [(shape(entry["geometry"]), entry["name"], entry["iso"]) for entry in data]
-        except (ValueError, KeyError, TypeError):
+            with path.open("r", encoding="utf-8") as file:
+                for line in file:
+                    if line.isspace():
+                        continue
+
+                    entry = json.loads(line)
+                    entries.append((from_wkb(base64.b64decode(entry["geom"])), entry["name"], entry["iso"]))
+        except (ValueError, KeyError, TypeError, OSError, GEOSException):
             return None
+
+        # No parsed line: empty or truncated-by-interrupted-write file -> miss.
+        return entries or None
 
     @classmethod
     def _write_entries(cls, path: Path, entries: list[tuple]) -> None:
-        data = [{"geometry": geometry.__geo_interface__, "name": name, "iso": iso} for geometry, name, iso in entries]
-        path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        """Write JSONL+WKB line by line: no intermediate data list and no
+        single giant joined string."""
+        with path.open("w", encoding="utf-8") as file:
+            for geometry, name, iso in entries:
+                encoded = base64.b64encode(to_wkb(geometry)).decode("ascii")
+                file.write(json.dumps({"name": name, "iso": iso, "geom": encoded}, ensure_ascii=False) + "\n")
+
+        # Drop the pre-JSONL array cache (superseded format, no retrocompat).
+        legacy = path.with_suffix(".json")
+
+        if legacy.exists():
+            legacy.unlink()
 
     @staticmethod
-    def _find(entries: list[tuple], point: Point):
-        for geometry, name, iso in entries:
+    def _find(index: _GeoIndex, point: Point):
+        for candidate in index.tree.query(point):
+            geometry, name, iso = index.entries[int(candidate)]
+
             if geometry.contains(point):
                 return geometry, name, iso
 

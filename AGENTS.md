@@ -80,6 +80,8 @@ Trailframe — photo gallery app: Python/FastAPI backend + React/TS/Vite fronten
 
 - **Thumbnails** (`photos/thumbnail_service.py`): multi-size via `general.thumbnail_sizes` (default `[160, 400]`); files at `{safe_filename[:2]}/{safe_filename}_{file_size}_{size}.webp` (fallback `{safe_filename}_{size}.webp`); `generate_all` writes all; `exists` = all present; `select_size` picks lowest ≥ preferred when ≤ 2×preferred else highest below; `GET /api/photos/{id}/thumbnail?size=<p>`
 
+- **Location boundaries cache** (`map/location_service.py`): `maps/_cache/*.jsonl` — JSON Lines, geometry as base64 WKB; `_read_entries`/`_write_entries` stream line-by-line (never a whole-file parse — the old array format peaked at file+parsed structure, measured 311 MB for `adm0`); unparseable/empty file = cache miss → re-download; superseded `.json` array caches are ignored and deleted on rewrite (no retrocompat); ADM0 download is strictly sequential (convert-to-shapely-and-drop per country, never parallel); `_adm0` resident, `_adm1`/`_adm2` LRU-bounded (`_ADM_CACHE_SIZE`, 16); `_find`/wireframe prefilter use `STRtree`; `_timed_load` logs duration/traced-peak/geometry-size at DEBUG (`LocationService` logger)
+
 - **Favorites**: `Photo.is_favorite` (`_add_missing_columns`); `PUT /api/photos/{id}/favorite`, `GET /api/photos?favorites=true`, `GET /api/photos/favorites`
 
 - **Deletion** (`api/photos.py`): move source to `general.trash_folder` via `FolderService.delete()`, remove thumbnail, delete DB row

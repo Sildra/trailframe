@@ -1,4 +1,6 @@
 import argparse
+import os
+import re
 from importlib import resources
 from pathlib import Path
 
@@ -21,15 +23,32 @@ from trailframe.services.core.configuration_service import ConfigurationService
 from trailframe.services.service_registry import ServiceRegistry
 
 
+def parse_path_arg(raw: str) -> Path:
+    """Parse a path argument, translating Git-Bash/MSYS-style paths on Windows.
+
+    ``/d/gallery_test/config.yaml`` is drive-relative for Python on Windows
+    (``C:\\d\\gallery_test\\...``); translate it to ``D:/gallery_test/config.yaml``.
+    """
+    if os.name == "nt":
+        match = re.fullmatch(r"/([A-Za-z])(?:/(.*))?", raw)
+        if match:
+            raw = f"{match.group(1).upper()}:/"
+            if match.group(2):
+                raw += match.group(2)
+    return Path(raw)
+
+
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Photo Gallery API")
-    parser.add_argument("--config", type=Path, default=Path("config.yaml"), help="Configuration file")
-    parser.add_argument("--folder", type=Path, default=None, help="Base folder where photos and thumbnails are stored")
-    parser.add_argument("--database", type=Path, default=None, help="SQLite database")
+    parser.add_argument("--config", type=parse_path_arg, default=Path("config.yaml"), help="Configuration file")
+    parser.add_argument(
+        "--folder", type=parse_path_arg, default=None, help="Base folder where photos and thumbnails are stored"
+    )
+    parser.add_argument("--database", type=parse_path_arg, default=None, help="SQLite database")
     parser.add_argument("--port", type=int, default=None, help="API port")
     parser.add_argument("--failsafe", action="store_true", help="Start without the FolderService (no scan/watch)")
     parser.add_argument(
-        "--openapi", type=Path, default=None, metavar="FILE", help="Write OpenAPI schema to FILE and exit"
+        "--openapi", type=parse_path_arg, default=None, metavar="FILE", help="Write OpenAPI schema to FILE and exit"
     )
     return parser.parse_args()
 

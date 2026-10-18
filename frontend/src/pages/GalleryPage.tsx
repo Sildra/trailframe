@@ -396,7 +396,7 @@ export default function GalleryPage() {
                 sx={{
                     display: "flex",
                     flexDirection: "column",
-                    width: leftCollapsed ? 60 : 320,
+                    width: leftCollapsed ? 40 : 320,
                     flexShrink: 0,
                     borderRight: 1,
                     borderColor: "divider",
@@ -472,7 +472,7 @@ export default function GalleryPage() {
                 sx={{
                     display: "flex",
                     flexDirection: "column",
-                    width: rightCollapsed ? 60 : 320,
+                    width: rightCollapsed ? 40 : 320,
                     flexShrink: 0,
                     borderLeft: 1,
                     borderColor: "divider",
