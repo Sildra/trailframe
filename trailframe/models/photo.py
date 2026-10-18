@@ -1,7 +1,12 @@
 from datetime import datetime
 
-from pydantic import BaseModel, NaiveDatetime
+from pydantic import BaseModel
+from sqlalchemy import DateTime
 from sqlmodel import JSON, Column, Field, LargeBinary, SQLModel
+
+# Naive datetimes, stored as-is. Plain `datetime` fields require tz-aware values on
+# sqlmodel >= 0.0.48, while pydantic's NaiveDatetime is unmapped on sqlmodel < 0.0.44.
+NAIVE_DATETIME = DateTime
 
 
 class Photo(SQLModel, table=True):
@@ -10,7 +15,7 @@ class Photo(SQLModel, table=True):
     path: str = Field(index=True, unique=True)
     filename: str | None = Field(index=True)
     file_size: int | None = Field(index=True)
-    date: NaiveDatetime | None = Field(index=True)
+    date: datetime | None = Field(default=None, index=True, sa_type=NAIVE_DATETIME())
     source: str | None = None
     is_favorite: bool = Field(default=False)
     latitude: float | None = None

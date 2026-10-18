@@ -4,8 +4,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
-from pydantic import NaiveDatetime
+from sqlalchemy import DateTime
 from sqlmodel import JSON, Column, Field, SQLModel
+
+# Naive datetimes, stored as-is. Plain `datetime` fields require tz-aware values on
+# sqlmodel >= 0.0.48, while pydantic's NaiveDatetime is unmapped on sqlmodel < 0.0.44.
+NAIVE_DATETIME = DateTime
 
 from trailframe.services.map.location_service import LocationService
 
@@ -49,7 +53,7 @@ class Activity(SQLModel, table=True):
     activity_id: str | None = Field(default=None, index=True, unique=True)
     name: str | None = None
     activity_type: str | None = None
-    start_time: NaiveDatetime | None = None
+    start_time: datetime | None = Field(default=None, sa_type=NAIVE_DATETIME())
     duration: float | None = None
     distance: float | None = None
     trace: list[list] = Field(default_factory=list, sa_column=Column(JSON))
@@ -188,7 +192,7 @@ class GarminActivity(SQLModel, table=True):
 
     activityId: int | None = Field(default=None, index=True, unique=True)
     activityName: str | None = None
-    startTimeLocal: NaiveDatetime | None = None
+    startTimeLocal: datetime | None = Field(default=None, sa_type=NAIVE_DATETIME())
     distance: float | None = None
     duration: float | None = None
     jsonActivity: dict = Field(default_factory=dict, sa_column=Column(JSON))
@@ -257,7 +261,7 @@ class GpxActivity(SQLModel, table=True):
     filename: str | None = None
     name: str | None = None
     activity_type: str | None = None
-    start_time: NaiveDatetime | None = None
+    start_time: datetime | None = Field(default=None, sa_type=NAIVE_DATETIME())
     distance: float | None = None
     duration: float | None = None
     trace: list[list] = Field(default_factory=list, sa_column=Column(JSON))
