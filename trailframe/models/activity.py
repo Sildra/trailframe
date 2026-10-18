@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
+from pydantic import NaiveDatetime
 from sqlmodel import JSON, Column, Field, SQLModel
 
 from trailframe.services.map.location_service import LocationService
@@ -48,7 +49,7 @@ class Activity(SQLModel, table=True):
     activity_id: str | None = Field(default=None, index=True, unique=True)
     name: str | None = None
     activity_type: str | None = None
-    start_time: datetime | None = None
+    start_time: NaiveDatetime | None = None
     duration: float | None = None
     distance: float | None = None
     trace: list[list] = Field(default_factory=list, sa_column=Column(JSON))
@@ -187,7 +188,7 @@ class GarminActivity(SQLModel, table=True):
 
     activityId: int | None = Field(default=None, index=True, unique=True)
     activityName: str | None = None
-    startTimeLocal: datetime | None = None
+    startTimeLocal: NaiveDatetime | None = None
     distance: float | None = None
     duration: float | None = None
     jsonActivity: dict = Field(default_factory=dict, sa_column=Column(JSON))
@@ -256,7 +257,7 @@ class GpxActivity(SQLModel, table=True):
     filename: str | None = None
     name: str | None = None
     activity_type: str | None = None
-    start_time: datetime | None = None
+    start_time: NaiveDatetime | None = None
     distance: float | None = None
     duration: float | None = None
     trace: list[list] = Field(default_factory=list, sa_column=Column(JSON))
@@ -356,7 +357,10 @@ class GpxActivity(SQLModel, table=True):
         end_time = max(parsed_times)
 
         duration = (end_time - start_time).total_seconds()
-        start_time = start_time.astimezone(UTC).replace(tzinfo=None)
+        # GPX times are UTC by spec; activities are stored in system-local wall
+        # clock so they compare directly against photo EXIF times. Trace rows
+        # stay epoch-ms (absolute), so only this anchor moves.
+        start_time = start_time.astimezone().replace(tzinfo=None)
 
         name, activity_type = cls._meta(root, filename)
 

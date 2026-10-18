@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 import allure
 from sqlalchemy import select
 
@@ -40,6 +42,20 @@ class TestSave:
 
         stored = (await db_session.execute(select(GpxActivity))).scalars().all()
         assert len(stored) == 1
+
+    @allure.title("Refreshes the stored start_time when identical content is re-saved")
+    async def test_save_refreshes_start_time_on_dedupe(self, db_session):
+        first = await GpxService.save(_GPX, "a.gpx")
+        assert first is not None
+        first.start_time = datetime(1999, 1, 1)
+        await db_session.commit()
+
+        second = await GpxService.save(_GPX, "b.gpx")
+        assert second is not None
+        assert second.id == first.id
+        assert second.start_time is not None
+        assert second.start_time != datetime(1999, 1, 1)
+        assert second.start_time.tzinfo is None
 
     @allure.title("Rejects invalid GPX without persisting anything")
     async def test_save_returns_none_for_invalid_gpx(self, db_session):

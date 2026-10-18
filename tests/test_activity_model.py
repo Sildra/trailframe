@@ -176,6 +176,16 @@ class TestGpxActivity:
         assert first[2] == 2.0
         assert first[3] == 100
 
+    @allure.title("Stores the UTC track time as system-local wall clock")
+    def test_from_gpx_start_time_is_system_local(self):
+        gpx = "<gpx><trk><trkseg><trkpt lat='1' lon='2'><time>2023-06-01T08:00:00Z</time></trkpt></trkseg></trk></gpx>"
+        activity = GpxActivity.from_gpx(gpx, filename="local.gpx")
+        assert activity is not None
+        assert activity.start_time is not None
+        assert activity.start_time.tzinfo is None
+        expected = datetime(2023, 6, 1, 8, 0, 0, tzinfo=UTC).astimezone().replace(tzinfo=None)
+        assert activity.start_time == expected
+
     @allure.title("Falls back to the filename when the track has no name")
     def test_from_gpx_uses_filename_when_no_name(self):
         gpx = "<gpx><trk><trkseg><trkpt lat='1' lon='2'><time>2023-06-01T08:00:00Z</time></trkpt></trkseg></trk></gpx>"

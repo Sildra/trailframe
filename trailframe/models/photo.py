@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, NaiveDatetime
 from sqlmodel import JSON, Column, Field, LargeBinary, SQLModel
 
 
@@ -10,7 +10,7 @@ class Photo(SQLModel, table=True):
     path: str = Field(index=True, unique=True)
     filename: str | None = Field(index=True)
     file_size: int | None = Field(index=True)
-    date: datetime | None = Field(index=True)
+    date: NaiveDatetime | None = Field(index=True)
     source: str | None = None
     is_favorite: bool = Field(default=False)
     latitude: float | None = None

@@ -29,6 +29,12 @@ class GpxService(Service):
             ).scalar_one_or_none()
 
             if existing is not None:
+                # Identical content, but re-parsing with the current timezone
+                # convention may yield a different wall-clock start_time, so
+                # refresh it in place instead of returning a stale row.
+                existing.start_time = activity.start_time
+                await session.commit()
+                await session.refresh(existing)
                 return existing
 
             session.add(activity)
