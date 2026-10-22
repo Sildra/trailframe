@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { Box } from "@mui/material";
 import { Circle, CircleMarker, MapContainer, TileLayer, useMap } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
+import MapResizer from "./MapResizer";
 import type { components } from "../api/generated/schema";
 
 type LocationEstimate = components["schemas"]["LocationEstimate"];
@@ -40,6 +41,7 @@ export default function PhotoLocationMap({ latitude, longitude, estimate, classN
                 attributionControl={false}
             >
                 <TileLayer url="./api/tiles/{z}/{x}/{y}.png" />
+                <MapResizer />
                 {showDot && (
                     <CircleMarker
                         center={[latitude, longitude]}
