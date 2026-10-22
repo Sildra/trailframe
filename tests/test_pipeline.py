@@ -36,7 +36,17 @@ class TestScannerRegistry:
     @allure.title("Registers every concrete scanner with a definition")
     def test_registry_covers_all_scanners(self):
         names = {definition.name for definition in SCANNER_DEFINITIONS}
-        assert names == {"File", "EXIF", "Thumbnail", "Activity", "Location", "Object", "PerceptualHash", "Database"}
+        assert names == {
+            "File",
+            "EXIF",
+            "Thumbnail",
+            "Activity",
+            "Location",
+            "Object",
+            "PerceptualHash",
+            "Rules",
+            "Database",
+        }
 
     @allure.title("Creates a scanner instance from the registry by name")
     def test_create_scanner(self):

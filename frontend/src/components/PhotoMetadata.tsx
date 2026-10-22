@@ -1,12 +1,24 @@
 import { Fragment, useEffect, useState } from "react";
-import { Accordion, AccordionDetails, AccordionSummary, Box, IconButton, Typography } from "@mui/material";
+import {
+    Accordion,
+    AccordionDetails,
+    AccordionSummary,
+    Box,
+    Button,
+    Chip,
+    CircularProgress,
+    IconButton,
+    Typography,
+} from "@mui/material";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import StarIcon from "@mui/icons-material/Star";
 import StarBorderIcon from "@mui/icons-material/StarBorder";
+import EditIcon from "@mui/icons-material/Edit";
 import { api } from "../api/client";
 import type { components } from "../api/generated/schema";
 import { formatDateTime } from "../lib/format";
 import PhotoLocationMap from "./PhotoLocationMap";
+import TagPicker from "./TagPicker";
 import ThumbnailGallery from "./ThumbnailGallery";
 
 type Photo = components["schemas"]["PhotoDetail"];
@@ -67,6 +79,10 @@ function MetadataList({ entries, mono }: { entries: Array<[string, string]>; mon
 
 export default function PhotoMetadata({ photoId, favorite = false, onToggleFavorite, onHoverObject, onSelectPhoto }: PhotoMetadataProps) {
     const [photo, setPhoto] = useState<Photo | null>(null);
+    const [savedTags, setSavedTags] = useState<string[]>([]);
+    const [tags, setTags] = useState<string[]>([]);
+    const [pickerOpen, setPickerOpen] = useState(false);
+    const [savingTags, setSavingTags] = useState(false);
 
     useEffect(() => {
         let cancelled = false;
@@ -79,6 +95,11 @@ export default function PhotoMetadata({ photoId, favorite = false, onToggleFavor
                     return;
                 }
                 setPhoto(data);
+
+                const loaded = (data.tags ?? []).filter((tag) => tag !== "");
+
+                setSavedTags(loaded);
+                setTags(loaded);
             })
             .catch(() => {});
 
@@ -86,6 +107,27 @@ export default function PhotoMetadata({ photoId, favorite = false, onToggleFavor
             cancelled = true;
         };
     }, [photoId]);
+
+    const tagsDirty = JSON.stringify(tags) !== JSON.stringify(savedTags);
+
+    const saveTags = async () => {
+        setSavingTags(true);
+
+        const { data, error } = await api.PUT("/api/photos/{photo_id}/tags", {
+            params: { path: { photo_id: photoId } },
+            body: { tags },
+        });
+
+        setSavingTags(false);
+
+        if (error || !data) {
+            return;
+        }
+
+        setSavedTags(data.tags);
+        setTags(data.tags);
+        setPhoto((previous) => (previous === null ? previous : { ...previous, tags: data.tags }));
+    };
 
     if (!photo) {
         return <Typography sx={{ fontSize: 13, color: "text.secondary" }}>Loading…</Typography>;
@@ -131,7 +173,6 @@ export default function PhotoMetadata({ photoId, favorite = false, onToggleFavor
     const exifEntries = Object.entries(photo.exif ?? {}).filter(
         ([, value]) => formatValue(value) !== "",
     );
-    const tags = (photo.tags ?? []).filter((tag) => tag !== "");
     const groups = (photo.groups ?? []).filter((g) => g.photo_ids.length > 0);
     const mapShown = (photo.latitude != null && photo.longitude != null) || photo.location_estimate != null;
     const mapLatitude = photo.latitude != null ? photo.latitude : photo.location_estimate?.lat;
@@ -177,16 +218,40 @@ export default function PhotoMetadata({ photoId, favorite = false, onToggleFavor
                     </AccordionDetails>
                 </Accordion>
             )}
-            {tags.length > 0 && (
-                <Accordion disableGutters>
-                    <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={{ fontWeight: 600, fontSize: 14 }}>
-                        Tags
-                    </AccordionSummary>
-                    <AccordionDetails>
-                        <Typography sx={{ fontSize: 13 }}>{tags.join(", ")}</Typography>
-                    </AccordionDetails>
-                </Accordion>
-            )}
+            <Accordion disableGutters>
+                <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={{ fontWeight: 600, fontSize: 14 }}>
+                    Tags
+                </AccordionSummary>
+                <AccordionDetails>
+                    <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
+                        {tags.length === 0 ? (
+                            <Typography sx={{ fontSize: 13, color: "text.secondary" }}>No tags yet.</Typography>
+                        ) : (
+                            <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
+                                {tags.map((tag) => (
+                                    <Chip
+                                        key={tag}
+                                        size="small"
+                                        label={tag}
+                                        onDelete={() => setTags(tags.filter((entry) => entry !== tag))}
+                                    />
+                                ))}
+                            </Box>
+                        )}
+                        <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                            <Button size="small" startIcon={<EditIcon />} onClick={() => setPickerOpen(true)}>
+                                Edit tags
+                            </Button>
+                            {tagsDirty && (
+                                <Button size="small" variant="contained" onClick={saveTags} disabled={savingTags}>
+                                    Save
+                                </Button>
+                            )}
+                            {savingTags && <CircularProgress size={16} />}
+                        </Box>
+                    </Box>
+                </AccordionDetails>
+            </Accordion>
             {objects.length > 0 && (
                 <Accordion disableGutters>
                     <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={{ fontWeight: 600, fontSize: 14 }}>
@@ -249,6 +314,15 @@ export default function PhotoMetadata({ photoId, favorite = false, onToggleFavor
                     </AccordionDetails>
                 </Accordion>
             )}
+            <TagPicker
+                open={pickerOpen}
+                value={tags}
+                onClose={() => setPickerOpen(false)}
+                onApply={(paths) => {
+                    setPickerOpen(false);
+                    setTags(paths);
+                }}
+            />
         </Box>
     );
 }

@@ -196,7 +196,7 @@ class TestConfigurationApi:
 
         scanners = app.get("/api/configuration").json()["children"]["scanners"]["children"]
 
-        assert list(scanners) == ["Activity", "EXIF", "Location", "Object", "PerceptualHash", "Thumbnail"]
+        assert list(scanners) == ["Activity", "EXIF", "Location", "Object", "PerceptualHash", "Rules", "Thumbnail"]
         assert "File" not in scanners
         assert "Database" not in scanners
         assert scanners["Object"]["description"] == ObjectScanner._definition

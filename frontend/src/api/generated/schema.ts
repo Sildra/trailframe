@@ -38,6 +38,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/photos/ids": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Photo Ids
+         * @description The ids of the photos matching the given filters.
+         */
+        get: operations["list_photo_ids_api_photos_ids_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/photos/favorites": {
         parameters: {
             query?: never;
@@ -185,6 +205,26 @@ export interface paths {
         get?: never;
         /** Set Favorite */
         put: operations["set_favorite_api_photos__photo_id__favorite_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/photos/{photo_id}/tags": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Photo Tags
+         * @description Replace the tags of a photo with the given list.
+         */
+        put: operations["set_photo_tags_api_photos__photo_id__tags_put"];
         post?: never;
         delete?: never;
         options?: never;
@@ -739,6 +779,136 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/tags": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Tags */
+        get: operations["list_tags_api_tags_get"];
+        /** Update Tags */
+        put: operations["update_tags_api_tags_put"];
+        /** Create Tag */
+        post: operations["create_tag_api_tags_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tags/{tag_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Tag */
+        delete: operations["delete_tag_api_tags__tag_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tag-rules/fields": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Fields
+         * @description The metadata catalog the assisted builder renders.
+         */
+        get: operations["list_fields_api_tag_rules_fields_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tag-rules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Rules */
+        get: operations["list_rules_api_tag_rules_get"];
+        put?: never;
+        /** Create Rule */
+        post: operations["create_rule_api_tag_rules_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tag-rules/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Test Rule */
+        post: operations["test_rule_api_tag_rules_test_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tag-rules/apply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Apply Rules
+         * @description Apply every enabled rule to the photos already in the library.
+         */
+        post: operations["apply_rules_api_tag_rules_apply_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tag-rules/{rule_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Rule */
+        get: operations["get_rule_api_tag_rules__rule_id__get"];
+        /** Update Rule */
+        put: operations["update_rule_api_tag_rules__rule_id__put"];
+        post?: never;
+        /** Delete Rule */
+        delete: operations["delete_rule_api_tag_rules__rule_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/tiles/{z}/{x}/{y}.png": {
         parameters: {
             query?: never;
@@ -1089,6 +1259,18 @@ export interface components {
             /** Lon */
             lon: number;
         };
+        /** PhotoTagsResponse */
+        PhotoTagsResponse: {
+            /** Id */
+            id: number;
+            /** Tags */
+            tags: string[];
+        };
+        /** PhotoTagsUpdate */
+        PhotoTagsUpdate: {
+            /** Tags */
+            tags: string[];
+        };
         /** ProcessStats */
         ProcessStats: {
             /** Rss */
@@ -1130,6 +1312,215 @@ export interface components {
             database_size: number;
             /** Filesystem */
             filesystem: components["schemas"]["FolderStat"][];
+        };
+        /**
+         * TagCreate
+         * @description A single tag to add to the vocabulary.
+         */
+        TagCreate: {
+            /** Path */
+            path: string;
+            /** Description */
+            description?: string | null;
+        };
+        /**
+         * TagError
+         * @description The reason why a tag operation was refused.
+         */
+        TagError: {
+            /** Detail */
+            detail: string;
+        };
+        /**
+         * TagNode
+         * @description A registry tag with its children, as returned by the API.
+         */
+        TagNode: {
+            /** Id */
+            id?: number | null;
+            /** Name */
+            name: string;
+            /** Path */
+            path: string;
+            /**
+             * Depth
+             * @default 0
+             */
+            depth: number;
+            /** Description */
+            description?: string | null;
+            /**
+             * Count
+             * @default 0
+             */
+            count: number;
+            /**
+             * Total
+             * @default 0
+             */
+            total: number;
+            /** Children */
+            children?: components["schemas"]["TagNode"][];
+        };
+        /**
+         * TagPayload
+         * @description A tag as sent by the vocabulary editor.
+         */
+        TagPayload: {
+            /** Id */
+            id?: number | null;
+            /** Path */
+            path: string;
+            /** Description */
+            description?: string | null;
+        };
+        /**
+         * TagRuleApplyResponse
+         * @description The outcome of applying every enabled rule to the library.
+         */
+        TagRuleApplyResponse: {
+            /** Photos */
+            photos: number;
+            /** Changed */
+            changed: number;
+            /** Added */
+            added: number;
+        };
+        /**
+         * TagRuleField
+         * @description One metadata field the assisted builder offers.
+         */
+        TagRuleField: {
+            /** Field */
+            field: string;
+            /** Group */
+            group: string;
+            /** Label */
+            label: string;
+            /** Description */
+            description: string;
+            /** Kind */
+            kind: string;
+            /** Label Field */
+            label_field?: string | null;
+            /**
+             * Metrics
+             * @default []
+             */
+            metrics: string[];
+            /**
+             * Suggestions
+             * @default []
+             */
+            suggestions: string[];
+            /**
+             * Operators
+             * @default []
+             */
+            operators: {
+                [key: string]: string;
+            }[];
+        };
+        /**
+         * TagRulePayload
+         * @description A rule as edited in the assisted builder.
+         */
+        TagRulePayload: {
+            /** Name */
+            name: string;
+            /**
+             * Enabled
+             * @default true
+             */
+            enabled: boolean;
+            /**
+             * Priority
+             * @default 0
+             */
+            priority: number;
+            /** Description */
+            description?: string | null;
+            /**
+             * Conditions
+             * @default {}
+             */
+            conditions: {
+                [key: string]: unknown;
+            };
+            /**
+             * Tags
+             * @default []
+             */
+            tags: string[];
+        };
+        /**
+         * TagRuleResponse
+         * @description A stored rule.
+         */
+        TagRuleResponse: {
+            /** Id */
+            id?: number | null;
+            /** Name */
+            name: string;
+            /**
+             * Enabled
+             * @default true
+             */
+            enabled: boolean;
+            /**
+             * Priority
+             * @default 0
+             */
+            priority: number;
+            /** Description */
+            description?: string | null;
+            /**
+             * Conditions
+             * @default {}
+             */
+            conditions: {
+                [key: string]: unknown;
+            };
+            /**
+             * Tags
+             * @default []
+             */
+            tags: string[];
+        };
+        /**
+         * TagRuleTestMatch
+         * @description One photo a draft rule matches, with the tags it would add.
+         */
+        TagRuleTestMatch: {
+            /** Photo Id */
+            photo_id?: number | null;
+            /** Filename */
+            filename?: string | null;
+            /**
+             * Tags
+             * @default []
+             */
+            tags: string[];
+        };
+        /**
+         * TagRuleTestRequest
+         * @description A draft rule to evaluate against the photos already in the library.
+         */
+        TagRuleTestRequest: {
+            rule: components["schemas"]["TagRulePayload"];
+            /**
+             * Limit
+             * @default 50
+             */
+            limit: number;
+        };
+        /**
+         * TagSyncRequest
+         * @description The complete vocabulary, as edited by the client.
+         */
+        TagSyncRequest: {
+            /** Tags */
+            tags: components["schemas"]["TagPayload"][];
         };
         /** ValidationError */
         ValidationError: {
@@ -1177,6 +1568,9 @@ export interface operations {
         parameters: {
             query?: {
                 favorites?: boolean;
+                tags?: string[] | null;
+                tags_mode?: string;
+                include_descendants?: boolean;
             };
             header?: never;
             path?: never;
@@ -1191,6 +1585,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PhotoDetail"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_photo_ids_api_photos_ids_get: {
+        parameters: {
+            query?: {
+                favorites?: boolean;
+                tags?: string[] | null;
+                tags_mode?: string;
+                include_descendants?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": number[];
                 };
             };
             /** @description Validation Error */
@@ -1458,6 +1886,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_photo_tags_api_photos__photo_id__tags_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                photo_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PhotoTagsUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PhotoTagsResponse"];
                 };
             };
             /** @description Validation Error */
@@ -2458,6 +2921,501 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProcessStats"];
+                };
+            };
+        };
+    };
+    list_tags_api_tags_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TagNode"][];
+                };
+            };
+        };
+    };
+    update_tags_api_tags_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TagSyncRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TagNode"][];
+                };
+            };
+            /** @description The tag path is invalid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TagError"];
+                };
+            };
+            /** @description The tag does not exist */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TagError"];
+                };
+            };
+            /** @description A tag already exists at that path */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TagError"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_tag_api_tags_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TagCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TagNode"][];
+                };
+            };
+            /** @description The tag path is invalid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TagError"];
+                };
+            };
+            /** @description The tag does not exist */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TagError"];
+                };
+            };
+            /** @description A tag already exists at that path */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TagError"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_tag_api_tags__tag_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tag_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description The tag path is invalid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TagError"];
+                };
+            };
+            /** @description The tag does not exist */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TagError"];
+                };
+            };
+            /** @description A tag already exists at that path */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TagError"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_fields_api_tag_rules_fields_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TagRuleField"][];
+                };
+            };
+        };
+    };
+    list_rules_api_tag_rules_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TagRuleResponse"][];
+                };
+            };
+        };
+    };
+    create_rule_api_tag_rules_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TagRulePayload"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TagRuleResponse"];
+                };
+            };
+            /** @description The rule is malformed */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The rule does not exist */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    test_rule_api_tag_rules_test_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TagRuleTestRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TagRuleTestMatch"][];
+                };
+            };
+            /** @description The rule is malformed */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The rule does not exist */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    apply_rules_api_tag_rules_apply_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TagRuleApplyResponse"];
+                };
+            };
+        };
+    };
+    get_rule_api_tag_rules__rule_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                rule_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TagRuleResponse"];
+                };
+            };
+            /** @description The rule is malformed */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The rule does not exist */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_rule_api_tag_rules__rule_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                rule_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TagRulePayload"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TagRuleResponse"];
+                };
+            };
+            /** @description The rule is malformed */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The rule does not exist */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_rule_api_tag_rules__rule_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                rule_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description The rule is malformed */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The rule does not exist */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

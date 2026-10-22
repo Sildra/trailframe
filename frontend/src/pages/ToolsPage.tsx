@@ -20,6 +20,7 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { api } from "../api/client";
 import SectionPage from "../components/SectionPage";
+import MapResizer from "../components/MapResizer";
 import { formatDateTime } from "../lib/format";
 import type { components } from "../api/generated/schema";
 
@@ -263,10 +264,28 @@ function ScannersPane() {
 function FitBounds({ photos, activities }: { photos: PhotoPoint[]; activities: ActivityTrace[] }) {
     const map = useMap();
     const fitted = useRef(false);
+    const userMoved = useRef(false);
+
+    // Remember whether the user took over the map. A programmatic fit never
+    // produces those events, so only real interactions are picked up.
+    useEffect(() => {
+        const container = map.getContainer();
+        const markMoved = () => {
+            userMoved.current = true;
+        };
+
+        container.addEventListener("wheel", markMoved, { passive: true });
+        container.addEventListener("pointerdown", markMoved);
+        container.addEventListener("keydown", markMoved);
+
+        return () => {
+            container.removeEventListener("wheel", markMoved);
+            container.removeEventListener("pointerdown", markMoved);
+            container.removeEventListener("keydown", markMoved);
+        };
+    }, [map]);
 
     useEffect(() => {
-        if (fitted.current) return;
-
         const bounds: L.LatLngExpression[] = [];
 
         for (const p of photos) bounds.push([p.lat, p.lon]);
@@ -274,10 +293,38 @@ function FitBounds({ photos, activities }: { photos: PhotoPoint[]; activities: A
             for (const pt of a.trace) bounds.push([pt[0], pt[1]]);
         }
 
-        if (bounds.length > 0) {
+        const fit = () => {
+            if (bounds.length === 0 || userMoved.current) return;
+
+            const size = map.getSize();
+            if (size.x <= 0 || size.y <= 0) return;
+
+            // The pane may be collapsed to a sliver; a fixed padding would eat
+            // the whole viewport and yield a meaningless zoom level.
+            const padding = Math.max(0, Math.min(20, size.x / 4, size.y / 4));
+            map.fitBounds(bounds as L.LatLngBoundsExpression, { padding: [padding, padding] });
             fitted.current = true;
-            map.fitBounds(bounds as L.LatLngBoundsExpression, { padding: [20, 20] });
+        };
+
+        // The viewport changes when the section pane is collapsed or expanded;
+        // the previous fit was computed for the old size, so frame it again.
+        // The pane animates its width, so coalesce the burst of resize events.
+        let timer = 0;
+        const onResize = () => {
+            window.clearTimeout(timer);
+            timer = window.setTimeout(fit, 120);
+        };
+
+        map.on("resize", onResize);
+
+        if (!fitted.current) {
+            fit();
         }
+
+        return () => {
+            window.clearTimeout(timer);
+            map.off("resize", onResize);
+        };
     }, [map, photos, activities]);
 
     return null;
@@ -311,6 +358,7 @@ function MapPane() {
             <Box sx={{ flex: 1, minHeight: 0, borderRadius: 1, overflow: "hidden", border: 1, borderColor: "divider", position: "relative" }}>
                 <MapContainer center={center} zoom={2} style={{ height: "100%", width: "100%" }}>
                     <TileLayer attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>' url="./api/tiles/{z}/{x}/{y}.png" />
+                    <MapResizer />
                     <FitBounds photos={showPhotos ? data.photos : []} activities={showActivities ? data.activities : []} />
                     <Pane name="photos" style={{ zIndex: 400 }}>
                         {showPhotos &&

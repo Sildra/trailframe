@@ -24,6 +24,8 @@ from trailframe.models.activity import Activity, GarminActivity  # noqa: F401  (
 from trailframe.models.group import PhotoGroup  # noqa: F401  (registers models with SQLModel metadata)
 from trailframe.models.photo import Photo  # noqa: F401  (registers models with SQLModel metadata)
 from trailframe.models.scanner_stat import ScannerStat  # noqa: F401  (registers models with SQLModel metadata)
+from trailframe.models.tag import Tag  # noqa: F401  (registers models with SQLModel metadata)
+from trailframe.models.tag_rule import TagRule  # noqa: F401  (registers models with SQLModel metadata)
 from trailframe.services.core.configuration_service import Node
 from trailframe.services.service import Service
 

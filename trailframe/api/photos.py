@@ -14,6 +14,7 @@ from trailframe.services.map.location_service import LocationService
 from trailframe.services.photos.duplicates_service import DuplicatesService
 from trailframe.services.photos.folder_service import FolderService
 from trailframe.services.photos.photo_service import PhotoService
+from trailframe.services.photos.tag_service import TagService
 from trailframe.services.photos.thumbnail_service import ThumbnailService
 
 router = APIRouter(prefix="/api/photos", tags=["photos"])
@@ -29,21 +30,85 @@ class FavoriteUpdate(BaseModel):
     value: bool
 
 
+class PhotoTagsUpdate(BaseModel):
+    tags: list[str]
+
+
+class PhotoTagsResponse(BaseModel):
+    id: int
+    tags: list[str]
+
+
 def _group_date_bounds(start_date: date, end_date: date) -> tuple[datetime, datetime]:
     return (datetime.combine(start_date, time.min), datetime.combine(end_date + timedelta(days=1), time.min))
 
 
+def _tag_paths(tags: list[str] | None) -> list[str]:
+    """Normalized tag paths, dropping the empty ones."""
+    paths: list[str] = []
+
+    for tag in tags or []:
+        value = TagService.normalize(tag)
+
+        if value and value not in paths:
+            paths.append(value)
+
+    return paths
+
+
 @router.get("", response_model=list[PhotoDetail])
-async def list_photos(favorites: bool = Query(False)) -> list[PhotoDetail]:
+async def list_photos(
+    favorites: bool = Query(False),
+    tags: list[str] | None = Query(None),
+    tags_mode: str = Query("any", pattern="^(any|all)$"),
+    include_descendants: bool = Query(True),
+) -> list[PhotoDetail]:
+    paths = _tag_paths(tags)
+
     async def _list(session) -> list[PhotoDetail]:
         stmt = select(Photo).order_by(Photo.date.asc().nulls_last(), Photo.id.asc())
 
         if favorites:
             stmt = stmt.where(Photo.is_favorite)
 
+        if paths:
+            condition = (
+                TagService.match(paths, tags_mode) if include_descendants else TagService.match_exact(paths, tags_mode)
+            )
+            stmt = stmt.where(condition)
+
         result = await session.execute(stmt)
 
         return [PhotoDetail.from_photo(photo) for photo in result.scalars().all()]
+
+    return await DatabaseService.execute(_list)
+
+
+@router.get("/ids", response_model=list[int])
+async def list_photo_ids(
+    favorites: bool = Query(False),
+    tags: list[str] | None = Query(None),
+    tags_mode: str = Query("any", pattern="^(any|all)$"),
+    include_descendants: bool = Query(True),
+) -> list[int]:
+    """The ids of the photos matching the given filters."""
+    paths = _tag_paths(tags)
+
+    async def _list(session) -> list[int]:
+        stmt = select(Photo.id).order_by(Photo.date.asc().nulls_last(), Photo.id.asc())
+
+        if favorites:
+            stmt = stmt.where(Photo.is_favorite)
+
+        if paths:
+            condition = (
+                TagService.match(paths, tags_mode) if include_descendants else TagService.match_exact(paths, tags_mode)
+            )
+            stmt = stmt.where(condition)
+
+        result = await session.execute(stmt)
+
+        return list(result.scalars().all())
 
     return await DatabaseService.execute(_list)
 
@@ -96,8 +161,10 @@ async def custom_slideshow(
             stmt = stmt.where(Photo.location.ilike(pattern))
 
         if tags is not None:
-            for tag in tags:
-                stmt = stmt.where(Photo.tags.ilike(f"%{tag}%"))
+            paths = _tag_paths(tags)
+
+            if paths:
+                stmt = stmt.where(TagService.match(paths, "all"))
 
         result = await session.execute(stmt.order_by(Photo.date.asc().nulls_last(), Photo.id.asc()))
         photo_ids = list(result.scalars().all())
@@ -283,6 +350,17 @@ async def set_favorite(photo_id: int, payload: FavoriteUpdate):
         return {"id": photo_id, "is_favorite": payload.value}
 
     return await DatabaseService.execute(_set)
+
+
+@router.put("/{photo_id}/tags", response_model=PhotoTagsResponse)
+async def set_photo_tags(photo_id: int, payload: PhotoTagsUpdate):
+    """Replace the tags of a photo with the given list."""
+    tags = await TagService.set_photo_tags(photo_id, payload.tags)
+
+    if tags is None:
+        raise HTTPException(404, f"Photo {photo_id} not found")
+
+    return {"id": photo_id, "tags": tags}
 
 
 @router.get("/{photo_id}/data", response_model=PhotoDetail)

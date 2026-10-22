@@ -5,13 +5,14 @@ import ActivitiesPage from "./pages/ActivitiesPage";
 import SlideshowMenuPage from "./pages/SlideshowMenuPage";
 import SlideshowPage, { type SlideshowSource } from "./pages/SlideshowPage";
 import ParametersPage from "./pages/ConfigurationPage";
+import TagsPage from "./pages/TagsPage";
 import ToolsPage from "./pages/ToolsPage";
 import EventBar from "./components/EventBar";
 import { EventProvider } from "./events/EventProvider";
 import { parseMenuSection, type MenuSection } from "./lib/slideshowSections";
 import type { components } from "./api/generated/schema";
 
-type Page = "gallery" | "activities" | "slideshow" | "configuration" | "tools";
+type Page = "gallery" | "activities" | "slideshow" | "configuration" | "tags" | "tools";
 
 type Activity = components["schemas"]["ActivitySummary"];
 
@@ -19,6 +20,7 @@ const PAGES: Array<{ id: Page; label: string }> = [
     { id: "gallery", label: "Gallery" },
     { id: "activities", label: "Activities" },
     { id: "slideshow", label: "Slideshow" },
+    { id: "tags", label: "Tags" },
     { id: "tools", label: "Tools" },
     { id: "configuration", label: "Configuration" },
 ];
@@ -99,6 +101,7 @@ export default function App() {
                             />
                         )}
                         {page === "tools" && <ToolsPage />}
+                        {page === "tags" && <TagsPage />}
                         {page === "configuration" && <ParametersPage />}
                         <EventBar />
                     </Box>

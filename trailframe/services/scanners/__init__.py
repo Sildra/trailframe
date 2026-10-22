@@ -8,6 +8,7 @@ from trailframe.services.scanners.file_scanner import FileScanner
 from trailframe.services.scanners.location_scanner import LocationScanner
 from trailframe.services.scanners.object_scanner import ObjectScanner
 from trailframe.services.scanners.perceptual_hash_scanner import PerceptualHashScanner
+from trailframe.services.scanners.rules_scanner import RulesScanner
 from trailframe.services.scanners.scanner import Scanner
 from trailframe.services.scanners.thumbnail_scanner import ThumbnailScanner
 
@@ -36,6 +37,7 @@ SCANNER_DEFINITIONS: tuple[ScannerDefinition, ...] = (
     ScannerDefinition("Location", LocationScanner),
     ScannerDefinition("Object", ObjectScanner),
     ScannerDefinition("PerceptualHash", PerceptualHashScanner),
+    ScannerDefinition("Rules", RulesScanner),
     ScannerDefinition("Thumbnail", ThumbnailScanner),
 )
 

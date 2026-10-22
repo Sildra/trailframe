@@ -18,6 +18,8 @@ from trailframe.api.photos import router as photos_router
 from trailframe.api.pipeline import router as pipeline_router
 from trailframe.api.remote_pipeline import router as remote_pipeline_router
 from trailframe.api.statistics import router as statistics_router
+from trailframe.api.tag_rules import router as tag_rules_router
+from trailframe.api.tags import router as tags_router
 from trailframe.api.tiles import router as tiles_router
 from trailframe.services.core.configuration_service import ConfigurationService
 from trailframe.services.service_registry import ServiceRegistry
@@ -100,6 +102,8 @@ def create_app(args: argparse.Namespace) -> FastAPI:
     app.include_router(activities_router)
     app.include_router(events_router)
     app.include_router(statistics_router)
+    app.include_router(tags_router)
+    app.include_router(tag_rules_router)
     app.include_router(tiles_router)
 
     dev_dist = Path("frontend/dist")

@@ -54,6 +54,7 @@ class TestPipelineConfig:
             "Location",
             "Object",
             "PerceptualHash",
+            "Rules",
             "Database",
         ]
         assert PipelineService.get_remote_pipelines() == []

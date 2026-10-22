@@ -41,7 +41,7 @@ class TestScannerConfigPreRead:
         read_scanner_configs(config)
 
         scanners = config.get_node("scanners").children
-        assert list(scanners) == ["Activity", "EXIF", "Location", "Object", "PerceptualHash", "Thumbnail"]
+        assert list(scanners) == ["Activity", "EXIF", "Location", "Object", "PerceptualHash", "Rules", "Thumbnail"]
 
     @allure.title("Skips internal scanners without configurable flags")
     def test_skips_flagless_scanners(self):

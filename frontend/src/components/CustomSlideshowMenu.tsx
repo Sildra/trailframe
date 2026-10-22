@@ -19,6 +19,7 @@ import ContentCopyIcon from "@mui/icons-material/ContentCopy";
 import { api } from "../api/client";
 import type { components } from "../api/generated/schema";
 import { orderedSearch } from "../lib/slideshowSections";
+import TagPicker from "./TagPicker";
 import type { SlideshowOption } from "../pages/SlideshowPage";
 
 type PhotoGroupSummary = components["schemas"]["PhotoGroupSummary"];
@@ -40,7 +41,7 @@ export default function CustomSlideshowMenu({ onStart }: CustomSlideshowMenuProp
     const [selectedGroup, setSelectedGroup] = useState<PhotoGroupSummary | null>(null);
     const [location, setLocation] = useState("");
     const [tags, setTags] = useState<string[]>([]);
-    const [tagInput, setTagInput] = useState("");
+    const [tagPickerOpen, setTagPickerOpen] = useState(false);
     const [randomize, setRandomize] = useState(false);
     const [favoritesOnly, setFavoritesOnly] = useState(false);
     const [useThumbnails, setUseThumbnails] = useState(false);
@@ -204,19 +205,6 @@ export default function CustomSlideshowMenu({ onStart }: CustomSlideshowMenuProp
         return parts.length > 0 ? parts.join(" · ") : "Custom";
     };
 
-    const handleTagKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
-        if (event.key === "Enter" && tagInput.trim()) {
-            event.preventDefault();
-            const newTag = tagInput.trim();
-
-            if (!tags.includes(newTag)) {
-                setTags([...tags, newTag]);
-            }
-
-            setTagInput("");
-        }
-    };
-
     const handleTagDelete = (tag: string) => {
         setTags(tags.filter((t) => t !== tag));
     };
@@ -265,14 +253,9 @@ export default function CustomSlideshowMenu({ onStart }: CustomSlideshowMenuProp
             />
 
             <Typography variant="subtitle2">Tags</Typography>
-            <TextField
-                label="Add tags"
-                size="small"
-                value={tagInput}
-                onChange={(e) => setTagInput(e.target.value)}
-                onKeyDown={handleTagKeyDown}
-                placeholder="Type and press Enter"
-            />
+            <Button size="small" variant="outlined" onClick={() => setTagPickerOpen(true)}>
+                {tags.length === 0 ? "Select tags" : `Edit tags (${tags.length})`}
+            </Button>
             {tags.length > 0 && (
                 <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
                     {tags.map((tag) => (
@@ -345,6 +328,17 @@ export default function CustomSlideshowMenu({ onStart }: CustomSlideshowMenuProp
                     </IconButton>
                 </Tooltip>
             </Box>
+
+            <TagPicker
+                open={tagPickerOpen}
+                value={tags}
+                onClose={() => setTagPickerOpen(false)}
+                onApply={(paths) => {
+                    setTagPickerOpen(false);
+                    setTags(paths);
+                }}
+                title="Filter by tags"
+            />
         </Stack>
     );
 }

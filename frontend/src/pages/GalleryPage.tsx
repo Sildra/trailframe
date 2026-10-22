@@ -9,6 +9,7 @@ import {
     IconButton,
     Menu,
     MenuItem,
+    Typography,
 } from "@mui/material";
 import ChevronLeftIcon from "@mui/icons-material/ChevronLeft";
 import ChevronRightIcon from "@mui/icons-material/ChevronRight";
@@ -18,12 +19,15 @@ import type { components } from "../api/generated/schema";
 import GroupedGallery from "../components/GroupedGallery";
 import ImageViewer from "../components/ImageViewer";
 import PhotoMetadata from "../components/PhotoMetadata";
+import TagTree from "../components/TagTree";
+import ThumbnailGallery from "../components/ThumbnailGallery";
 import UploadButton from "../components/UploadButton";
 import { duplicateKey, groupKey, locationIssueKey } from "../lib/groups";
+import type { TagNode } from "../lib/tags";
 
 type PhotoGroupSummary = components["schemas"]["PhotoGroupSummary"];
 
-const MENUS = ["Groups", "Duplicates", "Location Issues"] as const;
+const MENUS = ["Groups", "Duplicates", "Location Issues", "Tags"] as const;
 
 type Menu = (typeof MENUS)[number];
 
@@ -42,6 +46,9 @@ export default function GalleryPage() {
     const [hoveredBox, setHoveredBox] = useState<number[] | null>(null);
     const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
     const [favoriteIds, setFavoriteIds] = useState<Set<number>>(new Set());
+    const [tagTree, setTagTree] = useState<TagNode[]>([]);
+    const [tagSelection, setTagSelection] = useState<string[]>([]);
+    const [tagPhotos, setTagPhotos] = useState<{ key: string; ids: number[] }>({ key: "", ids: [] });
 
     useEffect(() => {
         let cancelled = false;
@@ -144,6 +151,61 @@ export default function GalleryPage() {
         };
     }, []);
 
+    useEffect(() => {
+        if (menu !== "Tags") {
+            return;
+        }
+
+        let cancelled = false;
+
+        api.GET("/api/tags")
+            .then(({ data, error }) => {
+                if (cancelled || error || !data) {
+                    return;
+                }
+                setTagTree(data);
+            })
+            .catch(() => {});
+
+        return () => {
+            cancelled = true;
+        };
+    }, [menu]);
+
+    const tagSelectionKey = tagSelection.join("|");
+
+    useEffect(() => {
+        if (menu !== "Tags" || tagSelection.length === 0) {
+            return;
+        }
+
+        let cancelled = false;
+
+        api.GET("/api/photos/ids", { params: { query: { tags: tagSelection } } })
+            .then(({ data, error }) => {
+                if (cancelled || error || !data) {
+                    return;
+                }
+                setTagPhotos({ key: tagSelectionKey, ids: data });
+            })
+            .catch(() => {});
+
+        return () => {
+            cancelled = true;
+        };
+    }, [menu, tagSelection, tagSelectionKey]);
+
+    const toggleTag = useCallback((path: string, checked: boolean) => {
+        setTagSelection((previous) =>
+            checked ? (previous.includes(path) ? previous : [...previous, path]) : previous.filter((entry) => entry !== path),
+        );
+    }, []);
+
+    const tagPhotoIds = useMemo(
+        () => (tagPhotos.key === tagSelection.join("|") ? tagPhotos.ids : []),
+        [tagPhotos, tagSelection],
+    );
+
     const refresh = async () => {
         const { data, error } = await api.GET("/api/photos/groups");
 
@@ -205,10 +267,14 @@ export default function GalleryPage() {
                 .flatMap((group) => group.photo_ids ?? []);
         }
 
+        if (menu === "Tags") {
+            return tagPhotoIds;
+        }
+
         return (groups ?? [])
             .filter((group) => !collapsed.has(groupKey(group)))
             .flatMap((group) => group.photo_ids ?? []);
-    }, [groups, collapsed, duplicates, duplicatesCollapsed, locationIssues, locationIssuesCollapsed, menu]);
+    }, [groups, collapsed, duplicates, duplicatesCollapsed, locationIssues, locationIssuesCollapsed, menu, tagPhotoIds]);
 
     const deletePhoto = useCallback(() => {
         if (selectedPhotoId === null) {
@@ -371,6 +437,33 @@ export default function GalleryPage() {
                         onRefresh={refresh}
                     />
                 );
+            case "Tags":
+                return (
+                    <Box sx={{ display: "flex", flexDirection: "column", minHeight: 0, flex: 1 }}>
+                        <TagTree
+                            nodes={tagTree}
+                            checkedPaths={tagSelection}
+                            checkable
+                            onToggleCheck={toggleTag}
+                            emptyLabel="No tags yet."
+                        />
+                        <Typography variant="caption" color="text.secondary" sx={{ px: 1, py: 0.5 }}>
+                            {tagSelection.length === 0
+                                ? "Tick tags to filter the gallery."
+                                : `${tagPhotoIds.length} photo${tagPhotoIds.length === 1 ? "" : "s"}`}
+                        </Typography>
+                        {tagPhotoIds.length > 0 && (
+                            <Box sx={{ px: 0.5, pb: 1 }}>
+                                <ThumbnailGallery
+                                    photoIds={tagPhotoIds}
+                                    selectedPhotoId={selectedPhotoId}
+                                    favorites={favoriteIds}
+                                    onSelect={setSelectedPhotoId}
+                                />
+                            </Box>
+                        )}
+                    </Box>
+                );
             default:
                 return (
                     <GroupedGallery
@@ -388,7 +481,7 @@ export default function GalleryPage() {
                     />
                 );
         }
-    }, [menu, groups, duplicates, duplicatesCollapsed, locationIssues, collapsed, locationIssuesCollapsed, selectedPhotoId, favoriteIds, toggleCollapsed, toggleDuplicates, toggleLocationIssues]);
+    }, [menu, groups, duplicates, duplicatesCollapsed, locationIssues, collapsed, locationIssuesCollapsed, selectedPhotoId, favoriteIds, toggleCollapsed, toggleDuplicates, toggleLocationIssues, tagTree, tagSelection, tagPhotoIds, toggleTag]);
 
     return (
         <Box sx={{ flex: 1, minHeight: 0, display: "flex" }}>

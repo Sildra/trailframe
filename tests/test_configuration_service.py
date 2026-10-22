@@ -207,6 +207,7 @@ class TestConfigurationService:
             "Location",
             "Object",
             "PerceptualHash",
+            "Rules",
             "Thumbnail",
         }
 

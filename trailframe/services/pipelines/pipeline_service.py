@@ -21,7 +21,7 @@ class PipelineService(Service):
 
     DEFAULT_PIPELINES: ClassVar[list[dict[str, Any]]] = [
         {"CreationPipeline": {"remote": "", "scanners": ["EXIF", "Thumbnail"]}},
-        {"BasicPipeline": {"remote": "", "scanners": ["Activity", "Location", "Object", "PerceptualHash"]}},
+        {"BasicPipeline": {"remote": "", "scanners": ["Activity", "Location", "Object", "PerceptualHash", "Rules"]}},
     ]
 
     PIPELINES_TEMPLATE: ClassVar[dict[str, Any]] = {
