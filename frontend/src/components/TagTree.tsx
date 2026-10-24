@@ -68,10 +68,8 @@ function TagBranch({
                 )}
                 <ListItemText
                     primary={node.name}
-                    secondary={node.description ?? undefined}
                     slotProps={{
                         primary: { sx: { fontSize: 13, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } },
-                        secondary: { sx: { fontSize: 11, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } },
                     }}
                 />
                 {node.total > 0 && (

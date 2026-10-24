@@ -33,13 +33,13 @@ export function normalizeTagPath(raw: string): string {
         .join(TAG_SEPARATOR);
 }
 
-/** Flatten a tag tree into the payload of the bulk editor. */
+/** Flatten a tag tree into its flat entries. */
 export function flattenTags(nodes: TagNode[]): TagEntry[] {
     const entries: TagEntry[] = [];
 
     const walk = (list: TagNode[]) => {
         for (const node of list) {
-            entries.push({ id: node.id ?? null, path: node.path, description: node.description ?? null });
+            entries.push({ id: node.id ?? null, path: node.path });
             walk(node.children ?? []);
         }
     };
@@ -54,7 +54,6 @@ interface MutableTagNode {
     name: string;
     path: string;
     depth: number;
-    description: string | null;
     count: number;
     total: number;
     children: MutableTagNode[];
@@ -70,7 +69,6 @@ export function buildTagTree(entries: TagEntry[]): TagNode[] {
             name: tagName(entry.path),
             path: entry.path,
             depth: entry.path.split(TAG_SEPARATOR).length - 1,
-            description: entry.description ?? null,
             count: 0,
             total: 0,
             children: [],
@@ -200,7 +198,7 @@ export function addTag(entries: TagEntry[], parent: string, name: string): TagEn
         return entries;
     }
 
-    return [...entries, { id: null, path, description: null }];
+    return [...entries, { id: null, path }];
 }
 
 /** Every path of the vocabulary, sorted. */
@@ -221,7 +219,8 @@ export interface TagRow {
     path: string;
     parent: string;
     depth: number;
-    description: string | null;
+    /** Number of tag rules assigning this exact path. */
+    rules: number;
     count: number;
     total: number;
 }
@@ -251,7 +250,7 @@ export function tagRows(tree: TagNode[], counts: Record<number, TagCounts>): Tag
                 path: node.path,
                 parent: tagParent(node.path),
                 depth: node.depth,
-                description: node.description ?? null,
+                rules: node.rules_count ?? 0,
                 count: node.id != null ? (counts[node.id]?.count ?? 0) : 0,
                 total: totals.get(node.path) ?? 0,
             });

@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
     Box,
     Button,
-    Chip,
     CircularProgress,
     Dialog,
     DialogActions,
@@ -11,121 +10,51 @@ import {
     Divider,
     IconButton,
     Stack,
-    Tab,
-    Tabs,
-    TextField,
+    Switch,
+    Table,
+    TableBody,
+    TableCell,
+    TableContainer,
+    TableHead,
+    TableRow,
     Tooltip,
     Typography,
 } from "@mui/material";
 import AddIcon from "@mui/icons-material/Add";
+import ArrowBackIcon from "@mui/icons-material/ArrowBack";
+import BoltIcon from "@mui/icons-material/Bolt";
 import DeleteIcon from "@mui/icons-material/Delete";
-import SaveIcon from "@mui/icons-material/Save";
-import UndoIcon from "@mui/icons-material/Undo";
+import EditIcon from "@mui/icons-material/Edit";
 import { api } from "../api/client";
+import type { components } from "../api/generated/schema";
 import RulePage from "../components/RulePage";
 import TagOverview from "../components/TagOverview";
-import TagTree from "../components/TagTree";
 import ThumbnailGallery from "../components/ThumbnailGallery";
-import {
-    addTag,
-    buildTagTree,
-    flattenTags,
-    isTagUnder,
-    moveTag,
-    movedTagPath,
-    removeTag,
-    renameTag,
-    renamedTagPath,
-    tagParent,
-    tagPaths,
-    type TagCounts,
-    type TagEntry,
-    type TagNode,
-} from "../lib/tags";
+import { flattenTags, type TagCounts, type TagNode } from "../lib/tags";
 
-type TagView = "overview" | "editor" | "rules";
+type TagView = "overview" | "detail" | "rule";
 
-const NEW_TAG_NAME = "New tag";
-
-interface TagNameFieldProps {
-    value: string;
-    onCommit: (name: string) => void;
-}
-
-function TagNameField({ value, onCommit }: TagNameFieldProps) {
-    const [text, setText] = useState(value);
-
-    return (
-        <TextField
-            label="Name"
-            size="small"
-            value={text}
-            onChange={(event) => {
-                setText(event.target.value);
-                onCommit(event.target.value);
-            }}
-            helperText="Renaming moves the tag and every tag below it."
-        />
-    );
-}
-
-interface TagParentFieldProps {
-    value: string;
-    options: string[];
-    onCommit: (parent: string) => void;
-}
-
-function TagParentField({ value, options, onCommit }: TagParentFieldProps) {
-    const [text, setText] = useState(value);
-
-    const commit = () => {
-        onCommit(text);
-    };
-
-    return (
-        <>
-            <TextField
-                label="Parent path"
-                size="small"
-                value={text}
-                onChange={(event) => setText(event.target.value)}
-                onBlur={commit}
-                onKeyDown={(event) => {
-                    if (event.key === "Enter") {
-                        event.preventDefault();
-                        commit();
-                    }
-                }}
-                helperText="Leave empty for a root tag. Moving a tag moves everything below it."
-                slotProps={{ htmlInput: { list: "tag-parent-options" } }}
-            />
-            <datalist id="tag-parent-options">
-                {options.map((option) => (
-                    <option key={option} value={option} />
-                ))}
-            </datalist>
-        </>
-    );
-}
+type TagRule = components["schemas"]["RuleResponse"];
 
 export default function TagsPage() {
     const [view, setView] = useState<TagView>("overview");
-    const [draft, setDraft] = useState<TagEntry[] | null>(null);
-    const [baseline, setBaseline] = useState<TagEntry[]>([]);
+    const [tree, setTree] = useState<TagNode[] | null>(null);
     const [counts, setCounts] = useState<Record<number, TagCounts>>({});
+    const [rules, setRules] = useState<TagRule[]>([]);
     const [selectedPath, setSelectedPath] = useState<string | null>(null);
-    const [filter, setFilter] = useState("");
-    const [saving, setSaving] = useState(false);
+    const [editingRule, setEditingRule] = useState<TagRule | null>(null);
     const [message, setMessage] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [confirmDelete, setConfirmDelete] = useState(false);
+    const [deleting, setDeleting] = useState(false);
+    const [applying, setApplying] = useState(false);
     const [tagPhotos, setTagPhotos] = useState<{ key: string; ids: number[] }>({ key: "", ids: [] });
 
-    const applyCounts = useCallback((tree: TagNode[]) => {
+    const applyTree = useCallback((nodes: TagNode[]) => {
         const next: Record<number, TagCounts> = {};
 
-        const walk = (nodes: TagNode[]) => {
-            for (const node of nodes) {
+        const walk = (list: TagNode[]) => {
+            for (const node of list) {
                 if (node.id != null) {
                     next[node.id] = { count: node.count, total: node.total };
                 }
@@ -133,30 +62,14 @@ export default function TagsPage() {
             }
         };
 
-        walk(tree);
+        walk(nodes);
+        setTree(nodes);
         setCounts(next);
     }, []);
 
-    const applyTree = useCallback(
-        (tree: TagNode[]) => {
-            const entries = flattenTags(tree);
-
-            setDraft(entries);
-            setBaseline(entries);
-            applyCounts(tree);
-        },
-        [applyCounts],
-    );
-
-    useEffect(() => {
-        let cancelled = false;
-
+    const loadTree = useCallback(() => {
         api.GET("/api/tags")
             .then(({ data, error: failure }) => {
-                if (cancelled) {
-                    return;
-                }
-
                 if (failure || !data) {
                     setError("The vocabulary could not be loaded.");
                     return;
@@ -165,38 +78,59 @@ export default function TagsPage() {
                 applyTree(data);
             })
             .catch(() => {});
-
-        return () => {
-            cancelled = true;
-        };
     }, [applyTree]);
 
-    const tree = useMemo(() => (draft === null ? [] : buildTagTree(draft)), [draft]);
-    const dirty = useMemo(() => JSON.stringify(draft) !== JSON.stringify(baseline), [draft, baseline]);
+    const loadRules = useCallback(() => {
+        api.GET("/api/rules")
+            .then(({ data, error: failure }) => {
+                if (failure || !data) {
+                    setError("The rules could not be loaded.");
+                    return;
+                }
+
+                setRules(data);
+            })
+            .catch(() => {});
+    }, []);
+
+    useEffect(() => loadTree(), [loadTree]);
+    useEffect(() => loadRules(), [loadRules]);
+
+    const entries = useMemo(() => (tree === null ? [] : flattenTags(tree)), [tree]);
 
     const selected = useMemo(() => {
-        if (draft === null || selectedPath === null) {
+        if (selectedPath === null) {
             return null;
         }
 
-        return draft.find((entry) => entry.path === selectedPath) ?? null;
-    }, [draft, selectedPath]);
+        const find = (nodes: TagNode[]): TagNode | null => {
+            for (const node of nodes) {
+                if (node.path === selectedPath) {
+                    return node;
+                }
 
-    const selectedCounts = useMemo(() => {
-        if (!selected || selected.id == null) {
-            return { count: 0, total: 0 };
+                const match = find(node.children ?? []);
+
+                if (match !== null) {
+                    return match;
+                }
+            }
+
+            return null;
+        };
+
+        return find(tree ?? []);
+    }, [selectedPath, tree]);
+
+    const tagRules = useMemo(() => {
+        if (selected === null) {
+            return [];
         }
 
-        return counts[selected.id] ?? { count: 0, total: 0 };
-    }, [selected, counts]);
-
-    const descendants = useMemo(() => {
-        if (draft === null || selectedPath === null) {
-            return 0;
-        }
-
-        return draft.filter((entry) => entry.path !== selectedPath && entry.path.startsWith(`${selectedPath}/`)).length;
-    }, [draft, selectedPath]);
+        return rules
+            .filter((rule) => rule.tag === selected.path)
+            .sort((left, right) => left.name.localeCompare(right.name));
+    }, [rules, selected]);
 
     useEffect(() => {
         if (selectedPath === null) {
@@ -217,47 +151,37 @@ export default function TagsPage() {
         return () => {
             cancelled = true;
         };
-    }, [selectedPath, baseline]);
+    }, [selectedPath]);
 
     const photoIds = useMemo(
         () => (tagPhotos.key === selectedPath ? tagPhotos.ids : []),
         [tagPhotos, selectedPath],
     );
 
-    const save = async () => {
-        if (draft === null) {
-            return;
-        }
-
-        setSaving(true);
-        setError(null);
-        setMessage(null);
-
-        const { data, error: failure } = await api.PUT("/api/tags", { body: { tags: draft } });
-
-        setSaving(false);
-
-        if (failure || !data) {
-            setError("The vocabulary could not be saved.");
-            return;
-        }
-
-        applyTree(data);
-        setMessage("Vocabulary saved.");
-    };
-
-    const revert = () => {
-        setDraft(baseline.map((entry) => ({ ...entry })));
+    const openTag = (path: string) => {
+        setSelectedPath(path);
+        setView("detail");
+        setEditingRule(null);
         setMessage(null);
         setError(null);
+        loadRules();
     };
 
-    const quickAdd = async (path: string, description: string): Promise<string | null> => {
+    const backToOverview = () => {
+        setSelectedPath(null);
+        setView("overview");
+        setEditingRule(null);
+    };
+
+    const backToTag = () => {
+        setView("detail");
+        setEditingRule(null);
+    };
+
+    const quickAdd = async (path: string): Promise<string | null> => {
         setError(null);
 
-        const { data, error: failure } = await api.POST("/api/tags", {
-            body: { path, description: description || null },
-        });
+        const { data, error: failure } = await api.POST("/api/tags", { body: { path } });
 
         if (failure || !data) {
             const detail = failure && typeof failure === "object" && "detail" in failure ? failure.detail : null;
@@ -269,101 +193,109 @@ export default function TagsPage() {
             return typeof detail === "string" ? detail : "The tag could not be added.";
         }
 
-        const entries = flattenTags(data);
-
-        if (dirty) {
-            // The editor holds unsaved changes: keep them and add the new tag.
-            setDraft((previous) => {
-                if (previous === null) {
-                    return entries;
-                }
-
-                const known = new Set(previous.map((entry) => entry.id).filter((id) => id != null));
-
-                return [...previous, ...entries.filter((entry) => entry.id != null && !known.has(entry.id))];
-            });
-            applyCounts(data);
-        } else {
-            applyTree(data);
-        }
-
+        applyTree(data);
         setMessage(`Added the tag "${path}".`);
 
         return null;
     };
 
-    const updateSelected = (changes: Partial<TagEntry>) => {
-        if (!selected || selectedPath === null) {
+    const deleteTag = async () => {
+        setConfirmDelete(false);
+
+        if (selected?.id == null) {
             return;
         }
 
-        setDraft((previous) =>
-            previous === null
-                ? previous
-                : previous.map((entry) => (entry.path === selectedPath ? { ...entry, ...changes } : entry)),
+        setDeleting(true);
+        setError(null);
+        setMessage(null);
+
+        const { error: failure } = await api.DELETE("/api/tags/{tag_id}", {
+            params: { path: { tag_id: selected.id } },
+        });
+
+        setDeleting(false);
+
+        if (failure) {
+            setError("The tag could not be deleted.");
+            return;
+        }
+
+        backToOverview();
+        setMessage("Tag deleted.");
+        loadTree();
+        loadRules();
+    };
+
+    const toggleRule = async (rule: TagRule) => {
+        if (rule.id == null) {
+            return;
+        }
+
+        setError(null);
+
+        const { error: failure } = await api.PUT("/api/rules/{rule_id}", {
+            params: { path: { rule_id: rule.id } },
+            body: {
+                tag: rule.tag,
+                name: rule.name,
+                description: rule.description,
+                enabled: !rule.enabled,
+                priority: rule.priority,
+                expression: rule.expression,
+                definition: rule.definition,
+            },
+        });
+
+        if (failure) {
+            setError("The rule could not be updated.");
+            return;
+        }
+
+        loadRules();
+    };
+
+    const deleteRule = async (rule: TagRule) => {
+        if (rule.id == null) {
+            return;
+        }
+
+        setError(null);
+        setMessage(null);
+
+        const { error: failure } = await api.DELETE("/api/rules/{rule_id}", {
+            params: { path: { rule_id: rule.id } },
+        });
+
+        if (failure) {
+            setError("The rule could not be deleted.");
+            return;
+        }
+
+        setMessage(`Deleted the rule "${rule.name}".`);
+        loadRules();
+    };
+
+    const applyRules = async () => {
+        setApplying(true);
+        setError(null);
+        setMessage(null);
+
+        const { data, error: failure } = await api.POST("/api/rules/apply");
+
+        setApplying(false);
+
+        if (failure || !data) {
+            setError("The rules could not be applied.");
+            return;
+        }
+
+        setMessage(
+            `Applied the rules to ${data.photos} photo${data.photos === 1 ? "" : "s"}: ${data.changed} received a tag, ${data.added} tag${data.added === 1 ? "" : "s"} added.`,
         );
     };
 
-    const handleRename = (name: string) => {
-        if (selectedPath === null) {
-            return;
-        }
-
-        const target = renamedTagPath(selectedPath, name);
-
-        setDraft((previous) => (previous === null ? previous : renameTag(previous, selectedPath, name)));
-
-        if (target !== selectedPath) {
-            setSelectedPath(target);
-        }
-    };
-
-    const handleMove = (parent: string) => {
-        if (selectedPath === null) {
-            return;
-        }
-
-        const target = movedTagPath(selectedPath, parent);
-
-        if (target === selectedPath || isTagUnder(target, selectedPath)) {
-            return;
-        }
-
-        setDraft((previous) => (previous === null ? previous : moveTag(previous, selectedPath, parent)));
-        setSelectedPath(target);
-    };
-
-    const handleAdd = (parent: string) => {
-        if (draft === null) {
-            return;
-        }
-
-        const path = parent ? `${parent}/${NEW_TAG_NAME}` : NEW_TAG_NAME;
-
-        setDraft(addTag(draft, parent, NEW_TAG_NAME));
-        setSelectedPath(path);
-    };
-
-    const handleDelete = () => {
-        setConfirmDelete(false);
-
-        if (selectedPath === null) {
-            return;
-        }
-
-        setDraft((previous) => (previous === null ? previous : removeTag(previous, selectedPath)));
-        setSelectedPath(null);
-    };
-
-    const parentOptions = useMemo(() => {
-        if (draft === null) {
-            return [];
-        }
-
-        return tagPaths(draft).filter((path) => path !== selectedPath);
-    }, [draft, selectedPath]);
-
-    if (draft === null) {
+    if (tree === null) {
         return (
             <Box sx={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
                 <CircularProgress />
@@ -385,29 +317,7 @@ export default function TagsPage() {
                     flexWrap: "wrap",
                 }}
             >
-                <Typography variant="h6" sx={{ mr: 1 }}>
-                    Tags
-                </Typography>
-
-                <Tabs
-                    value={view}
-                    onChange={(_event, value: TagView) => setView(value)}
-                    sx={{ minHeight: 34, "& .MuiTab-root": { minHeight: 34, py: 0 } }}
-                >
-                    <Tab value="overview" label="Overview" />
-                    <Tab value="editor" label="Vocabulary" />
-                    <Tab value="rules" label="Rules" />
-                </Tabs>
-
-                {view === "editor" && (
-                    <TextField
-                        size="small"
-                        value={filter}
-                        onChange={(event) => setFilter(event.target.value)}
-                        placeholder="Search the vocabulary"
-                        sx={{ width: 220 }}
-                    />
-                )}
+                <Typography variant="h6">Tags</Typography>
 
                 <Box sx={{ flex: 1 }} />
                 {message && (
@@ -420,138 +330,187 @@ export default function TagsPage() {
                         {error}
                     </Typography>
                 )}
-                {view === "overview" ? (
-                    <Button size="small" variant="contained" startIcon={<AddIcon />} onClick={() => setView("editor")}>
-                        Edit vocabulary
-                    </Button>
-                ) : view === "rules" ? null : (
-                    <>
-                        <Button size="small" startIcon={<AddIcon />} onClick={() => handleAdd("")}>
-                            New tag
-                        </Button>
-                        <Button size="small" startIcon={<UndoIcon />} onClick={revert} disabled={!dirty}>
-                            Revert
-                        </Button>
-                        <Button size="small" variant="contained" startIcon={<SaveIcon />} onClick={save} disabled={!dirty || saving}>
-                            Save
-                        </Button>
-                    </>
-                )}
             </Box>
 
-            {view === "overview" ? (
-                <TagOverview
-                    tree={tree}
-                    counts={counts}
-                    paths={parentOptions}
-                    onOpenTag={(path) => {
-                        setSelectedPath(path);
-                        setView("editor");
+            {view === "rule" && selected !== null ? (
+                <RulePage
+                    key={`${selected.path}:${editingRule?.id ?? "new"}`}
+                    tagPath={selected.path}
+                    rule={editingRule}
+                    onBack={backToTag}
+                    onSaved={() => {
+                        backToTag();
+                        setMessage("Rule saved.");
+                        loadRules();
+                        loadTree();
                     }}
-                    onQuickAdd={quickAdd}
                 />
-            ) : view === "rules" ? (
-                <RulePage tagEntries={draft ?? []} />
-            ) : (
-                <Box sx={{ flex: 1, minHeight: 0, display: "flex" }}>
-                <Box sx={{ width: 340, flexShrink: 0, borderRight: 1, borderColor: "divider", overflowY: "auto" }}>
-                    <TagTree
-                        nodes={tree}
-                        selectedPath={selectedPath}
-                        onSelect={(node) => setSelectedPath(node.path)}
-                        filter={filter}
-                        emptyLabel="No tags yet — create one to get started."
-                    />
-                </Box>
-
-                <Box sx={{ flex: 1, minWidth: 0, overflowY: "auto", p: 2 }}>
-                    {selected === null ? (
-                        <Typography color="text.secondary">Select a tag to edit it.</Typography>
-                    ) : (
-                        <Stack spacing={2} sx={{ maxWidth: 640 }}>
-                            <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                                <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
-                                    {selected.path}
-                                </Typography>
-                                <Box sx={{ flex: 1 }} />
-                                <Button size="small" startIcon={<AddIcon />} onClick={() => handleAdd(selected.path)}>
-                                    Add child
-                                </Button>
-                                <Tooltip title="Delete the tag and every tag below it">
+            ) : view === "detail" && selected !== null ? (
+                <Box sx={{ flex: 1, minHeight: 0, overflowY: "auto", p: 2 }}>
+                    <Stack spacing={2} sx={{ maxWidth: 960 }}>
+                        <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                            <Tooltip title="Back to the overview">
+                                <IconButton size="small" aria-label="Back to overview" onClick={backToOverview}>
+                                    <ArrowBackIcon fontSize="small" />
+                                </IconButton>
+                            </Tooltip>
+                            <Typography variant="h6" sx={{ fontWeight: 600, wordBreak: "break-word" }}>
+                                {selected.path}
+                            </Typography>
+                            <Box sx={{ flex: 1 }} />
+                            <Tooltip title="Delete the tag and every tag below it">
+                                <span>
                                     <IconButton
                                         size="small"
                                         color="error"
                                         aria-label="Delete tag"
+                                        disabled={deleting}
                                         onClick={() => setConfirmDelete(true)}
                                     >
                                         <DeleteIcon fontSize="small" />
                                     </IconButton>
+                                </span>
+                            </Tooltip>
+                        </Box>
+
+                        <Box>
+                            <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1 }}>
+                                <Typography variant="subtitle2">Rules</Typography>
+                                <Box sx={{ flex: 1 }} />
+                                <Button
+                                    size="small"
+                                    startIcon={<AddIcon />}
+                                    onClick={() => {
+                                        setEditingRule(null);
+                                        setView("rule");
+                                    }}
+                                >
+                                    New rule
+                                </Button>
+                                <Tooltip title="Apply every enabled rule to the photos already in the library">
+                                    <span>
+                                        <Button
+                                            size="small"
+                                            startIcon={<BoltIcon />}
+                                            onClick={applyRules}
+                                            disabled={applying}
+                                        >
+                                            Apply to all photos
+                                        </Button>
+                                    </span>
                                 </Tooltip>
                             </Box>
 
-                            <TagNameField
-                                key={`name:${selected.path}`}
-                                value={selected.path.split("/").pop() ?? ""}
-                                onCommit={handleRename}
-                            />
-
-                            <TagParentField
-                                key={`parent:${selected.path}`}
-                                value={tagParent(selected.path)}
-                                options={parentOptions}
-                                onCommit={handleMove}
-                            />
-
-                            <TextField
-                                label="Description"
-                                size="small"
-                                multiline
-                                minRows={2}
-                                value={selected.description ?? ""}
-                                onChange={(event) => updateSelected({ description: event.target.value || null })}
-                            />
-
-                            <Box sx={{ display: "flex", gap: 2 }}>
-                                <Chip size="small" label={`${selectedCounts.count} photos`} />
-                                <Chip size="small" label={`${selectedCounts.total} including descendants`} />
-                                <Chip size="small" label={`${descendants} descendant tags`} />
-                            </Box>
-
-                            <Divider />
-
-                            <Box>
-                                <Typography variant="subtitle2" sx={{ mb: 1 }}>
-                                    Photos ({photoIds.length})
+                            {tagRules.length === 0 ? (
+                                <Typography variant="body2" color="text.secondary">
+                                    No rule assigns this tag yet.
                                 </Typography>
-                                {photoIds.length === 0 ? (
-                                    <Typography variant="body2" color="text.secondary">
-                                        No photo carries this tag yet.
-                                    </Typography>
-                                ) : (
-                                    <ThumbnailGallery photoIds={photoIds} selectedPhotoId={null} onSelect={() => {}} />
-                                )}
-                            </Box>
-                        </Stack>
-                    )}
+                            ) : (
+                                <TableContainer sx={{ border: 1, borderColor: "divider", borderRadius: 1 }}>
+                                    <Table>
+                                        <TableHead>
+                                            <TableRow>
+                                                <TableCell>Rule</TableCell>
+                                                <TableCell align="center" sx={{ width: 80 }}>
+                                                    On
+                                                </TableCell>
+                                                <TableCell align="right" sx={{ width: 100 }} />
+                                            </TableRow>
+                                        </TableHead>
+                                        <TableBody>
+                                            {tagRules.map((rule) => (
+                                                <TableRow key={`rule-${rule.id ?? rule.name}`} hover>
+                                                    <TableCell>
+                                                        <Typography
+                                                            variant="body2"
+                                                            sx={{ cursor: "pointer", fontWeight: 500 }}
+                                                            onClick={() => {
+                                                                setEditingRule(rule);
+                                                                setView("rule");
+                                                            }}
+                                                        >
+                                                            {rule.name}
+                                                        </Typography>
+                                                    </TableCell>
+                                                    <TableCell align="center">
+                                                        <Switch
+                                                            size="small"
+                                                            checked={rule.enabled}
+                                                            onChange={() => toggleRule(rule)}
+                                                            slotProps={{
+                                                                input: { "aria-label": `Enable ${rule.name}` },
+                                                            }}
+                                                        />
+                                                    </TableCell>
+                                                    <TableCell align="right">
+                                                        <Tooltip title="Edit the rule">
+                                                            <IconButton
+                                                                size="small"
+                                                                aria-label="Edit rule"
+                                                                onClick={() => {
+                                                                    setEditingRule(rule);
+                                                                    setView("rule");
+                                                                }}
+                                                            >
+                                                                <EditIcon fontSize="small" />
+                                                            </IconButton>
+                                                        </Tooltip>
+                                                        <Tooltip title="Delete the rule">
+                                                            <IconButton
+                                                                size="small"
+                                                                color="error"
+                                                                aria-label="Delete rule"
+                                                                onClick={() => deleteRule(rule)}
+                                                            >
+                                                                <DeleteIcon fontSize="small" />
+                                                            </IconButton>
+                                                        </Tooltip>
+                                                    </TableCell>
+                                                </TableRow>
+                                            ))}
+                                        </TableBody>
+                                    </Table>
+                                </TableContainer>
+                            )}
+                        </Box>
+
+                        <Divider />
+
+                        <Box>
+                            <Typography variant="subtitle2" sx={{ mb: 1 }}>
+                                Photos
+                            </Typography>
+                            {photoIds.length === 0 ? (
+                                <Typography variant="body2" color="text.secondary">
+                                    No photo carries this tag yet.
+                                </Typography>
+                            ) : (
+                                <ThumbnailGallery photoIds={photoIds} selectedPhotoId={null} onSelect={() => {}} />
+                            )}
+                        </Box>
+                    </Stack>
                 </Box>
-                </Box>
+            ) : (
+                <TagOverview
+                    tree={tree}
+                    counts={counts}
+                    paths={entries.map((entry) => entry.path)}
+                    onOpenTag={openTag}
+                    onQuickAdd={quickAdd}
+                />
             )}
 
             <Dialog open={confirmDelete} onClose={() => setConfirmDelete(false)}>
                 <DialogTitle>Delete tag</DialogTitle>
                 <DialogContent>
-                    <Typography>
-                        Delete &ldquo;{selectedPath}&rdquo;?
-                    </Typography>
+                    <Typography>Delete &ldquo;{selected?.path}&rdquo;?</Typography>
                     <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-                        {descendants} descendant tag{descendants === 1 ? "" : "s"} and{" "}
-                        {selectedCounts.total} photo{selectedCounts.total === 1 ? "" : "s"} will lose the tag. The change is
-                        applied when the vocabulary is saved.
+                        Every tag below it is deleted too, and the photos carrying them lose the tag.
                     </Typography>
                 </DialogContent>
                 <DialogActions>
                     <Button onClick={() => setConfirmDelete(false)}>Cancel</Button>
-                    <Button color="error" onClick={handleDelete}>
+                    <Button color="error" onClick={deleteTag}>
                         Delete
                     </Button>
                 </DialogActions>

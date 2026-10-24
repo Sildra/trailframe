@@ -4,6 +4,23 @@
  */
 
 export interface paths {
+    "/api/about/version": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Version */
+        get: operations["get_version_api_about_version_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/about/packages": {
         parameters: {
             query?: never;
@@ -13,6 +30,40 @@ export interface paths {
         };
         /** List Packages */
         get: operations["list_packages_api_about_packages_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/docs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Documents */
+        get: operations["list_documents_api_docs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/docs/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Document */
+        get: operations["get_document_api_docs__name__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -815,7 +866,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/tag-rules/fields": {
+    "/api/rules/schema": {
         parameters: {
             query?: never;
             header?: never;
@@ -823,10 +874,10 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * List Fields
-         * @description The metadata catalog the assisted builder renders.
+         * Get Schema
+         * @description The photo schema the editor renders, validates and hints from.
          */
-        get: operations["list_fields_api_tag_rules_fields_get"];
+        get: operations["get_schema_api_rules_schema_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -835,7 +886,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/tag-rules": {
+    "/api/rules/values": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Values
+         * @description Bounded value dictionaries for the editor's suggestions.
+         */
+        get: operations["get_values_api_rules_values_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/rules": {
         parameters: {
             query?: never;
             header?: never;
@@ -843,17 +914,17 @@ export interface paths {
             cookie?: never;
         };
         /** List Rules */
-        get: operations["list_rules_api_tag_rules_get"];
+        get: operations["list_rules_api_rules_get"];
         put?: never;
         /** Create Rule */
-        post: operations["create_rule_api_tag_rules_post"];
+        post: operations["create_rule_api_rules_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/tag-rules/test": {
+    "/api/rules/preview": {
         parameters: {
             query?: never;
             header?: never;
@@ -862,15 +933,18 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Test Rule */
-        post: operations["test_rule_api_tag_rules_test_post"];
+        /**
+         * Preview Rule
+         * @description The photos a draft rule would tag; read-only.
+         */
+        post: operations["preview_rule_api_rules_preview_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/tag-rules/apply": {
+    "/api/rules/apply": {
         parameters: {
             query?: never;
             header?: never;
@@ -883,14 +957,14 @@ export interface paths {
          * Apply Rules
          * @description Apply every enabled rule to the photos already in the library.
          */
-        post: operations["apply_rules_api_tag_rules_apply_post"];
+        post: operations["apply_rules_api_rules_apply_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/tag-rules/{rule_id}": {
+    "/api/rules/{rule_id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -898,12 +972,12 @@ export interface paths {
             cookie?: never;
         };
         /** Get Rule */
-        get: operations["get_rule_api_tag_rules__rule_id__get"];
+        get: operations["get_rule_api_rules__rule_id__get"];
         /** Update Rule */
-        put: operations["update_rule_api_tag_rules__rule_id__put"];
+        put: operations["update_rule_api_rules__rule_id__put"];
         post?: never;
         /** Delete Rule */
-        delete: operations["delete_rule_api_tag_rules__rule_id__delete"];
+        delete: operations["delete_rule_api_rules__rule_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1025,6 +1099,90 @@ export interface components {
             /** File */
             file: string;
         };
+        /**
+         * Definition
+         * @description The parsed form of a rule expression; the authoritative rule body.
+         */
+        "Definition-Input": {
+            /**
+             * Version
+             * @default 1
+             */
+            version: number;
+            /**
+             * Match
+             * @default all
+             * @enum {string}
+             */
+            match: "all" | "any";
+            /** Conditions */
+            conditions?: (components["schemas"]["ScalarCondition"] | components["schemas"]["DetectionCondition"] | components["schemas"]["GroupCondition-Input"])[];
+        };
+        /**
+         * Definition
+         * @description The parsed form of a rule expression; the authoritative rule body.
+         */
+        "Definition-Output": {
+            /**
+             * Version
+             * @default 1
+             */
+            version: number;
+            /**
+             * Match
+             * @default all
+             * @enum {string}
+             */
+            match: "all" | "any";
+            /** Conditions */
+            conditions?: (components["schemas"]["ScalarCondition"] | components["schemas"]["DetectionCondition"] | components["schemas"]["GroupCondition-Output"])[];
+        };
+        /**
+         * DetectionCondition
+         * @description A detected object, optionally bound to one label and numeric metrics.
+         *
+         *     The label and its metrics apply to the *same* detection.
+         */
+        DetectionCondition: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "detection";
+            /**
+             * Label
+             * @default
+             */
+            label: string;
+            /**
+             * Op
+             * @default present
+             * @enum {string}
+             */
+            op: "present" | "absent";
+            /** Metrics */
+            metrics?: components["schemas"]["MetricConstraint"][];
+        };
+        /** Document */
+        Document: {
+            /** Name */
+            name: string;
+            /** Title */
+            title: string;
+            /** Description */
+            description: string;
+            /** Content */
+            content: string;
+        };
+        /** DocumentSummary */
+        DocumentSummary: {
+            /** Name */
+            name: string;
+            /** Title */
+            title: string;
+            /** Description */
+            description: string;
+        };
         /** FavoriteUpdate */
         FavoriteUpdate: {
             /** Value */
@@ -1101,6 +1259,44 @@ export interface components {
              */
             imported: boolean;
         };
+        /**
+         * GroupCondition
+         * @description A nested `all`/`any` group of conditions.
+         */
+        "GroupCondition-Input": {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "group";
+            /**
+             * Match
+             * @default all
+             * @enum {string}
+             */
+            match: "all" | "any";
+            /** Conditions */
+            conditions?: (components["schemas"]["ScalarCondition"] | components["schemas"]["DetectionCondition"] | components["schemas"]["GroupCondition-Input"])[];
+        };
+        /**
+         * GroupCondition
+         * @description A nested `all`/`any` group of conditions.
+         */
+        "GroupCondition-Output": {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "group";
+            /**
+             * Match
+             * @default all
+             * @enum {string}
+             */
+            match: "all" | "any";
+            /** Conditions */
+            conditions?: (components["schemas"]["ScalarCondition"] | components["schemas"]["DetectionCondition"] | components["schemas"]["GroupCondition-Output"])[];
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -1126,6 +1322,22 @@ export interface components {
             photos: components["schemas"]["PhotoPoint"][];
             /** Activities */
             activities: components["schemas"]["ActivityTrace"][];
+        };
+        /**
+         * MetricConstraint
+         * @description A numeric bound on one detection metric (`confidence`, `surface`).
+         */
+        MetricConstraint: {
+            /** Name */
+            name: string;
+            /**
+             * Op
+             * @default gte
+             * @enum {string}
+             */
+            op: "eq" | "neq" | "gt" | "gte" | "lt" | "lte";
+            /** Value */
+            value: number;
         };
         /** PackageInfo */
         PackageInfo: {
@@ -1297,6 +1509,137 @@ export interface components {
             /** Scanners */
             scanners: string[];
         };
+        /** RuleApplyResponse */
+        RuleApplyResponse: {
+            /** Photos */
+            photos: number;
+            /** Changed */
+            changed: number;
+            /** Added */
+            added: number;
+        };
+        /**
+         * RulePayload
+         * @description A rule as authored in the editor. The tag owns the rule.
+         */
+        RulePayload: {
+            /** Tag */
+            tag: string;
+            /** Name */
+            name: string;
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /**
+             * Enabled
+             * @default true
+             */
+            enabled: boolean;
+            /**
+             * Priority
+             * @default 0
+             */
+            priority: number;
+            /**
+             * Expression
+             * @default
+             */
+            expression: string;
+            definition: components["schemas"]["Definition-Input"];
+        };
+        /** RulePreviewPhoto */
+        RulePreviewPhoto: {
+            /** Photo Id */
+            photo_id?: number | null;
+            /** Filename */
+            filename?: string | null;
+        };
+        /**
+         * RulePreviewRequest
+         * @description A draft rule to evaluate against the photos already in the library.
+         */
+        RulePreviewRequest: {
+            /** Tag */
+            tag: string;
+            definition: components["schemas"]["Definition-Input"];
+            /**
+             * Limit
+             * @default 24
+             */
+            limit: number;
+        };
+        /** RulePreviewResponse */
+        RulePreviewResponse: {
+            /** Tag */
+            tag: string;
+            /** Count */
+            count: number;
+            /**
+             * Truncated
+             * @default false
+             */
+            truncated: boolean;
+            /**
+             * Photos
+             * @default []
+             */
+            photos: components["schemas"]["RulePreviewPhoto"][];
+        };
+        /**
+         * RuleResponse
+         * @description A stored rule, with its id and owning tag.
+         */
+        RuleResponse: {
+            /** Tag */
+            tag: string;
+            /** Name */
+            name: string;
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /**
+             * Enabled
+             * @default true
+             */
+            enabled: boolean;
+            /**
+             * Priority
+             * @default 0
+             */
+            priority: number;
+            /**
+             * Expression
+             * @default
+             */
+            expression: string;
+            definition: components["schemas"]["Definition-Output"];
+            /** Id */
+            id: string;
+        };
+        /**
+         * ScalarCondition
+         * @description A comparison of one metadata field against a value.
+         */
+        ScalarCondition: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "scalar";
+            /** Path */
+            path: string;
+            /**
+             * Op
+             * @default eq
+             */
+            op: string;
+            /** Value */
+            value?: string | number | boolean | string[] | null;
+        };
         /** ScannerStatSummary */
         ScannerStatSummary: {
             /** Name */
@@ -1320,8 +1663,6 @@ export interface components {
         TagCreate: {
             /** Path */
             path: string;
-            /** Description */
-            description?: string | null;
         };
         /**
          * TagError
@@ -1347,8 +1688,6 @@ export interface components {
              * @default 0
              */
             depth: number;
-            /** Description */
-            description?: string | null;
             /**
              * Count
              * @default 0
@@ -1359,6 +1698,11 @@ export interface components {
              * @default 0
              */
             total: number;
+            /**
+             * Rules Count
+             * @default 0
+             */
+            rules_count: number;
             /** Children */
             children?: components["schemas"]["TagNode"][];
         };
@@ -1371,148 +1715,6 @@ export interface components {
             id?: number | null;
             /** Path */
             path: string;
-            /** Description */
-            description?: string | null;
-        };
-        /**
-         * TagRuleApplyResponse
-         * @description The outcome of applying every enabled rule to the library.
-         */
-        TagRuleApplyResponse: {
-            /** Photos */
-            photos: number;
-            /** Changed */
-            changed: number;
-            /** Added */
-            added: number;
-        };
-        /**
-         * TagRuleField
-         * @description One metadata field the assisted builder offers.
-         */
-        TagRuleField: {
-            /** Field */
-            field: string;
-            /** Group */
-            group: string;
-            /** Label */
-            label: string;
-            /** Description */
-            description: string;
-            /** Kind */
-            kind: string;
-            /** Label Field */
-            label_field?: string | null;
-            /**
-             * Metrics
-             * @default []
-             */
-            metrics: string[];
-            /**
-             * Suggestions
-             * @default []
-             */
-            suggestions: string[];
-            /**
-             * Operators
-             * @default []
-             */
-            operators: {
-                [key: string]: string;
-            }[];
-        };
-        /**
-         * TagRulePayload
-         * @description A rule as edited in the assisted builder.
-         */
-        TagRulePayload: {
-            /** Name */
-            name: string;
-            /**
-             * Enabled
-             * @default true
-             */
-            enabled: boolean;
-            /**
-             * Priority
-             * @default 0
-             */
-            priority: number;
-            /** Description */
-            description?: string | null;
-            /**
-             * Conditions
-             * @default {}
-             */
-            conditions: {
-                [key: string]: unknown;
-            };
-            /**
-             * Tags
-             * @default []
-             */
-            tags: string[];
-        };
-        /**
-         * TagRuleResponse
-         * @description A stored rule.
-         */
-        TagRuleResponse: {
-            /** Id */
-            id?: number | null;
-            /** Name */
-            name: string;
-            /**
-             * Enabled
-             * @default true
-             */
-            enabled: boolean;
-            /**
-             * Priority
-             * @default 0
-             */
-            priority: number;
-            /** Description */
-            description?: string | null;
-            /**
-             * Conditions
-             * @default {}
-             */
-            conditions: {
-                [key: string]: unknown;
-            };
-            /**
-             * Tags
-             * @default []
-             */
-            tags: string[];
-        };
-        /**
-         * TagRuleTestMatch
-         * @description One photo a draft rule matches, with the tags it would add.
-         */
-        TagRuleTestMatch: {
-            /** Photo Id */
-            photo_id?: number | null;
-            /** Filename */
-            filename?: string | null;
-            /**
-             * Tags
-             * @default []
-             */
-            tags: string[];
-        };
-        /**
-         * TagRuleTestRequest
-         * @description A draft rule to evaluate against the photos already in the library.
-         */
-        TagRuleTestRequest: {
-            rule: components["schemas"]["TagRulePayload"];
-            /**
-             * Limit
-             * @default 50
-             */
-            limit: number;
         };
         /**
          * TagSyncRequest
@@ -1535,6 +1737,11 @@ export interface components {
             /** Context */
             ctx?: Record<string, never>;
         };
+        /** VersionInfo */
+        VersionInfo: {
+            /** Version */
+            version: string;
+        };
     };
     responses: never;
     parameters: never;
@@ -1544,6 +1751,26 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    get_version_api_about_version_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VersionInfo"];
+                };
+            };
+        };
+    };
     list_packages_api_about_packages_get: {
         parameters: {
             query?: never;
@@ -1560,6 +1787,57 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PackageInfo"][];
+                };
+            };
+        };
+    };
+    list_documents_api_docs_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentSummary"][];
+                };
+            };
+        };
+    };
+    get_document_api_docs__name__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Document"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -3125,7 +3403,7 @@ export interface operations {
             };
         };
     };
-    list_fields_api_tag_rules_fields_get: {
+    get_schema_api_rules_schema_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -3140,12 +3418,14 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TagRuleField"][];
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
                 };
             };
         };
     };
-    list_rules_api_tag_rules_get: {
+    get_values_api_rules_values_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -3160,12 +3440,34 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TagRuleResponse"][];
+                    "application/json": {
+                        [key: string]: string[];
+                    };
                 };
             };
         };
     };
-    create_rule_api_tag_rules_post: {
+    list_rules_api_rules_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuleResponse"][];
+                };
+            };
+        };
+    };
+    create_rule_api_rules_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -3174,7 +3476,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["TagRulePayload"];
+                "application/json": components["schemas"]["RulePayload"];
             };
         };
         responses: {
@@ -3184,7 +3486,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TagRuleResponse"];
+                    "application/json": components["schemas"]["RuleResponse"];
                 };
             };
             /** @description The rule is malformed */
@@ -3212,7 +3514,7 @@ export interface operations {
             };
         };
     };
-    test_rule_api_tag_rules_test_post: {
+    preview_rule_api_rules_preview_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -3221,7 +3523,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["TagRuleTestRequest"];
+                "application/json": components["schemas"]["RulePreviewRequest"];
             };
         };
         responses: {
@@ -3231,7 +3533,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TagRuleTestMatch"][];
+                    "application/json": components["schemas"]["RulePreviewResponse"];
                 };
             };
             /** @description The rule is malformed */
@@ -3259,7 +3561,7 @@ export interface operations {
             };
         };
     };
-    apply_rules_api_tag_rules_apply_post: {
+    apply_rules_api_rules_apply_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -3274,17 +3576,17 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TagRuleApplyResponse"];
+                    "application/json": components["schemas"]["RuleApplyResponse"];
                 };
             };
         };
     };
-    get_rule_api_tag_rules__rule_id__get: {
+    get_rule_api_rules__rule_id__get: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                rule_id: number;
+                rule_id: string;
             };
             cookie?: never;
         };
@@ -3296,7 +3598,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TagRuleResponse"];
+                    "application/json": components["schemas"]["RuleResponse"];
                 };
             };
             /** @description The rule is malformed */
@@ -3324,18 +3626,18 @@ export interface operations {
             };
         };
     };
-    update_rule_api_tag_rules__rule_id__put: {
+    update_rule_api_rules__rule_id__put: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                rule_id: number;
+                rule_id: string;
             };
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["TagRulePayload"];
+                "application/json": components["schemas"]["RulePayload"];
             };
         };
         responses: {
@@ -3345,7 +3647,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TagRuleResponse"];
+                    "application/json": components["schemas"]["RuleResponse"];
                 };
             };
             /** @description The rule is malformed */
@@ -3373,12 +3675,12 @@ export interface operations {
             };
         };
     };
-    delete_rule_api_tag_rules__rule_id__delete: {
+    delete_rule_api_rules__rule_id__delete: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                rule_id: number;
+                rule_id: string;
             };
             cookie?: never;
         };

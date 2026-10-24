@@ -1,5 +1,6 @@
-import { useState } from "react";
-import { AppBar, Box, Tab, Tabs, Toolbar } from "@mui/material";
+import { useCallback, useEffect, useState } from "react";
+import { AppBar, Box, IconButton, Menu, MenuItem, Tab, Tabs, Toolbar } from "@mui/material";
+import HelpOutlinedIcon from "@mui/icons-material/HelpOutlined";
 import GalleryPage from "./pages/GalleryPage";
 import ActivitiesPage from "./pages/ActivitiesPage";
 import SlideshowMenuPage from "./pages/SlideshowMenuPage";
@@ -8,11 +9,15 @@ import ParametersPage from "./pages/ConfigurationPage";
 import TagsPage from "./pages/TagsPage";
 import ToolsPage from "./pages/ToolsPage";
 import EventBar from "./components/EventBar";
+import MarkdownSlidesDialog, { type SlidePosition } from "./components/MarkdownSlidesDialog";
 import { EventProvider } from "./events/EventProvider";
+import { api } from "./api/client";
 import { parseMenuSection, type MenuSection } from "./lib/slideshowSections";
 import type { components } from "./api/generated/schema";
 
 type Page = "gallery" | "activities" | "slideshow" | "configuration" | "tags" | "tools";
+
+type DocumentName = "tutorial" | "whats-new";
 
 type Activity = components["schemas"]["ActivitySummary"];
 
@@ -24,6 +29,13 @@ const PAGES: Array<{ id: Page; label: string }> = [
     { id: "tools", label: "Tools" },
     { id: "configuration", label: "Configuration" },
 ];
+
+const DOCUMENTS: Record<DocumentName, string> = {
+    tutorial: "Tutorial",
+    "whats-new": "What's new",
+};
+
+const SEEN_VERSION_KEY = "trailframe.seenVersion";
 
 function initialPage(): Page {
     const value = new URLSearchParams(window.location.search).get("page");
@@ -38,8 +50,99 @@ export default function App() {
         parseMenuSection(initialParams.get("section")),
     );
     const [slideshowSource, setSlideshowSource] = useState<SlideshowSource | null>(null);
+    const [helpAnchor, setHelpAnchor] = useState<HTMLElement | null>(null);
+    const [openDocument, setOpenDocument] = useState<DocumentName | null>(null);
+    const [documentPosition, setDocumentPosition] = useState<SlidePosition>("first");
+    const [markSeenOnClose, setMarkSeenOnClose] = useState(false);
+    const [appVersion, setAppVersion] = useState<string | null>(null);
+    const [documents, setDocuments] = useState<Record<string, string>>({});
+    const [documentErrors, setDocumentErrors] = useState<Record<string, string>>({});
 
     const pageIndex = PAGES.findIndex(({ id }) => id === page);
+    const loadedDocument = openDocument ? documents[openDocument] : undefined;
+    const documentError = openDocument ? documentErrors[openDocument] : undefined;
+
+    useEffect(() => {
+        let cancelled = false;
+
+        api.GET("/api/about/version")
+            .then(({ data, error }) => {
+                if (cancelled || error || !data) {
+                    return;
+                }
+
+                setAppVersion(data.version);
+
+                const seenVersion = window.localStorage.getItem(SEEN_VERSION_KEY);
+
+                if (seenVersion === null) {
+                    window.localStorage.setItem(SEEN_VERSION_KEY, data.version);
+                } else if (seenVersion !== data.version) {
+                    setDocumentPosition("last");
+                    setMarkSeenOnClose(true);
+                    setOpenDocument("whats-new");
+                }
+            })
+            .catch(() => {});
+
+        return () => {
+            cancelled = true;
+        };
+    }, []);
+
+    useEffect(() => {
+        if (!openDocument || loadedDocument !== undefined || documentError !== undefined) {
+            return;
+        }
+
+        const name = openDocument;
+        let cancelled = false;
+
+        api.GET("/api/docs/{name}", { params: { path: { name } } })
+            .then(({ data, error }) => {
+                if (cancelled) {
+                    return;
+                }
+
+                if (error || !data) {
+                    setDocumentErrors((previous) => ({
+                        ...previous,
+                        [name]: "The document could not be loaded.",
+                    }));
+                    return;
+                }
+
+                setDocuments((previous) => ({ ...previous, [name]: data.content }));
+            })
+            .catch(() => {
+                if (!cancelled) {
+                    setDocumentErrors((previous) => ({
+                        ...previous,
+                        [name]: "The document could not be loaded.",
+                    }));
+                }
+            });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [openDocument, loadedDocument, documentError]);
+
+    const closeDocument = useCallback(() => {
+        if (markSeenOnClose && appVersion !== null) {
+            window.localStorage.setItem(SEEN_VERSION_KEY, appVersion);
+        }
+
+        setOpenDocument(null);
+        setMarkSeenOnClose(false);
+    }, [appVersion, markSeenOnClose]);
+
+    const showDocument = useCallback((name: DocumentName, position: SlidePosition = "first") => {
+        setHelpAnchor(null);
+        setDocumentPosition(position);
+        setMarkSeenOnClose(name === "whats-new" && position === "last");
+        setOpenDocument(name);
+    }, []);
 
     function changeSlideshowSection(section: MenuSection) {
         setSlideshowSection(section);
@@ -74,6 +177,22 @@ export default function App() {
                                     <Tab key={id} label={label} />
                                 ))}
                             </Tabs>
+                            <Box sx={{ flexGrow: 1 }} />
+                            <IconButton
+                                size="small"
+                                aria-label="Help"
+                                onClick={(event) => setHelpAnchor(event.currentTarget)}
+                            >
+                                <HelpOutlinedIcon />
+                            </IconButton>
+                            <Menu
+                                anchorEl={helpAnchor}
+                                open={helpAnchor !== null}
+                                onClose={() => setHelpAnchor(null)}
+                            >
+                                <MenuItem onClick={() => showDocument("tutorial")}>Tutorial</MenuItem>
+                                <MenuItem onClick={() => showDocument("whats-new")}>What's new</MenuItem>
+                            </Menu>
                         </Toolbar>
                     </AppBar>
                 )}
@@ -107,6 +226,16 @@ export default function App() {
                     </Box>
                 )}
             </Box>
+            <MarkdownSlidesDialog
+                key={openDocument ?? "closed"}
+                open={openDocument !== null}
+                onClose={closeDocument}
+                title={openDocument ? DOCUMENTS[openDocument] : ""}
+                markdown={loadedDocument ?? null}
+                loading={openDocument !== null && loadedDocument === undefined && documentError === undefined}
+                error={documentError ?? null}
+                initialSlide={documentPosition}
+            />
         </EventProvider>
     );
 }

@@ -1,12 +1,12 @@
 from trailframe.models.photo import Photo
-from trailframe.services.photos.tag_rule_service import TagRuleService
 from trailframe.services.photos.tag_service import TagService
 from trailframe.services.pipelines.item import Item
+from trailframe.services.rules.rule_service import RuleService
 from trailframe.services.scanners.scanner import Scanner
 
 
 class RulesScanner(Scanner):
-    """Assign tags from the user-defined rules held by `TagRuleService`.
+    """Assign tags from the user-defined rules held by `RuleService`.
 
     Runs in the standard pipeline after the metadata scanners (EXIF, Object,
     Location, ...) and before `DatabaseScanner`, so the tags written here are
@@ -25,7 +25,7 @@ class RulesScanner(Scanner):
 
     async def executePhoto(self, item: Item) -> bool:
         photo = item.photo
-        assigned = TagRuleService.tags_for_photo(photo)
+        assigned = RuleService.tags_for_photo(photo)
 
         if assigned:
             await TagService.ensure_paths(assigned)

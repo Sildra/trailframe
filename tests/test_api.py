@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime
 
 import allure
@@ -204,7 +205,51 @@ class TestConfigurationApi:
         assert scanners["Object"]["children"]["enable_remote"]["value"] is False
 
 
+class TestDocsApi:
+    @allure.title("Lists the bundled documents")
+    def test_lists_documents(self, app):
+        response = app.get("/api/docs")
+
+        assert response.status_code == 200
+        documents = response.json()
+        assert {document["name"] for document in documents} == {"tutorial", "whats-new"}
+        assert all({"name", "title", "description"} <= set(document) for document in documents)
+
+    @allure.title("Returns the Markdown content of a document")
+    def test_returns_document_content(self, app):
+        response = app.get("/api/docs/tutorial")
+
+        assert response.status_code == 200
+        document = response.json()
+        assert document["name"] == "tutorial"
+        assert document["title"] == "Tutorial"
+        assert "Trailframe" in document["content"]
+        assert "---" in document["content"]
+
+    @allure.title("Keeps What's new in ascending minor-version order")
+    def test_whats_new_versions_are_ascending(self, app):
+        content = app.get("/api/docs/whats-new").json()["content"]
+        versions = [int(value) for value in re.findall(r"^# v0\.(\d+)\.x", content, re.MULTILINE)]
+
+        assert versions
+        assert versions == list(range(1, max(versions) + 1))
+
+    @allure.title("Returns 404 for an unknown document")
+    def test_unknown_document_returns_404(self, app):
+        response = app.get("/api/docs/missing")
+
+        assert response.status_code == 404
+
+
 class TestAboutApi:
+    @allure.title("Returns the application version")
+    def test_version_returns_string(self, app):
+        response = app.get("/api/about/version")
+
+        assert response.status_code == 200
+        assert isinstance(response.json()["version"], str)
+        assert response.json()["version"]
+
     @allure.title("Lists imported packages with name, version and license")
     def test_packages_returns_list(self, app):
         response = app.get("/api/about/packages")

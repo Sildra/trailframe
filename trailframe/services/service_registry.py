@@ -13,10 +13,10 @@ from trailframe.services.map.tile_service import TileService
 from trailframe.services.photos.duplicates_service import DuplicatesService
 from trailframe.services.photos.folder_service import FolderService
 from trailframe.services.photos.photo_service import PhotoService
-from trailframe.services.photos.tag_rule_service import TagRuleService
 from trailframe.services.photos.tag_service import TagService
 from trailframe.services.photos.thumbnail_service import ThumbnailService
 from trailframe.services.pipelines.pipeline_service import PipelineService
+from trailframe.services.rules.rule_service import RuleService
 from trailframe.services.scanners import SCANNERS
 from trailframe.services.service import Service
 
@@ -34,7 +34,7 @@ class ServiceRegistry(Service):
         DatabaseService,
         PhotoService,
         TagService,
-        TagRuleService,
+        RuleService,
         PipelineService,
         FolderService,
         ThumbnailService,

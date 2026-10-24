@@ -3,6 +3,7 @@ from pydantic import BaseModel
 
 from trailframe.models.tag import TagNode
 from trailframe.services.photos.tag_service import TagConflictError, TagService
+from trailframe.services.rules.rule_service import RuleService
 
 router = APIRouter(prefix="/api/tags", tags=["tags"])
 
@@ -12,7 +13,6 @@ class TagPayload(BaseModel):
 
     id: int | None = None
     path: str
-    description: str | None = None
 
 
 class TagSyncRequest(BaseModel):
@@ -25,7 +25,6 @@ class TagCreate(BaseModel):
     """A single tag to add to the vocabulary."""
 
     path: str
-    description: str | None = None
 
 
 class TagError(BaseModel):
@@ -53,13 +52,15 @@ async def update_tags(payload: TagSyncRequest) -> list[TagNode]:
     except ValueError as exception:
         raise HTTPException(400, str(exception)) from exception
 
+    await RuleService.refresh()
+
     return await TagService.get_tree()
 
 
 @router.post("", response_model=list[TagNode], responses=ERROR_RESPONSES)
 async def create_tag(payload: TagCreate) -> list[TagNode]:
     try:
-        return await TagService.create(payload.path, payload.description)
+        return await TagService.create(payload.path)
     except TagConflictError as exception:
         raise HTTPException(409, str(exception)) from exception
     except ValueError as exception:
@@ -72,5 +73,7 @@ async def delete_tag(tag_id: int) -> dict:
 
     if result is None:
         raise HTTPException(404, f"Tag {tag_id} not found")
+
+    await RuleService.refresh()
 
     return result

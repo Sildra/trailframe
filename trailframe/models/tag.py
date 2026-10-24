@@ -1,4 +1,4 @@
-from sqlmodel import Field, SQLModel
+from sqlmodel import JSON, Column, Field, SQLModel
 
 
 class Tag(SQLModel, table=True):
@@ -16,7 +16,7 @@ class Tag(SQLModel, table=True):
     path: str = Field(index=True, unique=True)
     parent_id: int | None = Field(default=None, index=True)
     depth: int = Field(default=0)
-    description: str | None = None
+    rules: list[dict] = Field(default_factory=list, sa_column=Column(JSON))
 
 
 class TagNode(SQLModel):
@@ -26,11 +26,11 @@ class TagNode(SQLModel):
     name: str
     path: str
     depth: int = 0
-    description: str | None = None
     count: int = 0
     """Photos tagged with exactly this path."""
     total: int = 0
     """Photos tagged with this path or any of its descendants."""
+    rules_count: int = 0
     children: list["TagNode"] = Field(default_factory=list)
 
 

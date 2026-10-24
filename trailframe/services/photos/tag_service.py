@@ -5,7 +5,6 @@ from sqlalchemy.sql.elements import ColumnElement
 
 from trailframe.models.photo import Photo
 from trailframe.models.tag import Tag, TagNode
-from trailframe.services.core.configuration_service import ConfigurationService, Node
 from trailframe.services.core.database_service import DatabaseService
 from trailframe.services.service import Service
 
@@ -114,8 +113,6 @@ class TagService(Service):
         "Quality": {"Panorama": {}, "Macro": {}, "Black and White": {}, "Low Light": {}, "Long Exposure": {}},
     }
 
-    _seeded: ClassVar[bool] = False
-
     # ------------------------------------------------------------------
     # Paths
     # ------------------------------------------------------------------
@@ -151,23 +148,22 @@ class TagService(Service):
         return path == parent or path.startswith(parent + cls.SEPARATOR)
 
     # ------------------------------------------------------------------
-    # Configuration / lifecycle
+    # Lifecycle
     # ------------------------------------------------------------------
 
     @classmethod
-    def _configure(cls, config: Node) -> None:
-        cls._seeded = bool(config.get_path_value("tags.seeded", "The default tag vocabulary has been installed", False))
-
-    @classmethod
     async def _start(cls) -> None:
-        if cls._seeded:
+        async def _count(session) -> int:
+            result = await session.execute(select(func.count()).select_from(Tag))
+            return int(result.scalar_one())
+
+        count = await DatabaseService.execute(_count)
+
+        if count:
             return
 
         created = await cls.seed_defaults()
         cls._log(f"installed the default tag vocabulary ({created} tags)")
-
-        ConfigurationService.root().get_node("tags.seeded").set_value(True)
-        ConfigurationService.save()
 
     @classmethod
     async def seed_defaults(cls) -> int:
@@ -325,8 +321,8 @@ class TagService(Service):
                 name=row.name,
                 path=row.path,
                 depth=row.depth,
-                description=row.description,
                 count=counts.get(row.path, 0),
+                rules_count=len(getattr(row, "rules", None) or []),
             )
             for row in rows
         }
@@ -466,7 +462,7 @@ class TagService(Service):
     # ------------------------------------------------------------------
 
     @classmethod
-    async def create(cls, path: str, description: str | None = None) -> list[TagNode]:
+    async def create(cls, path: str) -> list[TagNode]:
         """Register a single tag path, creating the missing ancestors.
 
         Unlike `sync`, which replaces the whole vocabulary, this adds one tag
@@ -480,7 +476,7 @@ class TagService(Service):
         if cls.depth_of(normalized) + 1 > cls.MAX_DEPTH:
             raise ValueError(f"tag path is too deep (max {cls.MAX_DEPTH} levels): {normalized}")
 
-        entry = {"path": normalized, "description": str(description) if description else None}
+        entry = {"path": normalized}
 
         async def _create_one(session) -> None:
             rows = list((await session.execute(select(Tag))).scalars().all())
@@ -557,12 +553,6 @@ class TagService(Service):
 
                 await cls._create(session, entry, by_path, rows)
 
-            for entry in entries:
-                row = by_path.get(entry["path"])
-
-                if row is not None:
-                    row.description = entry["description"]
-
             for row in rows:
                 row.depth = cls.depth_of(row.path)
                 parent = by_path.get(cls.parent_path(row.path))
@@ -595,7 +585,6 @@ class TagService(Service):
 
             seen.add(path)
 
-            description = raw.get("description")
             tag_id = raw.get("id")
 
             try:
@@ -603,7 +592,7 @@ class TagService(Service):
             except (TypeError, ValueError) as exception:
                 raise ValueError(f"invalid tag id: {tag_id}") from exception
 
-            entries.append({"id": parsed_id, "path": path, "description": str(description) if description else None})
+            entries.append({"id": parsed_id, "path": path})
 
         return entries
 
@@ -698,7 +687,6 @@ class TagService(Service):
                 path=current,
                 parent_id=parent.id if parent is not None else None,
                 depth=depth - 1,
-                description=entry["description"] if depth == len(segments) else None,
             )
 
             session.add(tag)

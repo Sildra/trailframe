@@ -11,18 +11,20 @@ from fastapi.concurrency import asynccontextmanager
 from trailframe.api.about import router as about_router
 from trailframe.api.activities import router as activities_router
 from trailframe.api.configuration import router as configuration_router
+from trailframe.api.docs import router as docs_router
 from trailframe.api.events import router as events_router
 from trailframe.api.map_data import router as map_data_router
 from trailframe.api.models import router as models_router
 from trailframe.api.photos import router as photos_router
 from trailframe.api.pipeline import router as pipeline_router
 from trailframe.api.remote_pipeline import router as remote_pipeline_router
+from trailframe.api.rules import router as rules_router
 from trailframe.api.statistics import router as statistics_router
-from trailframe.api.tag_rules import router as tag_rules_router
 from trailframe.api.tags import router as tags_router
 from trailframe.api.tiles import router as tiles_router
 from trailframe.services.core.configuration_service import ConfigurationService
 from trailframe.services.service_registry import ServiceRegistry
+from trailframe.version import app_version
 
 
 def parse_path_arg(raw: str) -> Path:
@@ -90,9 +92,10 @@ def create_app(args: argparse.Namespace) -> FastAPI:
 
         await ServiceRegistry.stop()
 
-    app = FastAPI(title="Trailframe", version="0.1.0", lifespan=lifespan)
+    app = FastAPI(title="Trailframe", version=app_version(), lifespan=lifespan)
 
     app.include_router(about_router)
+    app.include_router(docs_router)
     app.include_router(photos_router)
     app.include_router(models_router)
     app.include_router(pipeline_router)
@@ -103,7 +106,7 @@ def create_app(args: argparse.Namespace) -> FastAPI:
     app.include_router(events_router)
     app.include_router(statistics_router)
     app.include_router(tags_router)
-    app.include_router(tag_rules_router)
+    app.include_router(rules_router)
     app.include_router(tiles_router)
 
     dev_dist = Path("frontend/dist")

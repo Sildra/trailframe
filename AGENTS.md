@@ -11,6 +11,7 @@ Trailframe — photo gallery app: Python/FastAPI backend + React/TS/Vite fronten
 | Lint backend | `ruff check .` |
 | Format backend | `ruff format .` |
 | Lint frontend | `cd frontend && npm run lint` |
+| Test frontend | `cd frontend && npm test` |
 | Run tests | `python -m pytest` |
 | Build package | `npm run build && python -m build` |
 | Kill backend | `netstat -ano \| findstr :8000` then `taskkill -PID <pid> -F` |
@@ -41,13 +42,13 @@ Trailframe — photo gallery app: Python/FastAPI backend + React/TS/Vite fronten
 ### Architecture
 
 - **Services** (`trailframe/services/`): class-based `Service` singletons wired in `main.py` lifespan
-  - `service.py` (base), `core/` (Configuration, Database, Statistics, ThreadPool), `photos/` (Folder, Thumbnail, Photo), `activities/` (Activity, GarminConnect, Gpx), `map/` (Map, Location, Tile), plus `pipelines/`, `scanners/`
+  - `service.py` (base), `core/` (Configuration, Database, Statistics, ThreadPool), `photos/` (Folder, Thumbnail, Photo), `rules/` (Rule), `activities/` (Activity, GarminConnect, Gpx), `map/` (Map, Location, Tile), plus `pipelines/`, `scanners/`
   - `Service`: non-virtual `configure/start/stop` → virtual `_configure/_start/_stop`, `_log` (`[Name]` prefixed on stderr via `log.py`), state tracking; `_name` overrides
   - `_requires`: each service declares its direct dependencies as names (resolved against `ServiceRegistry` at start); `start()` verifies them — on violation logs an `ERROR` and raises (`Service._require_started`)
 
 - **Pipeline** base: eager thread-safe queue (sync `add`/`start`/`stop`, `get_queue_size`, `accepts`); `stop()` drains worker and flushes run stats; `take_pending()` returns leftover items; `PipelineEmpty` sentinel accepted everywhere and dropped
 
-- **Start order**: `ThreadPoolService` → `DatabaseService` (creates tables) → `PhotoService` → `TagService` → `TagRuleService` → `PipelineService` → `FolderService` → `ThumbnailService` → `MapService` → `GarminConnectService` → `GpxService` → `ActivityService` → `LocationService` → `TileService` → `StatisticsService` → `DuplicatesService` (order must satisfy `_requires`: DB→TP, Photos→DB, Tag→DB, TagRule→DB+Tag, Pipeline→DB, Folder→DB+Pipeline, Thumbnail→Photos, Garmin→DB+TP, Gpx→DB, Activity→DB+TP+Garmin+Map, Location→DB+TP, Tile→TP, Statistics→DB, Duplicates→DB+TP)
+- **Start order**: `ThreadPoolService` → `DatabaseService` (creates tables) → `PhotoService` → `TagService` → `RuleService` → `PipelineService` → `FolderService` → `ThumbnailService` → `MapService` → `GarminConnectService` → `GpxService` → `ActivityService` → `LocationService` → `TileService` → `StatisticsService` → `DuplicatesService` (order must satisfy `_requires`: DB→TP, Photos→DB, Tag→DB, Rule→DB+Tag, Pipeline→DB, Folder→DB+Pipeline, Thumbnail→Photos, Garmin→DB+TP, Gpx→DB, Activity→DB+TP+Garmin+Map, Location→DB+TP, Tile→TP, Statistics→DB, Duplicates→DB+TP)
 
 - **Concurrency**: one shared pool (`ThreadPoolService`, size `general.thread_pool_size`, default 2); all heavy work (scanners, maps, Garmin, tiles, geo); each pipeline = 1 worker task (`Pipeline._worker_count = 1`) — bounds memory (one YOLO inference at a time); DB work stays on event loop
 
@@ -77,33 +78,27 @@ Trailframe — photo gallery app: Python/FastAPI backend + React/TS/Vite fronten
 
 ### Tags
 
-- **Model** (`models/tag.py`): `Tag` table (`tags`) — `id`, `name`, `path` (unique, slash-separated full path), `parent_id`, `depth`, `description`; `TagNode` is the API DTO (`count` = photos with exactly this path, `total` = incl. descendants, `children`)
+- **Model** (`models/tag.py`): `Tag` table (`tags`) — `id`, `name`, `path` (unique, slash-separated full path), `parent_id`, `depth`, `rules` (JSON list of embedded rule documents); `TagNode` is the API DTO (`count` = photos with exactly this path, `total` = incl. descendants, `rules_count` = rules assigning this exact path, `children`)
 - **TagService** (`services/photos/tag_service.py`): owns the registry *shape*; `Photo.tags` (JSON list of full paths) owns the *assignments* — one source of truth per concern, no tag scanner
   - Paths: `normalize()` (trim segments, single `/`), `name_of()`, `parent_path()`, `ancestors()`, `depth_of()`; `MAX_DEPTH = 10` levels
   - `ensure_paths()` registers a path **and its ancestors** (missing parents are created)
-  - `seed_defaults()` installs `DEFAULT_TAGS` (155 nodes / 12 roots: Activity, Architecture, Landscape, Animals, People, Food, Nature, Transport, Object, Event, Document, Quality); guarded by the `tags.seeded` config flag (set to `true` after the first install) so user deletions survive restarts
+  - `seed_defaults()` installs `DEFAULT_TAGS` (155 nodes / 12 roots: Activity, Architecture, Landscape, Animals, People, Food, Nature, Transport, Object, Event, Document, Quality); seeded automatically on first start when the `tags` table is empty, so user deletions survive restarts (no config flag)
   - `match()` / `match_exact()`: SQL conditions over `json_each(COALESCE(photo.tags,'[]'))` — `value = :path OR value LIKE :path || '/%'` (exact + descendants), `mode` = `any`/`all`
-  - `sync(payload)`: bulk vocabulary write (one request carries the whole tree). Diff = rename (by `id`) → keep → cascade delete → create → describe; a renamed tag moves its descendants **and** the photos carrying them; a deleted parent kills its whole subtree even if the payload still lists a descendant
+  - `sync(payload)`: bulk vocabulary write (one request carries the whole tree). Diff = rename (by `id`) → keep → cascade delete → create → describe; a renamed tag moves its descendants **and** the photos carrying them **and** its embedded rules (renamed in place); a deleted parent kills its whole subtree even if the payload still lists a descendant, and its rules go with the rows
   - `delete(tag_id)`: cascade delete of a tag + descendants, stripping them from the photos
   - `set_photo_tags(photo_id, paths)` replaces the whole list of a photo's tags (one call, not incremental)
 - **Photo filters**: `GET /api/photos?tags=&tags_mode=any|all&include_descendants=true` and `GET /api/photos/ids` (ids only, used by the gallery/slideshow); `GET /api/photos/custom?tags=` keeps the AND semantics
 
 ### Rules
 
-- **Model** (`models/tag_rule.py`): `TagRule` table (`tag_rule`) — `id`, `name`, `enabled`, `priority`, `description`, `conditions` (JSON), `tags` (JSON list of full paths)
-- **Rule shape**: `{name, enabled, priority, description, conditions: {operator: "and"|"or", rules: [...]}, tags: [...]}`
-  - A leaf condition is `{field, match_label?, operator, value?, constraints?}` — `field` names a metadata field, `operator` is one of the catalog's operators, `value` the compared value
-  - Object conditions carry `match_label` (the detected label) and `constraints` — `{confidence: {gte: 0.8}, surface: {gte: 0.1}}`
-  - `surface` = **share of the image area** (box w × h ÷ photo pixel area), so `0.10` = the object covers 10% of the frame; the pixel size comes from the EXIF `ExifImageWidth`/`ExifImageHeight` (orientation 5–8 swaps the axes) — there are no width/height columns on `Photo`
-- **TagRuleService** (`services/photos/tag_rule_service.py`): owns the rule evaluation
-  - **In-memory cache**: the enabled rules live in `TagRuleService._rules`, loaded at `_start` and refreshed after every CRUD write — so `RulesScanner` evaluates a `Photo` with **no database round-trip**, like every other scanner
-  - **Field catalog** (`fields()`): objects (label/confidence/surface), EXIF (make, model, lens, ISO, aperture, focal length, exposure), image size/orientation, location/country, date, filename, file size, favorite, current tags, scanners, `scores.brisque`; each field declares its `kind` and the operators it offers (`OPERATORS`)
-  - `validate()` rejects an unknown field, an unknown operator or a malformed condition; `MAX_RULES = 200`, `MAX_CONDITIONS = 20`
-  - `tags_for_photo(photo)` / `matching_tags(photo, rule)` — the evaluation; `test_rule(rule, limit)` is a **read-only preview** against the library (capped at `TEST_SCAN_LIMIT = 5000` photos)
-  - `apply_all()` — re-applies every enabled rule to the whole library (add-only), the counterpart of the scanner for the photos scanned before a rule existed
-  - Assigned tag paths are registered in the vocabulary through `TagService.ensure_paths`
-- **RulesScanner** (`services/scanners/rules_scanner.py`): a standard scanner, registered in `SCANNER_DEFINITIONS` and in `BasicPipeline` **after** `Object` (so the detections exist) and **before** `Database` (so the tags are persisted). Gates on `"Rules" not in photo.scanners`, like `ObjectScanner`. **Add-only**: it never removes a tag, so a tag set by hand is never taken away
-- **API** (`api/tag_rules.py`): `GET /api/tag-rules` (list), `POST /api/tag-rules` (create), `GET/PUT/DELETE /api/tag-rules/{id}`, `GET /api/tag-rules/fields` (the builder catalog), `POST /api/tag-rules/test` (preview a draft), `POST /api/tag-rules/apply` (apply to the whole library)
+- **Storage**: rules live **on the tag they assign** (`Tag.rules`, a JSON list) — there is no rule table, no FK and no orphan. The owning tag *is* the target: renaming/moving the tag carries its rules, deleting the tag deletes them. Legacy `tag_rule` tables are ignored (never read, never dropped).
+- **Rule document**: `{id, name, description, enabled, priority, expression, definition}`. `expression` is kept for display/re-edit; `definition` is authoritative and the backend **never parses** expression text.
+- **Definition AST** (`services/rules/ast.py`): `{version, match: all|any, conditions}`; a condition is `scalar` (`path`, `op`, `value`), `detection` (`label`, `present|absent`, `metrics`) or recursive `group`. A detection binds its label and metric constraints to the **same** detection.
+- **Schema** (`services/rules/schema.py`): one descriptor drives validation, evaluation, the generated form and the editor hints — groups/fields/kind/operators/docs/value source, plus the detection metrics. Fields: objects, EXIF make/model/lens/aperture/ISO/focal length/exposure, image width/height/orientation, country/location/date/lat/long, filename/file size/favorite/tags/scanners, `scores.brisque`. `MAX_CONDITIONS = 20`, `MAX_GROUP_DEPTH = 4`; `validate_definition()` rejects unknown paths/operators and malformed values.
+- **RuleService** (`services/rules/rule_service.py`): `_requires = (DatabaseService, TagService)`; embeds CRUD in `Tag.rules`, keeps every rule in `_records` and the enabled ones in `_rules` (refreshed at `_start`, after writes, and from `api/tags.py` after sync/delete) so `RulesScanner` evaluates with no DB round-trip. `schema()` and `values()` serve the editor (bounded dynamic dictionaries, cached for 60 s). `preview()` is read-only and capped at `TEST_SCAN_LIMIT = 5000`; `apply_all()` re-applies enabled rules to the library, add-only.
+- **Evaluator** (`services/rules/evaluator.py`): AST-only (`matches`, `tags_for_photo`); a detection's metrics must all hold for one detection; `surface` is box area ÷ photo area from the EXIF dimensions; missing values match only `neq`/`not_contains`.
+- **RulesScanner** (`services/scanners/rules_scanner.py`): a standard scanner registered in `SCANNER_DEFINITIONS` and in `BasicPipeline` **after** `Object` (so detections exist) and **before** `Database` (so tags persist). Gates on `"Rules" not in photo.scanners`, add-only.
+- **API** (`api/rules.py`): `GET /api/rules/schema`, `GET /api/rules/values`, `GET/POST /api/rules`, `GET/PUT/DELETE /api/rules/{id}`, `POST /api/rules/preview`, `POST /api/rules/apply`.
 
 ### Database & Storage
 
@@ -119,7 +114,7 @@ Trailframe — photo gallery app: Python/FastAPI backend + React/TS/Vite fronten
 
 ### API Endpoints
 
-- **Tags** (`api/tags.py`): `GET /api/tags` → the registry tree (`TagNode[]`); `PUT /api/tags` → replace the whole vocabulary in one request (`{"tags": [{id, path, description}]}`) and return the new tree; `DELETE /api/tags/{id}` → cascade delete of a tag and its descendants
+- **Tags** (`api/tags.py`): `GET /api/tags` → the registry tree (`TagNode[]`); `PUT /api/tags` → replace the whole vocabulary in one request (`{"tags": [{id, path}]}`) and return the new tree; `DELETE /api/tags/{id}` → cascade delete of a tag and its descendants
 - **Photo tags** (`api/photos.py`): `PUT /api/photos/{id}/tags` → replace the tags of a photo with the given list (`{"tags": [...]}` → `{id, tags}`); `GET /api/photos/ids` → the ids of the photos matching the filters (tags/favorites)
 
 - **Maps/tiles**: `TileService` + `/api/tiles/{z}/{x}/{y}.png` proxy/cache (`general.tiles_folder`, TTL/size under `maps:`)
@@ -132,11 +127,15 @@ Trailframe — photo gallery app: Python/FastAPI backend + React/TS/Vite fronten
 
 - **Statistics** (`core/statistics_service.py`): `Scanner._record` times scans; `Pipeline._flush_stats` persists `ScannerStat` row per scanner via `record_run`; `GET /api/statistics/scanners` (items/s); `GET /api/statistics/storage` (DB + folder sizes); `FolderStat`/`StorageStats` are pydantic shapes in `api/statistics.py`, not DB tables; for tests: insert mock `ScannerStat` rows, don't run real scans
 
+- **Docs/version** (`api/docs.py`, `api/about.py`): `GET /api/docs` lists bundled Markdown documents, `GET /api/docs/{name}` returns `{name, title, description, content}` from `trailframe/docs/*.md` (whitelisted names, `importlib.resources` so the wheel works); `GET /api/about/version` returns `trailframe.version.app_version()` (installed metadata → generated `_version.py` → `0.0.0`), also used as the FastAPI version
+
 ## Frontend (Vite + React 19 + TS)
 
 - **Entries**: `index.html` (`/?page=...&section=`), `slideshow.html` (`src/SlideshowApp.tsx`, `?section=&activity=`/`?photos=&name=&thumbs=`); params canonicalized in `src/lib/slideshowSections.ts`
 
-- **Commands**: `npm run lint`, `npm run build`, `npm run dev` (node/npm/npx on PATH at `/c/Program Files/nodejs`)
+- **Commands**: `npm run lint`, `npm test`, `npm run build`, `npm run dev` (node/npm/npx on PATH at `/c/Program Files/nodejs`)
+
+- **Tables**: compact globally in `src/theme.tsx` — `MuiDataGrid` defaults to `density: "compact"` (13 px cells/headers), `MuiTable` defaults to `size="small"` with 4 px/8 px cell padding; don't re-specify size/density per table
 
 - **Schema generation**: `src/api/generated/schema.ts` generated by `openapi-typescript` — never hand-edit; regenerate: from root `python -m trailframe.main --openapi ./openapi_local.json`, then from `frontend/` `npx openapi-typescript ../openapi_local.json -o src/api/generated/schema.ts`; delete temp file
 
@@ -144,10 +143,11 @@ Trailframe — photo gallery app: Python/FastAPI backend + React/TS/Vite fronten
 
 ### Tags UI
 
-- **`src/lib/tags.ts`**: path helpers (`tagName`, `tagParent`, `isTagUnder`, `normalizeTagPath`, `sanitizeTagName`) and draft operations on the flat `TagEntry[]` model (`{id, path, description}` — exactly the bulk payload): `flattenTags`, `buildTagTree` (tree derived from the paths), `renameTag`, `moveTag`, `addTag`, `removeTag`
+- **`src/lib/tags.ts`**: path helpers (`tagName`, `tagParent`, `isTagUnder`, `normalizeTagPath`, `sanitizeTagName`) and draft operations on the flat `TagEntry[]` model (`{id, path}` — exactly the bulk payload): `flattenTags`, `buildTagTree` (tree derived from the paths), `renameTag`, `moveTag`, `addTag`, `removeTag`
 - **`src/components/TagTree.tsx`**: hand-rolled recursive tree on MUI primitives (no `@mui/x-tree-view`); `checkable` shows the checkboxes, `filter` keeps the matching nodes and their ancestors
 - **`src/components/TagPicker.tsx`**: dialog with a searchable tree + "new tag path" field (missing parents are created server-side); used by the photo metadata and the custom slideshow menu
-- **`src/pages/TagsPage.tsx`** (`/?page=tags`): vocabulary editor — the draft is the flat entry list, the tree is derived from it, and **Save sends the whole vocabulary in one `PUT /api/tags`**; renaming/moving a tag updates its descendants locally; the delete confirmation shows the descendant and photo counts (the cascade is applied on save)
+- **`src/components/TagOverview.tsx`**: the **Overview** tab — a `DataGrid` of the vocabulary (Tag, Path, Rules, Photos, With descendants), scope select (all/root/used) and quick add; the Rules count comes straight from `TagNode.rules_count` (no extra request), the photo counts from the `TagNode` counts
+- **`src/pages/TagsPage.tsx`** (`/?page=tags`): the **Overview** (`TagOverview`); clicking a row opens the tag's **inner page** (back arrow, the tag path as the read-only title, a table of the rules assigning that exact path, the photo gallery, delete); there is no vocabulary editor and no path/name editing. The inner page lists `GET /api/rules`, toggles a rule with `PUT /api/rules/{id}`, deletes it with `DELETE /api/rules/{id}`, and **Apply to all photos** calls `POST /api/rules/apply`
 - **`src/pages/GalleryPage.tsx`**: "Tags" entry in the gallery menu — the tree filters the gallery (checked tags → `GET /api/photos/ids`) and the matching photos are listed under the tree
 - **`src/components/PhotoMetadata.tsx`**: tags accordion with chips; "Edit tags" opens the picker and **Save sends the whole list** in one `PUT /api/photos/{id}/tags`
 - **`src/components/CustomSlideshowMenu.tsx`**: the free-text tag input was replaced by the hierarchical picker; the selection is still serialised as the `tags[]` query param
@@ -155,10 +155,20 @@ Trailframe — photo gallery app: Python/FastAPI backend + React/TS/Vite fronten
 
 ### Rules UI
 
-- **`src/lib/rules.ts`**: the rule draft model (`RuleDraft`, `RuleCondition`, `RuleConstraint`) and its conversions — `emptyRule`, `toDraft` (stored rule → editable draft), `toPayload` (draft → API body), `groupFields`, `findField`, `fieldOperators`, `describeCondition`, `describeRule`
-- **`src/components/RuleBuilder.tsx`**: the assisted builder — a metadata field select (grouped by kind), an operator select, the detected-object label plus its `confidence`/`surface` constraints, add/remove condition rows, the and/or toggle, and the tag chips a rule assigns
-- **`src/components/RulePage.tsx`**: the rule list (name, summary, priority, enable switch, edit/delete) next to the builder; **Test** previews the draft against the library (`POST /api/tag-rules/test`), **Save** creates/updates the rule, **Apply to all photos** re-applies every enabled rule to the whole library (`POST /api/tag-rules/apply`)
-- **`src/pages/TagsPage.tsx`**: the **Rules** tab (alongside Overview and Vocabulary) renders `RulePage`; it receives the vocabulary draft so the builder can suggest the existing tag paths
+- **`src/lib/rules.ts`**: the AST model matching the backend (`Definition`, `ScalarCondition`, `DetectionCondition`, `GroupCondition`, `MetricConstraint`) plus the draft (`RuleDraft`) and conversions (`emptyRule`, `toDraft`, `toPayload`, `countConditions`).
+- **`src/lib/expression/`**: the **fully local** language — `tokens.ts` (tokenizer, UTF-16 spans), `parser.ts` (`and`/`or`, parentheses, `objects has [no] "label" [with metric op number, ...]`, `path op value`, `path is [not] true|false`, `path in [..]`), `printer.ts` (AST → canonical text), `schema.ts` (validation against the served descriptor). It never calls the backend per keystroke. Vitest covers parse/print/validate (`npm test`).
+- **`src/components/ExpressionEditor.tsx`**: transparent textarea over a syntax-coloured overlay (keywords, fields, strings, numbers, dates, operators); reports parse issues and pauses previews during IME composition.
+- **`src/components/SchemaForm.tsx`**: the generated form — field/operator selects, value editors by kind, detection label + `confidence`/`surface` metrics, add/remove; labels, operators and suggestions all come from `GET /api/rules/schema` + `GET /api/rules/values` (fetched once when the editor opens). Nested groups are round-tripped from the text; the form edits flat top-level conditions first.
+- **`src/hooks/useRulePreview.ts`**: debounced (450 ms) preview with a **local-validity gate**, one request in flight, latest-wins coalescing, identical-definition suppression, and `POST /api/rules/preview`.
+- **`src/components/RulePage.tsx`**: the editor — expression on top, generated schema form below, header (name/description/priority/enabled/revert/save) and the expected-matches panel; Save sends `POST /api/rules` or `PUT /api/rules/{id}`. The expression text is authoritative in the browser; only a locally valid AST is ever sent.
+- **`src/pages/TagsPage.tsx`**: opens `RulePage` from a tag's inner page; it no longer has a separate Rules tab.
+
+### Help & documentation UI
+
+- **`src/lib/markdownSlides.ts`**: `splitSlides(markdown)` splits a document on `---` lines outside fenced code blocks; Vitest covers CRLF, fences, empty slides.
+- **`src/components/MarkdownSlidesDialog.tsx`**: one MUI dialog per document, `react-markdown` + `remark-gfm` mapped to theme typography/tables; bottom `‹` / `›` controls with a `current / total` counter, arrow-key navigation, scroll reset per slide; `initialSlide` selects `first` or `last`.
+- **`src/App.tsx`**: Help button in the AppBar opens **Tutorial** or **What's new**; version is fetched from `GET /api/about/version`, the last seen version lives in `localStorage["trailframe.seenVersion"]`, and What's new auto-opens at the last slide after a version change (then stores the version on close).
+- **Content**: `trailframe/docs/tutorial.md` and `trailframe/docs/whats-new.md`; What's new keeps one slide per minor `0.X` release in ascending order (patch releases are folded into the minor slide).
 
 ## Verification
 

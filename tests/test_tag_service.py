@@ -28,7 +28,7 @@ def _flatten(tree) -> list[dict]:
     entries: list[dict] = []
 
     for node in tree:
-        entries.append({"id": node.id, "path": node.path, "description": node.description})
+        entries.append({"id": node.id, "path": node.path})
         entries.extend(_flatten(node.children))
 
     return entries
@@ -39,7 +39,7 @@ def _flatten_json(tree) -> list[dict]:
     entries: list[dict] = []
 
     for node in tree:
-        entries.append({"id": node["id"], "path": node["path"], "description": node["description"]})
+        entries.append({"id": node["id"], "path": node["path"]})
         entries.extend(_flatten_json(node["children"]))
 
     return entries
@@ -279,14 +279,14 @@ class TestTagCreate:
     @allure.title("Adds a single tag and creates its missing ancestors")
     @pytest.mark.asyncio
     async def test_create_adds_the_ancestors(self, db_session):
-        tree = await TagService.create("A/B/C", "a description")
+        tree = await TagService.create("A/B/C")
 
         assert _find(tree, "A") is not None
         assert _find(tree, "A/B") is not None
 
         node = _find(tree, "A/B/C")
         assert node is not None
-        assert node.description == "a description"
+        assert node.path == "A/B/C"
 
     @allure.title("Keeps the rest of the vocabulary when a tag is added")
     @pytest.mark.asyncio
@@ -329,14 +329,14 @@ class TestTagApi:
     @allure.title("Saves the whole vocabulary in one request")
     def test_update_tags(self, app):
         entries = _flatten_json(app.get("/api/tags").json())
-        entries.append({"id": None, "path": "Brand/New", "description": "added by the editor"})
+        entries.append({"id": None, "path": "Brand/New"})
 
         response = app.put("/api/tags", json={"tags": entries})
         assert response.status_code == 200
 
         node = _find_json(response.json(), "Brand/New")
         assert node is not None
-        assert node["description"] == "added by the editor"
+        assert node["path"] == "Brand/New"
 
     @allure.title("Rejects an invalid vocabulary with a 400")
     def test_update_tags_invalid(self, app):
@@ -362,12 +362,12 @@ class TestTagApi:
 
     @allure.title("Adds a single tag with its missing ancestors")
     def test_create_tag(self, app):
-        response = app.post("/api/tags", json={"path": "Brand/New", "description": "quick add"})
+        response = app.post("/api/tags", json={"path": "Brand/New"})
         assert response.status_code == 200
 
         node = _find_json(response.json(), "Brand/New")
         assert node is not None
-        assert node["description"] == "quick add"
+        assert node["path"] == "Brand/New"
 
         tree = app.get("/api/tags").json()
         assert _find_json(tree, "Brand") is not None

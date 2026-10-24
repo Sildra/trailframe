@@ -9,6 +9,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 
 from trailframe.services.core.thread_pool_service import ThreadPoolService
+from trailframe.version import app_version
 
 router = APIRouter(prefix="/api/about", tags=["about"])
 
@@ -22,6 +23,10 @@ class PackageInfo(BaseModel):
     name: str
     version: str
     license: str
+
+
+class VersionInfo(BaseModel):
+    version: str
 
 
 def _imported_module_names() -> set[str]:
@@ -85,6 +90,11 @@ def _build_packages() -> list[PackageInfo]:
         )
 
     return packages
+
+
+@router.get("/version", response_model=VersionInfo)
+async def get_version() -> VersionInfo:
+    return VersionInfo(version=app_version())
 
 
 @router.get("/packages", response_model=list[PackageInfo])
