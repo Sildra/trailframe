@@ -3,6 +3,7 @@ import threading
 from asyncio import AbstractEventLoop
 from collections.abc import Callable
 from concurrent.futures import Future
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -22,11 +23,14 @@ from sqlmodel import SQLModel
 
 from trailframe.models.activity import Activity, GarminActivity  # noqa: F401  (registers models with SQLModel metadata)
 from trailframe.models.group import PhotoGroup  # noqa: F401  (registers models with SQLModel metadata)
+from trailframe.models.migration import MigrationAudit, MigrationPlanState  # noqa: F401  (registers models with SQLModel metadata)
 from trailframe.models.photo import Photo  # noqa: F401  (registers models with SQLModel metadata)
 from trailframe.models.scanner_stat import ScannerStat  # noqa: F401  (registers models with SQLModel metadata)
 from trailframe.models.tag import Tag  # noqa: F401  (registers models with SQLModel metadata)
+from trailframe.migrations.runner import run_migration_plans
 from trailframe.services.core.configuration_service import Node
 from trailframe.services.service import Service
+from trailframe.version import app_version
 
 Job = tuple[Callable[[Any], Any], Future | None]
 
@@ -95,7 +99,13 @@ class DatabaseService(Service):
             await connection.run_sync(cls._repair_primary_keys)
             await connection.run_sync(cls._sync_indexes)
 
+        await cls.execute(cls._run_migration_plans)
+
         await cls._worker()
+
+    @classmethod
+    async def _run_migration_plans(cls, session) -> None:
+        await run_migration_plans(session)
 
     @classmethod
     async def _worker(cls) -> None:
@@ -188,6 +198,24 @@ class DatabaseService(Service):
             )
 
     @classmethod
+    def _log_migration_audit(cls, connection, plan_name: str, kind: str, description: str | None = None) -> None:
+        connection.execute(
+            text(
+                """
+                INSERT INTO migration_audit (plan_name, kind, applied_version, applied_at, description)
+                VALUES (:plan_name, :kind, :applied_version, :applied_at, :description)
+                """
+            ),
+            {
+                "plan_name": plan_name,
+                "kind": kind,
+                "applied_version": app_version(),
+                "applied_at": datetime.now(timezone.utc).isoformat(),
+                "description": description,
+            },
+        )
+
+    @classmethod
     def _add_missing_columns(cls, connection) -> None:
         inspector = inspect(connection)
         existing = {
@@ -211,6 +239,12 @@ class DatabaseService(Service):
 
                 connection.execute(text(f"ALTER TABLE {table.name} ADD COLUMN {ddl}"))
                 cls._log(f"added column {table.name}.{column.name}")
+                cls._log_migration_audit(
+                    connection,
+                    plan_name="auto_migrate",
+                    kind="implicit_column",
+                    description=f"added column {table.name}.{column.name}",
+                )
 
     @classmethod
     def _backup(cls, connection) -> None:
@@ -271,6 +305,12 @@ class DatabaseService(Service):
         connection.exec_driver_sql(f'ALTER TABLE "{target}" RENAME TO "{source}"')
 
         cls._log(f"rebuilt table {source} with primary key ({', '.join(primary_key)})")
+        cls._log_migration_audit(
+            connection,
+            plan_name="auto_migrate",
+            kind="pk_rebuild",
+            description=f"rebuilt table {source} with primary key ({', '.join(primary_key)})",
+        )
 
     @classmethod
     def _repair_primary_keys(cls, connection) -> None:
@@ -332,6 +372,12 @@ class DatabaseService(Service):
                 columns = ", ".join(index.columns.keys())
                 connection.execute(text(f"CREATE {unique}INDEX {name} ON {table.name} ({columns})"))
                 cls._log(f"created index {name} on {table.name}")
+                cls._log_migration_audit(
+                    connection,
+                    plan_name="auto_migrate",
+                    kind="index_create",
+                    description=f"created index {name} on {table.name} ({columns})",
+                )
 
             for name in db_indexes:
                 if name in expected:
@@ -339,6 +385,12 @@ class DatabaseService(Service):
 
                 connection.execute(text(f"DROP INDEX {name}"))
                 cls._log(f"dropped index {name} on {table.name}")
+                cls._log_migration_audit(
+                    connection,
+                    plan_name="auto_migrate",
+                    kind="index_drop",
+                    description=f"dropped index {name} on {table.name}",
+                )
 
     @staticmethod
     def _sqlite_default(column) -> str:
