@@ -168,7 +168,7 @@ export default function RulePage({ tagPath, rule, onBack, onSaved }: RulePagePro
 
     return (
         <Box sx={{ flex: 1, minHeight: 0, overflowY: "auto", p: 2 }}>
-            <Stack spacing={2} sx={{ maxWidth: 900 }}>
+            <Stack spacing={2} sx={{ maxWidth: 900, width: "100%", mx: "auto" }}>
                 <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
                     <Tooltip title="Back to the tag">
                         <IconButton size="small" aria-label="Back to tag" onClick={onBack}>

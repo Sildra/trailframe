@@ -347,7 +347,7 @@ export default function TagsPage() {
                 />
             ) : view === "detail" && selected !== null ? (
                 <Box sx={{ flex: 1, minHeight: 0, overflowY: "auto", p: 2 }}>
-                    <Stack spacing={2} sx={{ maxWidth: 960 }}>
+                    <Stack spacing={2} sx={{ maxWidth: 960, width: "100%", mx: "auto" }}>
                         <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
                             <Tooltip title="Back to the overview">
                                 <IconButton size="small" aria-label="Back to overview" onClick={backToOverview}>

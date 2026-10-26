@@ -1,5 +1,5 @@
-import { useMemo, useRef } from "react";
-import { Box, Typography } from "@mui/material";
+import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
+import { Box, Typography, useTheme } from "@mui/material";
 import { tokenize, type ParseIssue, type Token } from "../lib/expression";
 
 const KEYWORDS = new Set([
@@ -17,7 +17,15 @@ const KEYWORDS = new Set([
     "objects",
 ]);
 
-const COLORS: Record<string, string> = {
+/** Shared by the overlay and the textarea so glyphs and caret stay on the same grid. */
+const MONO = {
+    fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+    fontSize: 14,
+    lineHeight: 1.6,
+    letterSpacing: 0,
+} as const;
+
+const DARK_COLORS: Record<string, string> = {
     keyword: "#c792ea",
     field: "#82aaff",
     string: "#c3e88d",
@@ -28,15 +36,28 @@ const COLORS: Record<string, string> = {
     unknown: "#ff5370",
 };
 
-function tokenColor(token: Token): string {
+const LIGHT_COLORS: Record<string, string> = {
+    keyword: "#7c3aed",
+    field: "#1d4ed8",
+    string: "#15803d",
+    number: "#c2410c",
+    date: "#a16207",
+    operator: "#0e7490",
+    punct: "#0e7490",
+    unknown: "#dc2626",
+};
+
+function tokenColor(token: Token, colors: Record<string, string>): string {
     if (token.kind === "word") {
-        return KEYWORDS.has(token.text.toLowerCase()) ? COLORS.keyword : COLORS.field;
+        return KEYWORDS.has(token.text.toLowerCase()) ? colors.keyword : colors.field;
     }
 
-    return COLORS[token.kind] ?? COLORS.operator;
+    return colors[token.kind] ?? colors.operator;
 }
 
-function segments(value: string) {
+const MIN_HEIGHT = 116;
+
+function segments(value: string, colors: Record<string, string>) {
     const { tokens } = tokenize(value);
     const nodes: { text: string; color?: string; key: number }[] = [];
     let cursor = 0;
@@ -50,7 +71,7 @@ function segments(value: string) {
             nodes.push({ text: value.slice(cursor, token.start), key: index * 2 });
         }
 
-        nodes.push({ text: value.slice(token.start, token.end), color: tokenColor(token), key: index * 2 + 1 });
+        nodes.push({ text: value.slice(token.start, token.end), color: tokenColor(token, colors), key: index * 2 + 1 });
         cursor = token.end;
     });
 
@@ -59,6 +80,15 @@ function segments(value: string) {
     }
 
     return nodes;
+}
+
+function fitHeight(element: HTMLTextAreaElement | null) {
+    if (element === null) {
+        return;
+    }
+
+    element.style.height = "auto";
+    element.style.height = `${Math.max(element.scrollHeight, MIN_HEIGHT)}px`;
 }
 
 export interface ExpressionEditorProps {
@@ -70,8 +100,21 @@ export interface ExpressionEditorProps {
 
 /** A local, syntax-coloured multiline editor; it never calls the backend. */
 export default function ExpressionEditor({ value, onChange, issue, onCompositionChange }: ExpressionEditorProps) {
-    const overlay = useRef<HTMLPreElement | null>(null);
-    const nodes = useMemo(() => segments(value), [value]);
+    const theme = useTheme();
+    const area = useRef<HTMLTextAreaElement | null>(null);
+    const colors = theme.palette.mode === "dark" ? DARK_COLORS : LIGHT_COLORS;
+    const nodes = useMemo(() => segments(value, colors), [value, colors]);
+
+    // Grow with the content: a scrollbar would narrow the textarea and desync the overlay.
+    useLayoutEffect(() => fitHeight(area.current), [value]);
+
+    useEffect(() => {
+        const handleResize = () => fitHeight(area.current);
+
+        window.addEventListener("resize", handleResize);
+
+        return () => window.removeEventListener("resize", handleResize);
+    }, []);
 
     return (
         <Box>
@@ -82,14 +125,11 @@ export default function ExpressionEditor({ value, onChange, issue, onComposition
                     borderColor: issue ? "error.main" : "divider",
                     borderRadius: 1,
                     bgcolor: "action.hover",
-                    fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
-                    fontSize: 14,
-                    lineHeight: 1.6,
+                    ...MONO,
                 }}
             >
                 <Box
                     component="pre"
-                    ref={overlay}
                     aria-hidden
                     sx={{
                         position: "absolute",
@@ -102,6 +142,7 @@ export default function ExpressionEditor({ value, onChange, issue, onComposition
                         overflow: "hidden",
                         pointerEvents: "none",
                         color: "text.primary",
+                        ...MONO,
                     }}
                 >
                     {nodes.map((node) => (
@@ -114,18 +155,13 @@ export default function ExpressionEditor({ value, onChange, issue, onComposition
 
                 <Box
                     component="textarea"
+                    ref={area}
                     value={value}
                     onChange={(event) => onChange(event.target.value)}
                     onCompositionStart={() => onCompositionChange?.(true)}
                     onCompositionEnd={(event) => {
                         onCompositionChange?.(false);
                         onChange(event.currentTarget.value);
-                    }}
-                    onScroll={(event) => {
-                        if (overlay.current) {
-                            overlay.current.scrollTop = event.currentTarget.scrollTop;
-                            overlay.current.scrollLeft = event.currentTarget.scrollLeft;
-                        }
                     }}
                     spellCheck={false}
                     autoCapitalize="off"
@@ -136,19 +172,19 @@ export default function ExpressionEditor({ value, onChange, issue, onComposition
                         position: "relative",
                         display: "block",
                         width: "100%",
-                        minHeight: 116,
-                        resize: "vertical",
+                        minHeight: MIN_HEIGHT,
+                        resize: "none",
                         border: 0,
                         outline: 0,
                         px: 1.5,
                         py: 1.25,
                         bgcolor: "transparent",
                         color: "transparent",
-                        caretColor: "text.primary",
-                        font: "inherit",
+                        caretColor: (theme) => theme.palette.text.primary,
+                        ...MONO,
                         whiteSpace: "pre-wrap",
                         wordBreak: "break-word",
-                        overflow: "auto",
+                        overflow: "hidden",
                         "&::placeholder": { color: "text.disabled", opacity: 1 },
                         "&::selection": { backgroundColor: "primary.main", color: "transparent" },
                     }}
