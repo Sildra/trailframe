@@ -248,6 +248,8 @@ export default function RulePage({ tagPath, rule, onBack, onSaved }: RulePagePro
                         }}
                         issue={issue}
                         onCompositionChange={setComposing}
+                        schema={schema}
+                        values={values}
                     />
                     <Typography variant="caption" color="text.secondary">
                         Parsed, validated and coloured in the browser; the server only receives the parsed definition.

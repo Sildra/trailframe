@@ -1,4 +1,5 @@
 export { tokenize, type ParseIssue, type Token, type TokenKind } from "./tokens";
+export { hintsFor, type Hint, type HintKind, type HintState } from "./hints";
 export { parseExpression, type ParseResult } from "./parser";
 export { printCondition, printDefinition } from "./printer";
 export {

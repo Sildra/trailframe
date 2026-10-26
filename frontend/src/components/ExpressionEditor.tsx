@@ -1,6 +1,6 @@
-import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
-import { Box, Typography, useTheme } from "@mui/material";
-import { tokenize, type ParseIssue, type Token } from "../lib/expression";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Box, Chip, Tooltip, Typography, useTheme } from "@mui/material";
+import { hintsFor, tokenize, type Hint, type ParseIssue, type RuleSchema, type Token } from "../lib/expression";
 
 const KEYWORDS = new Set([
     "and",
@@ -57,6 +57,8 @@ function tokenColor(token: Token, colors: Record<string, string>): string {
 
 const MIN_HEIGHT = 116;
 
+const EMPTY_VALUES: Record<string, string[]> = {};
+
 function segments(value: string, colors: Record<string, string>) {
     const { tokens } = tokenize(value);
     const nodes: { text: string; color?: string; key: number }[] = [];
@@ -96,14 +98,31 @@ export interface ExpressionEditorProps {
     onChange: (value: string) => void;
     issue?: ParseIssue | null;
     onCompositionChange?: (composing: boolean) => void;
+    /** The served rule schema, used for the contextual hints. */
+    schema?: RuleSchema | null;
+    /** The served value dictionaries, used for the value hints. */
+    values?: Record<string, string[]>;
 }
 
 /** A local, syntax-coloured multiline editor; it never calls the backend. */
-export default function ExpressionEditor({ value, onChange, issue, onCompositionChange }: ExpressionEditorProps) {
+export default function ExpressionEditor({
+    value,
+    onChange,
+    issue,
+    onCompositionChange,
+    schema = null,
+    values = EMPTY_VALUES,
+}: ExpressionEditorProps) {
     const theme = useTheme();
     const area = useRef<HTMLTextAreaElement | null>(null);
+    const [caret, setCaret] = useState(value.length);
+    const [focused, setFocused] = useState(false);
     const colors = theme.palette.mode === "dark" ? DARK_COLORS : LIGHT_COLORS;
     const nodes = useMemo(() => segments(value, colors), [value, colors]);
+    const hints = useMemo(
+        () => (schema ? hintsFor(schema, values, value, Math.min(caret, value.length)) : null),
+        [schema, values, value, caret],
+    );
 
     // Grow with the content: a scrollbar would narrow the textarea and desync the overlay.
     useLayoutEffect(() => fitHeight(area.current), [value]);
@@ -115,6 +134,26 @@ export default function ExpressionEditor({ value, onChange, issue, onComposition
 
         return () => window.removeEventListener("resize", handleResize);
     }, []);
+
+    const applyHint = (hint: Hint) => {
+        if (hints === null) {
+            return;
+        }
+
+        const position = hints.start + hint.insert.length;
+
+        onChange(value.slice(0, hints.start) + hint.insert + value.slice(hints.end));
+        setCaret(position);
+
+        requestAnimationFrame(() => {
+            const element = area.current;
+
+            if (element !== null) {
+                element.focus();
+                element.setSelectionRange(position, position);
+            }
+        });
+    };
 
     return (
         <Box>
@@ -157,7 +196,19 @@ export default function ExpressionEditor({ value, onChange, issue, onComposition
                     component="textarea"
                     ref={area}
                     value={value}
-                    onChange={(event) => onChange(event.target.value)}
+                    onChange={(event) => {
+                        onChange(event.target.value);
+                        setCaret(event.target.selectionStart ?? event.target.value.length);
+                    }}
+                    onSelect={(event) => setCaret(event.currentTarget.selectionStart)}
+                    onFocus={() => setFocused(true)}
+                    onBlur={() => setFocused(false)}
+                    onKeyDown={(event) => {
+                        if (event.key === "Tab" && hints !== null && hints.hints.length > 0) {
+                            event.preventDefault();
+                            applyHint(hints.hints[0]);
+                        }
+                    }}
                     onCompositionStart={() => onCompositionChange?.(true)}
                     onCompositionEnd={(event) => {
                         onCompositionChange?.(false);
@@ -190,6 +241,39 @@ export default function ExpressionEditor({ value, onChange, issue, onComposition
                     }}
                 />
             </Box>
+
+            {focused && hints !== null && (hints.hints.length > 0 || hints.note) && (
+                <Box
+                    sx={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 0.5,
+                        flexWrap: "wrap",
+                        mt: 0.75,
+                    }}
+                >
+                    <Typography variant="caption" color="text.secondary" sx={{ mr: 0.5 }}>
+                        {hints.title}
+                    </Typography>
+                    {hints.hints.map((hint) => (
+                        <Tooltip key={`${hint.kind}:${hint.insert}`} title={hint.detail} arrow>
+                            <Chip
+                                label={hint.label}
+                                size="small"
+                                variant="outlined"
+                                onClick={() => applyHint(hint)}
+                                onMouseDown={(event) => event.preventDefault()}
+                                sx={{ fontFamily: MONO.fontFamily, fontSize: 12 }}
+                            />
+                        </Tooltip>
+                    ))}
+                    {hints.hints.length === 0 && hints.note && (
+                        <Typography variant="caption" color="text.secondary" sx={{ fontStyle: "italic" }}>
+                            {hints.note}
+                        </Typography>
+                    )}
+                </Box>
+            )}
 
             {issue && (
                 <Typography variant="caption" color="error.main" sx={{ display: "block", mt: 0.5 }}>
