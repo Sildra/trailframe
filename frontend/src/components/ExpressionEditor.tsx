@@ -140,9 +140,12 @@ export default function ExpressionEditor({
             return;
         }
 
-        const position = hints.start + hint.insert.length;
+        // Hints after a step keyword are appended, so `objects has` becomes
+        // `objects has "dog"` rather than `objects has"dog"`.
+        const prefix = hints.start === hints.end && hints.start > 0 && !/\s/.test(value[hints.start - 1]) ? " " : "";
+        const position = hints.start + prefix.length + hint.insert.length;
 
-        onChange(value.slice(0, hints.start) + hint.insert + value.slice(hints.end));
+        onChange(value.slice(0, hints.start) + prefix + hint.insert + value.slice(hints.end));
         setCaret(position);
 
         requestAnimationFrame(() => {

@@ -274,6 +274,54 @@ function detectionHints(schema: RuleSchema, rest: Token[]): HintState | null {
 }
 
 /**
+ * True when `partial` is a step keyword that the grammar already moved past, so
+ * the hints belong to the step after it even though no space was typed yet:
+ * `objects has`, `objects has no`, `exif.Make is`, `… with`, `… and`.
+ */
+function completesStep(tokens: Token[], partial: string): boolean {
+    const segment = lastSegment(tokens);
+    const first = segment[0];
+
+    if (first === undefined) {
+        return false;
+    }
+
+    if (partial === "and" || partial === "or") {
+        return segment.length >= 3;
+    }
+
+    const detection = first.kind === "word" && first.text.toLowerCase() === "objects";
+
+    if (detection) {
+        const rest = segment.slice(1);
+
+        if (rest.some((token) => word(token) === "with")) {
+            return false;
+        }
+
+        if (rest.length === 0) {
+            return partial === "has";
+        }
+
+        if (rest.length === 1 && word(rest[0]) === "has") {
+            return partial === "no";
+        }
+
+        return partial === "with" && rest[rest.length - 1].kind === "string";
+    }
+
+    if (partial === "is" || partial === "contains" || partial === "in") {
+        return segment.length === 1;
+    }
+
+    if (partial === "not") {
+        return segment.length === 2 && word(segment[1]) === "is";
+    }
+
+    return false;
+}
+
+/**
  * The hints for the caret position: the fields where a condition starts, the
  * operators after a field, the values after an operator, labels and metrics.
  */
@@ -293,6 +341,14 @@ export function hintsFor(
         partial = last.kind === "string" ? last.text : last.raw;
         start = last.start;
         tokens.pop();
+    }
+
+    // The step keyword is already typed: hints belong after it, and a hint is
+    // appended at the caret instead of replacing the keyword.
+    if (partial && completesStep(tokens, partial.toLowerCase())) {
+        tokens.push({ kind: "word", text: partial, raw: partial, start, end });
+        partial = "";
+        start = end;
     }
 
     const segment = lastSegment(tokens);

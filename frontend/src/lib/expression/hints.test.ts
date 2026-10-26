@@ -163,6 +163,31 @@ describe("hintsFor", () => {
         expect(hints('objects has "dog" with confidence >= ')?.note).toContain("number");
     });
 
+    it("moves past a step keyword that has no trailing space yet", () => {
+        const has = hints("objects has");
+
+        expect(has?.title).toBe("Object labels");
+        expect(has?.hints.map((hint) => hint.insert)).toEqual(['"dog"', '"cat"']);
+        expect(has?.start).toBe(11);
+        expect(has?.end).toBe(11);
+
+        expect(hints("objects has no")?.title).toBe("Object labels");
+        expect(hints('objects has "dog" with')?.hints.map((hint) => hint.insert)).toEqual(["confidence "]);
+
+        expect(hints("exif.Make is")?.hints.map((hint) => hint.insert)).toEqual(['"Canon"', '"Nikon"']);
+        expect(hints("exif.Make is not")?.hints.map((hint) => hint.insert)).toEqual(['"Canon"', '"Nikon"']);
+        expect(hints("exif.Make contains")?.hints.map((hint) => hint.insert)).toEqual(['"Canon"', '"Nikon"']);
+        expect(hints("exif.Make in")?.note).toContain("list");
+
+        expect(hints('exif.Make = "Canon" and')?.title).toBe("Fields");
+        expect(hints('objects has "dog" and')?.title).toBe("Fields");
+    });
+
+    it("keeps filtering while the step keyword is incomplete", () => {
+        expect(hints("objects h")?.hints.map((hint) => hint.insert)).toEqual(["has ", "has no "]);
+        expect(hints("exif.Make i")?.hints.map((hint) => hint.insert)).toEqual(["contains ", "in "]);
+    });
+
     it("offers the next metric after a comma", () => {
         expect(hints('objects has "dog" with confidence >= 0.8, ')?.hints.map((hint) => hint.insert)).toEqual([
             "confidence ",
