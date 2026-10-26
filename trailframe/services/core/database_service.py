@@ -3,7 +3,7 @@ import threading
 from asyncio import AbstractEventLoop
 from collections.abc import Callable
 from concurrent.futures import Future
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -21,13 +21,13 @@ from sqlalchemy.schema import CreateColumn, CreateTable
 from sqlalchemy.types import Boolean, DateTime, Float, Integer, Numeric
 from sqlmodel import SQLModel
 
+from trailframe.migrations.runner import run_migration_plans
 from trailframe.models.activity import Activity, GarminActivity  # noqa: F401  (registers models with SQLModel metadata)
 from trailframe.models.group import PhotoGroup  # noqa: F401  (registers models with SQLModel metadata)
 from trailframe.models.migration import MigrationAudit, MigrationPlanState  # noqa: F401  (registers models with SQLModel metadata)
 from trailframe.models.photo import Photo  # noqa: F401  (registers models with SQLModel metadata)
 from trailframe.models.scanner_stat import ScannerStat  # noqa: F401  (registers models with SQLModel metadata)
 from trailframe.models.tag import Tag  # noqa: F401  (registers models with SQLModel metadata)
-from trailframe.migrations.runner import run_migration_plans
 from trailframe.services.core.configuration_service import Node
 from trailframe.services.service import Service
 from trailframe.version import app_version
@@ -99,7 +99,12 @@ class DatabaseService(Service):
             await connection.run_sync(cls._repair_primary_keys)
             await connection.run_sync(cls._sync_indexes)
 
-        await cls.execute(cls._run_migration_plans)
+        session = cls._ScopedSession()
+
+        try:
+            await cls._run_migration_plans(session)
+        finally:
+            await cls._ScopedSession.remove()
 
         await cls._worker()
 
@@ -210,7 +215,7 @@ class DatabaseService(Service):
                 "plan_name": plan_name,
                 "kind": kind,
                 "applied_version": app_version(),
-                "applied_at": datetime.now(timezone.utc).isoformat(),
+                "applied_at": datetime.now(UTC).isoformat(),
                 "description": description,
             },
         )
