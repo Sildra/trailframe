@@ -906,6 +906,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/rules/expression/parse": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Parse Expression
+         * @description Convert expression text into a rule definition using the editor's parser.
+         */
+        post: operations["parse_expression_api_rules_expression_parse_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/rules/expression/print": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Print Expression
+         * @description Render a rule definition back to canonical expression text.
+         */
+        post: operations["print_expression_api_rules_expression_print_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/rules": {
         parameters: {
             query?: never;
@@ -1182,6 +1222,47 @@ export interface components {
             title: string;
             /** Description */
             description: string;
+        };
+        /** ExpressionIssue */
+        ExpressionIssue: {
+            /** Message */
+            message: string;
+            /**
+             * Start
+             * @default 0
+             */
+            start: number;
+            /**
+             * End
+             * @default 0
+             */
+            end: number;
+        };
+        /**
+         * ExpressionParseRequest
+         * @description The expression text to convert into a rule definition.
+         */
+        ExpressionParseRequest: {
+            /** Expression */
+            expression: string;
+        };
+        /** ExpressionParseResponse */
+        ExpressionParseResponse: {
+            definition?: components["schemas"]["Definition-Output"] | null;
+            /**
+             * Issues
+             * @default []
+             */
+            issues: components["schemas"]["ExpressionIssue"][];
+        };
+        /** ExpressionPrintRequest */
+        ExpressionPrintRequest: {
+            definition: components["schemas"]["Definition-Input"];
+        };
+        /** ExpressionPrintResponse */
+        ExpressionPrintResponse: {
+            /** Expression */
+            expression: string;
         };
         /** FavoriteUpdate */
         FavoriteUpdate: {
@@ -3443,6 +3524,72 @@ export interface operations {
                     "application/json": {
                         [key: string]: string[];
                     };
+                };
+            };
+        };
+    };
+    parse_expression_api_rules_expression_parse_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExpressionParseRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExpressionParseResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    print_expression_api_rules_expression_print_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExpressionPrintRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExpressionPrintResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

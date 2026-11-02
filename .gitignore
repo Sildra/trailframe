@@ -4,6 +4,7 @@ __pycache__
 
 node_modules/
 dist/
+/frontend/dist-expression/
 
 # Backend runtime artifacts (CWD when launched)
 /config.yaml

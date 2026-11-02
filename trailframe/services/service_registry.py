@@ -16,6 +16,7 @@ from trailframe.services.photos.photo_service import PhotoService
 from trailframe.services.photos.tag_service import TagService
 from trailframe.services.photos.thumbnail_service import ThumbnailService
 from trailframe.services.pipelines.pipeline_service import PipelineService
+from trailframe.services.rules.expression_engine_service import ExpressionEngineService
 from trailframe.services.rules.rule_service import RuleService
 from trailframe.services.scanners import SCANNERS
 from trailframe.services.service import Service
@@ -31,6 +32,7 @@ class ServiceRegistry(Service):
 
     _services: ClassVar[list[type[Service]]] = [
         ThreadPoolService,
+        ExpressionEngineService,
         DatabaseService,
         PhotoService,
         TagService,

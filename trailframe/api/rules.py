@@ -4,6 +4,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from trailframe.services.rules.ast import Definition
+from trailframe.services.rules.expression_engine_service import ExpressionEngineService
 from trailframe.services.rules.rule_service import RuleService, RuleValidationError
 
 router = APIRouter(prefix="/api/rules", tags=["rules"])
@@ -53,6 +54,31 @@ class RuleApplyResponse(BaseModel):
     added: int
 
 
+class ExpressionParseRequest(BaseModel):
+    """The expression text to convert into a rule definition."""
+
+    expression: str
+
+
+class ExpressionIssue(BaseModel):
+    message: str
+    start: int = 0
+    end: int = 0
+
+
+class ExpressionParseResponse(BaseModel):
+    definition: Definition | None = None
+    issues: list[ExpressionIssue] = []
+
+
+class ExpressionPrintRequest(BaseModel):
+    definition: Definition
+
+
+class ExpressionPrintResponse(BaseModel):
+    expression: str
+
+
 ERROR_RESPONSES = {400: {"description": "The rule is malformed"}, 404: {"description": "The rule does not exist"}}
 
 
@@ -66,6 +92,18 @@ async def get_schema() -> dict[str, Any]:
 async def get_values() -> dict[str, list[str]]:
     """Bounded value dictionaries for the editor's suggestions."""
     return await RuleService.values()
+
+
+@router.post("/expression/parse", response_model=ExpressionParseResponse)
+async def parse_expression(payload: ExpressionParseRequest) -> dict[str, Any]:
+    """Convert expression text into a rule definition using the editor's parser."""
+    return ExpressionEngineService.parse(payload.expression)
+
+
+@router.post("/expression/print", response_model=ExpressionPrintResponse)
+async def print_expression(payload: ExpressionPrintRequest) -> dict[str, str]:
+    """Render a rule definition back to canonical expression text."""
+    return {"expression": ExpressionEngineService.print(payload.definition.model_dump())}
 
 
 @router.get("", response_model=list[RuleResponse])

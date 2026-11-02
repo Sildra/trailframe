@@ -91,25 +91,8 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements-dev.txt
 
-      - name: Lint
-        run: ruff check .
-
-      - name: Download distribution
-        uses: actions/download-artifact@v8
-        with:
-          name: dist
-          path: dist
-
-      - name: Smoke-test wheel
-        run: |
-          pip install --no-deps dist/*.whl
-          cd "$RUNNER_TEMP" && python -c "from importlib.resources import files; package = files('trailframe'); assert (package / 'frontend' / 'dist' / 'index.html').is_file(), 'frontend/dist missing from wheel'; print('wheel contains the bundled frontend')"
-
-      - name: Test
-        run: python -m pytest
-
       #
-      # Frontend
+      # Frontend (the expression bundle is required by the backend tests)
       #
       - name: Setup Node
         uses: actions/setup-node@v7
@@ -122,7 +105,28 @@ jobs:
         run: npm ci
         working-directory: frontend
 
+      - name: Build expression bundle
+        run: npm run build:expression
+        working-directory: frontend
+
       - name: Lint
+        run: ruff check .
+
+      - name: Download distribution
+        uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist
+
+      - name: Smoke-test wheel
+        run: |
+          pip install --no-deps dist/*.whl
+          cd "$RUNNER_TEMP" && python -c "from importlib.resources import files; package = files('trailframe'); assert (package / 'frontend' / 'dist' / 'index.html').is_file(), 'frontend/dist missing from wheel'; assert (package / 'frontend' / 'dist-expression' / 'expression.js').is_file(), 'expression bundle missing from wheel'; print('wheel contains the bundled frontend and expression engine')"
+
+      - name: Test
+        run: python -m pytest
+
+      - name: Lint frontend
         run: npm run lint
         working-directory: frontend
 

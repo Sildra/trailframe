@@ -17,6 +17,7 @@ py-staticmaps
 psutil
 python-multipart
 httpx
+mini-racer
 pytest
 pytest-asyncio
 pytest-cov
