@@ -9,7 +9,9 @@ import type {
     ScalarOperator,
     ScalarValue,
 } from "../rules";
+import { fieldFor, type RuleSchema } from "./schema";
 import { tokenize, type ParseIssue, type Token } from "./tokens";
+import { isKnownUnit, isPrefixUnit } from "./units";
 
 const NUMERIC_OPS = new Set<NumericOperator>(["eq", "neq", "gt", "gte", "lt", "lte"]);
 
@@ -53,9 +55,11 @@ class ParseError extends Error {
 class Parser {
     private index = 0;
     private readonly tokens: Token[];
+    private readonly schema?: RuleSchema;
 
-    constructor(tokens: Token[]) {
+    constructor(tokens: Token[], schema?: RuleSchema) {
         this.tokens = tokens;
+        this.schema = schema;
     }
 
     private peek(offset = 0): Token {
@@ -99,6 +103,66 @@ class Parser {
         const token = this.peek();
 
         throw new ParseError(message, token.start, token.end);
+    }
+
+    /** The detection metric the schema describes, when it knows the name. */
+    private metric(name: string) {
+        return this.schema?.detection.metrics.find((metric) => metric.name === name);
+    }
+
+    /**
+     * Read a number and its unit. Units are required when the schema declares
+     * one (`35mm`, `f/2.8`, `80%`); without a schema they stay optional so old
+     * expressions still parse.
+     */
+    private parseNumber(unit: string | undefined): number {
+        const first = this.peek();
+
+        if (first.kind === "unit" && isPrefixUnit(first.text)) {
+            this.next();
+
+            if (unit && first.text !== unit) {
+                throw new ParseError(`Expected the unit '${unit}'`, first.start, first.end);
+            }
+
+            if (!unit && !isKnownUnit(first.text)) {
+                throw new ParseError(`Unknown unit '${first.text}'`, first.start, first.end);
+            }
+
+            const number = this.next();
+
+            if (number.kind !== "number") {
+                throw new ParseError("Expected a number after the unit", number.start, number.end);
+            }
+
+            return Number(number.text);
+        }
+
+        const number = this.next();
+
+        if (number.kind !== "number") {
+            throw new ParseError("Expected a number", number.start, number.end);
+        }
+
+        const next = this.peek();
+        const suffix =
+            next.kind === "unit" || (next.kind === "word" && isKnownUnit(next.text)) ? next.text : undefined;
+
+        if (suffix !== undefined) {
+            if (unit && suffix !== unit) {
+                throw new ParseError(`Expected the unit '${unit}'`, next.start, next.end);
+            }
+
+            if (!unit && this.schema) {
+                throw new ParseError(`Unexpected unit '${suffix}'`, next.start, next.end);
+            }
+
+            this.next();
+        } else if (unit) {
+            throw new ParseError(`Expected the unit '${unit}' after the number`, number.start, number.end);
+        }
+
+        return Number(number.text);
     }
 
     private asCondition(group: Group): Condition {
@@ -176,7 +240,7 @@ class Parser {
     private parseScalar(path: string): ScalarCondition {
         if (this.matchWord("is")) {
             const negated = this.matchWord("not");
-            const value = this.parseLiteral();
+            const value = this.parseValue(path);
 
             return { type: "scalar", path, op: negated ? "neq" : "eq", value };
         }
@@ -188,9 +252,26 @@ class Parser {
             throw new ParseError(`Expected a comparison operator after '${path}'`, token.start, token.end);
         }
 
-        const value = op === "in" ? this.parseList() : this.parseLiteral();
+        const value = op === "in" ? this.parseList() : this.parseValue(path);
 
         return { type: "scalar", path, op, value };
+    }
+
+    /** A scalar value, reading the field's unit when the schema declares one. */
+    private parseValue(path: string): ScalarValue {
+        const field = this.schema ? fieldFor(this.schema, path) : undefined;
+
+        if (field?.kind === "number") {
+            return this.parseNumber(field.unit);
+        }
+
+        const first = this.peek();
+
+        if (!this.schema && (first.kind === "number" || (first.kind === "unit" && isPrefixUnit(first.text)))) {
+            return this.parseNumber(undefined);
+        }
+
+        return this.parseLiteral();
     }
 
     private parseDetection(): DetectionCondition {
@@ -236,13 +317,7 @@ class Parser {
                 throw new ParseError(`Expected a numeric comparison after '${name.text}'`, token.start, token.end);
             }
 
-            const value = this.next();
-
-            if (value.kind !== "number") {
-                throw new ParseError("Expected a number", value.start, value.end);
-            }
-
-            metrics.push({ name: name.text, op, value: Number(value.text) });
+            metrics.push({ name: name.text, op, value: this.parseNumber(this.metric(name.text)?.unit) });
         } while (this.matchPunct(","));
 
         return metrics;
@@ -302,7 +377,7 @@ export interface ParseResult {
 }
 
 /** Parse an expression into the rule AST, collecting a readable issue. */
-export function parseExpression(source: string): ParseResult {
+export function parseExpression(source: string, schema?: RuleSchema | null): ParseResult {
     const text = source.trim();
 
     if (!text) {
@@ -318,7 +393,7 @@ export function parseExpression(source: string): ParseResult {
     const { tokens } = tokenize(source);
 
     try {
-        return { definition: new Parser(tokens).parse(), issues: [] };
+        return { definition: new Parser(tokens, schema ?? undefined).parse(), issues: [] };
     } catch (error) {
         if (error instanceof ParseError) {
             return { definition: null, issues: [{ message: error.message, start: error.start, end: error.end }] };

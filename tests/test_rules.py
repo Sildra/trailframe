@@ -6,6 +6,7 @@ import allure
 import pytest
 
 from trailframe.models.photo import Photo
+from trailframe.models.tag import Tag
 from trailframe.services.rules.ast import Definition
 from trailframe.services.rules.evaluator import matches
 from trailframe.services.rules.schema import RuleValidationError, as_number, resolve, validate_definition
@@ -44,7 +45,7 @@ def _dog_rule(tag: str = "Animals/Pet/Dog") -> dict:
     return {
         "tag": tag,
         "name": "Dogs",
-        "expression": 'objects has "dog" with confidence >= 0.8',
+        "expression": 'objects has "dog" with confidence >= 80%',
         "definition": {
             "match": "all",
             "conditions": [
@@ -52,7 +53,7 @@ def _dog_rule(tag: str = "Animals/Pet/Dog") -> dict:
                     "type": "detection",
                     "label": "dog",
                     "op": "present",
-                    "metrics": [{"name": "confidence", "op": "gte", "value": 0.8}],
+                    "metrics": [{"name": "confidence", "op": "gte", "value": 80}],
                 }
             ],
         },
@@ -92,6 +93,20 @@ class TestSchema:
         with pytest.raises(RuleValidationError):
             validate_definition(_definition(conditions=[]))
 
+        with pytest.raises(RuleValidationError):
+            validate_definition(
+                _definition(
+                    conditions=[
+                        {
+                            "type": "detection",
+                            "label": "dog",
+                            "op": "present",
+                            "metrics": [{"name": "confidence", "op": "gte", "value": 120}],
+                        }
+                    ]
+                )
+            )
+
     @allure.title("Accepts nested all/any groups")
     def test_groups(self):
         definition = _definition(
@@ -127,7 +142,7 @@ class TestEvaluation:
                     "type": "detection",
                     "label": "dog",
                     "op": "present",
-                    "metrics": [{"name": "confidence", "op": "gte", "value": 0.9}],
+                    "metrics": [{"name": "confidence", "op": "gte", "value": 90}],
                 }
             ]
         )
@@ -139,7 +154,7 @@ class TestEvaluation:
                     "type": "detection",
                     "label": "cat",
                     "op": "present",
-                    "metrics": [{"name": "confidence", "op": "gte", "value": 0.9}],
+                    "metrics": [{"name": "confidence", "op": "gte", "value": 90}],
                 }
             ]
         )
@@ -197,6 +212,8 @@ class TestRulesApi:
         assert {group["name"] for group in schema["groups"]} >= {"Objects", "Camera", "Place"}
         detection = next(field for group in schema["groups"] for field in group["fields"] if field["path"] == "objects")
         assert [metric["name"] for metric in detection["detection"]["metrics"]] == ["confidence", "surface"]
+        assert [metric["unit"] for metric in detection["detection"]["metrics"]] == ["%", "%"]
+        assert detection["detection"]["metrics"][0]["max"] == 100
 
         values = app.get("/api/rules/values").json()
         assert "objects" in values and "tags" in values
@@ -274,3 +291,63 @@ class TestRulesApi:
 
         photo = app.get(f"/api/photos/{photo_id}/data").json()
         assert "Animals/Pet/Dog" in photo["tags"]
+
+
+class TestMigrations:
+    @allure.title("Converts stored fraction metrics to percent exactly once")
+    async def test_rule_metrics_percent(self, db_session):
+        from sqlmodel import select
+
+        from trailframe.migrations.plans import RuleMetricsPercent
+        from trailframe.services.core.database_service import DatabaseService
+
+        rules = [
+            {
+                "id": "one",
+                "name": "Dogs",
+                "expression": 'objects has "dog" with confidence >= 0.8',
+                "definition": {
+                    "match": "all",
+                    "conditions": [
+                        {
+                            "type": "detection",
+                            "label": "dog",
+                            "op": "present",
+                            "metrics": [
+                                {"name": "confidence", "op": "gte", "value": 0.8},
+                                {"name": "surface", "op": "lte", "value": 1},
+                            ],
+                        },
+                        {
+                            "type": "group",
+                            "match": "any",
+                            "conditions": [
+                                {
+                                    "type": "detection",
+                                    "label": "cat",
+                                    "op": "present",
+                                    "metrics": [{"name": "confidence", "op": "gte", "value": 0.5}],
+                                }
+                            ],
+                        },
+                    ],
+                },
+            }
+        ]
+
+        async def _op(session):
+            session.add(Tag(name="Dog", path="Animals/Pet/Dog", rules=rules))
+            await session.commit()
+
+            await RuleMetricsPercent().run(session)
+            await RuleMetricsPercent().run(session)
+
+            stored = (await session.execute(select(Tag))).scalars().first()
+
+            return stored.rules
+
+        converted = await DatabaseService.execute(_op)
+        conditions = converted[0]["definition"]["conditions"]
+
+        assert [metric["value"] for metric in conditions[0]["metrics"]] == [80, 100]
+        assert conditions[1]["conditions"][0]["metrics"][0]["value"] == 50

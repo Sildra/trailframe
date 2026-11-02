@@ -61,3 +61,5 @@ The processing core was rebuilt around a shared thread pool.
 - In-app Help menu with Tutorial and What's new (markdown slides), arrow-key navigation, and automatic What's new on version change.
 - API docs at `/api/docs` and app version at `/api/about/version`.
 - Default tags now seed on first start when the `tags` table is empty (no config flag).
+- Rule expressions spell out their units (`80%`, `f/2.8`, `1200px`); detection metrics are written in percent, and existing rules are migrated automatically.
+- The rule editor fills in units and quotes as you type, steps over them with space or comma, and selecting a field inserts its quoted value with the caret inside.

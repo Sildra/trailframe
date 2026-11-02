@@ -26,8 +26,9 @@ const schema: RuleSchema = {
                 kind: "number",
                 operators: ["eq", "neq", "gt", "gte", "lt", "lte"],
                 min: 0,
-                max: 1,
-                step: 0.01,
+                max: 100,
+                step: 1,
+                unit: "%",
             },
         ],
     },
@@ -104,8 +105,19 @@ describe("hintsFor", () => {
         const state = hints("");
 
         expect(state?.title).toBe("Fields");
-        expect(state?.hints.map((hint) => hint.insert)).toContain("filename ");
+        expect(state?.hints.map((hint) => hint.insert)).toContain('filename = ""');
         expect(state?.hints.map((hint) => hint.insert)).toContain("objects has ");
+    });
+
+    it("fills in the quotes of a text field and puts the caret inside them", () => {
+        const hint = hints("")?.hints.find((item) => item.label === "exif.Make");
+
+        expect(hint?.insert).toBe('exif.Make = ""');
+        expect(hint?.caret).toBe(hint ? hint.insert.length - 1 : -1);
+
+        const tags = hints("")?.hints.find((item) => item.label === "is_favorite");
+
+        expect(tags?.insert).toBe("is_favorite ");
     });
 
     it("offers the fields again after and / or / (", () => {
@@ -160,7 +172,11 @@ describe("hintsFor", () => {
             "<",
             "<=",
         ]);
-        expect(hints('objects has "dog" with confidence >= ')?.note).toContain("number");
+        expect(hints('objects has "dog" with confidence >= ')?.note).toContain("percentage");
+        expect(hints('objects has "dog" with confidence >= 80% ')).toBeNull();
+        expect(hints('objects has "dog" with confidence >= 80%, ')?.hints.map((hint) => hint.insert)).toEqual([
+            "confidence ",
+        ]);
     });
 
     it("moves past a step keyword that has no trailing space yet", () => {

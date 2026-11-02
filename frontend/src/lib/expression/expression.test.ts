@@ -30,8 +30,9 @@ const schema: RuleSchema = {
                 kind: "number",
                 operators: [...NUMBER_OPS],
                 min: 0,
-                max: 1,
-                step: 0.01,
+                max: 100,
+                step: 1,
+                unit: "%",
             },
             {
                 name: "surface",
@@ -40,8 +41,9 @@ const schema: RuleSchema = {
                 kind: "number",
                 operators: [...NUMBER_OPS],
                 min: 0,
-                max: 1,
-                step: 0.01,
+                max: 100,
+                step: 1,
+                unit: "%",
             },
         ],
     },
@@ -59,6 +61,39 @@ const schema: RuleSchema = {
                     operators: ["present", "absent"],
                     computed: false,
                     values: { source: "objects", values: [] },
+                },
+            ],
+        },
+        {
+            name: "Camera",
+            label: "Camera",
+            fields: [
+                {
+                    path: "exif.FNumber",
+                    group: "Camera",
+                    label: "Aperture",
+                    description: "",
+                    kind: "number",
+                    operators: ["eq", "neq", "gt", "gte", "lt", "lte"],
+                    computed: false,
+                    values: { source: "none", values: [] },
+                    min: 0,
+                    max: 64,
+                    step: 0.1,
+                    unit: "f/",
+                },
+                {
+                    path: "width",
+                    group: "Image",
+                    label: "Width",
+                    description: "",
+                    kind: "number",
+                    operators: ["eq", "neq", "gt", "gte", "lt", "lte"],
+                    computed: true,
+                    values: { source: "none", values: [] },
+                    min: 0,
+                    step: 1,
+                    unit: "px",
                 },
             ],
         },
@@ -117,8 +152,8 @@ const schema: RuleSchema = {
     ],
 };
 
-function definition(source: string): Definition {
-    const result = parseExpression(source);
+function definition(source: string, ruleSchema?: RuleSchema): Definition {
+    const result = parseExpression(source, ruleSchema);
 
     expect(result.issues).toEqual([]);
     expect(result.definition).not.toBeNull();
@@ -199,9 +234,43 @@ describe("printDefinition", () => {
     });
 });
 
+describe("units", () => {
+    it("requires the unit the schema declares", () => {
+        expect(parseExpression('objects has "dog" with confidence >= 80', schema).issues[0].message).toContain("unit");
+        expect(parseExpression("width >= 1200", schema).issues[0].message).toContain("unit");
+        expect(parseExpression("exif.FNumber >= 2.8", schema).issues[0].message).toContain("unit");
+    });
+
+    it("parses suffix and prefix units into plain numbers", () => {
+        expect(definition('objects has "dog" with confidence >= 80%', schema).conditions[0]).toMatchObject({
+            metrics: [{ name: "confidence", op: "gte", value: 80 }],
+        });
+        expect(definition("width >= 1200px", schema).conditions[0]).toMatchObject({ value: 1200 });
+        expect(definition("exif.FNumber >= f/2.8", schema).conditions[0]).toMatchObject({ value: 2.8 });
+    });
+
+    it("rejects a unit the schema does not expect", () => {
+        expect(parseExpression("filename = 35mm", schema).issues[0].message).toContain("Unexpected");
+        expect(parseExpression("width >= 1200mm", schema).issues[0].message).toContain("px");
+    });
+
+    it("writes the units back", () => {
+        const source = 'objects has "dog" with confidence >= 80% and width >= 1200px and exif.FNumber >= f/2.8';
+
+        expect(printDefinition(definition(source, schema), schema)).toBe(source);
+        expect(printDefinition(definition('objects has "dog" with confidence >= 80'), schema)).toContain("80%");
+    });
+});
+
 describe("validateDefinition", () => {
     it("accepts a definition the schema supports", () => {
-        expect(validateDefinition(schema, definition('objects has "dog" and is_favorite is true'))).toEqual([]);
+        expect(validateDefinition(schema, definition('objects has "dog" with confidence >= 80% and is_favorite is true', schema))).toEqual([]);
+    });
+
+    it("rejects metric values outside the served range", () => {
+        const outOfRange = definition('objects has "dog" with confidence >= 120%', schema);
+
+        expect(validateDefinition(schema, outOfRange)[0].message).toContain("between");
     });
 
     it("rejects unknown fields and unsupported operators", () => {

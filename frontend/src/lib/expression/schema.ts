@@ -16,6 +16,7 @@ export interface SchemaMetric {
     min: number;
     max: number;
     step: number;
+    unit?: string;
 }
 
 export interface SchemaDetection {
@@ -171,6 +172,11 @@ function validateDetection(schema: RuleSchema, condition: Extract<Condition, { t
 
         if (!isNumber(metric.value)) {
             issues.push(issue(`'${metric.name}' needs a number`));
+            continue;
+        }
+
+        if (metric.value < spec.min || metric.value > spec.max) {
+            issues.push(issue(`'${metric.name}' must be between ${spec.min} and ${spec.max}`));
         }
     }
 

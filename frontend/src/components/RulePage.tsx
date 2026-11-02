@@ -42,20 +42,18 @@ export interface RulePageProps {
     onSaved: () => void;
 }
 
+function storedDefinition(rule: Rule | null): Definition {
+    return rule === null ? { version: 1, match: "all", conditions: [] } : (rule.definition as Definition);
+}
+
 function initialExpression(rule: Rule | null): string {
-    if (rule === null) {
-        return "";
-    }
-
-    if (rule.expression && parseExpression(rule.expression).definition !== null) {
-        return rule.expression;
-    }
-
-    return printDefinition(rule.definition as Definition);
+    return rule === null ? "" : printDefinition(storedDefinition(rule));
 }
 
 /** The detail page of one rule: expression on top, generated schema form below. */
 export default function RulePage({ tagPath, rule, onBack, onSaved }: RulePageProps) {
+    const stored = useMemo(() => storedDefinition(rule), [rule]);
+    const initial = useMemo(() => initialExpression(rule), [rule]);
     const [schema, setSchema] = useState<RuleSchema | null>(null);
     const [values, setValues] = useState<Record<string, string[]>>({});
     const [loadError, setLoadError] = useState<string | null>(null);
@@ -63,7 +61,7 @@ export default function RulePage({ tagPath, rule, onBack, onSaved }: RulePagePro
     const [description, setDescription] = useState(rule?.description ?? "");
     const [enabled, setEnabled] = useState(rule?.enabled ?? true);
     const [priority, setPriority] = useState(rule?.priority ?? 0);
-    const [expression, setExpression] = useState(() => initialExpression(rule));
+    const [expression, setExpression] = useState(initial);
     const [composing, setComposing] = useState(false);
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -74,9 +72,9 @@ export default function RulePage({ tagPath, rule, onBack, onSaved }: RulePagePro
             description: rule?.description ?? "",
             enabled: rule?.enabled ?? true,
             priority: rule?.priority ?? 0,
-            expression: initialExpression(rule),
+            expression: rule === null ? "" : printDefinition(stored, schema ?? undefined),
         }),
-        [rule],
+        [rule, stored, schema],
     );
 
     useEffect(() => {
@@ -93,8 +91,13 @@ export default function RulePage({ tagPath, rule, onBack, onSaved }: RulePagePro
                     return;
                 }
 
-                setSchema(schemaResponse.data as unknown as RuleSchema);
+                const loaded = schemaResponse.data as unknown as RuleSchema;
+
+                setSchema(loaded);
                 setValues(valuesResponse.data ?? {});
+                // Legacy expressions have no units yet, so reprint them now that
+                // the schema says which units each field expects.
+                setExpression((current) => (rule === null || current !== initial ? current : printDefinition(stored, loaded)));
             })
             .catch(() => {
                 if (!cancelled) {
@@ -105,9 +108,9 @@ export default function RulePage({ tagPath, rule, onBack, onSaved }: RulePagePro
         return () => {
             cancelled = true;
         };
-    }, []);
+    }, [rule, stored, initial]);
 
-    const parsed = useMemo(() => parseExpression(expression), [expression]);
+    const parsed = useMemo(() => parseExpression(expression, schema), [expression, schema]);
     const schemaIssues = useMemo(
         () => (schema && parsed.definition ? validateDefinition(schema, parsed.definition) : []),
         [schema, parsed.definition],
@@ -268,7 +271,7 @@ export default function RulePage({ tagPath, rule, onBack, onSaved }: RulePagePro
                         values={values}
                         definition={definition ?? { version: 1, match: "all", conditions: [] }}
                         onChange={(next) => {
-                            setExpression(printDefinition(next));
+                            setExpression(printDefinition(next, schema));
                             setError(null);
                         }}
                     />

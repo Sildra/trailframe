@@ -8,6 +8,7 @@ for expression hints, so both sides always agree on what a rule can say.
 
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass, field
 from datetime import date
@@ -82,14 +83,20 @@ class FieldSpec:
 
 @dataclass(frozen=True, slots=True)
 class MetricSpec:
-    """One numeric metric of a detection."""
+    """One numeric metric of a detection, expressed in the unit `unit`."""
 
     name: str
     label: str
     description: str
     min: float = 0.0
-    max: float = 1.0
-    step: float = 0.01
+    max: float = 100.0
+    step: float = 1.0
+    unit: str = ""
+
+
+def metric_scale(spec: MetricSpec) -> float:
+    """How many stored units make one rule unit (`confidence` is stored as 0..1)."""
+    return 100.0 if spec.unit == "%" else 1.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -187,9 +194,10 @@ DETECTION = FieldSpec(
 )
 
 DETECTION_METRICS: tuple[MetricSpec, ...] = (
-    MetricSpec("confidence", "Confidence", "How sure the detector is, from 0 to 1."),
-    MetricSpec("surface", "Surface", "Share of the image area the object covers, from 0 to 1."),
+    MetricSpec("confidence", "Confidence", "How sure the detector is, from 0 to 100 percent.", unit="%"),
+    MetricSpec("surface", "Surface", "Share of the image area the object covers, from 0 to 100 percent.", unit="%"),
 )
+METRIC_BY_NAME: dict[str, MetricSpec] = {metric.name: metric for metric in DETECTION_METRICS}
 
 GROUPS: tuple[GroupSpec, ...] = (
     GroupSpec("Objects", "Objects", (DETECTION,)),
@@ -395,6 +403,7 @@ def _field_json(spec: FieldSpec) -> dict[str, Any]:
                     "min": metric.min,
                     "max": metric.max,
                     "step": metric.step,
+                    "unit": metric.unit,
                 }
                 for metric in DETECTION_METRICS
             ],
@@ -604,6 +613,15 @@ def _validate_conditions(conditions: list[Condition], depth: int) -> None:
                 if metric.op not in KIND_OPERATORS["number"]:
                     raise RuleValidationError(f"'{metric.op}' cannot be used on '{metric.name}'")
 
+                if not math.isfinite(metric.value):
+                    raise RuleValidationError(f"'{metric.name}' needs a finite number")
+
+                spec = METRIC_BY_NAME[metric.name]
+                low, high = spec.min, spec.max
+
+                if not low <= metric.value <= high:
+                    raise RuleValidationError(f"'{metric.name}' must be between {low:g} and {high:g}")
+
         else:
             _require_value(condition)
 
@@ -630,14 +648,17 @@ __all__ = [
     "KIND_OPERATORS",
     "MAX_CONDITIONS",
     "MAX_GROUP_DEPTH",
+    "METRIC_BY_NAME",
     "NUMERIC_OPS",
     "OBJECT_LABELS",
     "OPERATORS",
     "SCHEMA_VERSION",
     "FieldSpec",
+    "MetricSpec",
     "RuleValidationError",
     "as_number",
     "field_for",
+    "metric_scale",
     "resolve",
     "schema",
     "validate_definition",

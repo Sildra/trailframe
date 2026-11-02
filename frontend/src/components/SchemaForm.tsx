@@ -3,6 +3,7 @@ import {
     Box,
     Button,
     IconButton,
+    InputAdornment,
     MenuItem,
     Stack,
     TextField,
@@ -22,7 +23,7 @@ import type {
     ScalarOperator,
 } from "../lib/rules";
 import type { RuleSchema, SchemaField, SchemaMetric } from "../lib/expression";
-import { operatorLabel } from "../lib/expression";
+import { isPrefixUnit, operatorLabel } from "../lib/expression";
 
 export interface SchemaFormProps {
     schema: RuleSchema;
@@ -99,6 +100,9 @@ function ValueEditor({
     }
 
     if (field.kind === "number") {
+        const unit = field.unit;
+        const adornment = unit ? <InputAdornment position={isPrefixUnit(unit) ? "start" : "end"}>{unit}</InputAdornment> : undefined;
+
         return (
             <TextField
                 size="small"
@@ -107,6 +111,11 @@ function ValueEditor({
                 onChange={(event) => onChange(Number(event.target.value))}
                 slotProps={{
                     htmlInput: { min: field.min, max: field.max, step: field.step ?? "any" },
+                    input: adornment
+                        ? isPrefixUnit(unit)
+                            ? { startAdornment: adornment }
+                            : { endAdornment: adornment }
+                        : undefined,
                 }}
                 sx={{ width: 140 }}
             />
@@ -317,7 +326,7 @@ function DetectionRow({
                         const first = metrics[0];
 
                         if (first) {
-                            onChange({ ...condition, metrics: [...condition.metrics, { name: first.name, op: "gte", value: 0.5 }] });
+                            onChange({ ...condition, metrics: [...condition.metrics, { name: first.name, op: "gte", value: (first.min + first.max) / 2 }] });
                         }
                     }}
                 >
@@ -333,51 +342,66 @@ function DetectionRow({
             </Stack>
 
             {condition.op === "present" &&
-                condition.metrics.map((metric, index) => (
-                    <Stack key={`metric-${index}`} direction="row" spacing={1} sx={{ alignItems: "center", ml: 9, mt: 0.5 }}>
-                        <TextField
-                            select
-                            size="small"
-                            value={metric.name}
-                            onChange={(event) => updateMetric(index, { ...metric, name: event.target.value })}
-                            sx={{ minWidth: 130 }}
-                        >
-                            {metrics.map((item) => (
-                                <MenuItem key={item.name} value={item.name}>
-                                    {item.label}
-                                </MenuItem>
-                            ))}
-                        </TextField>
-                        <TextField
-                            select
-                            size="small"
-                            value={metric.op}
-                            onChange={(event) => updateMetric(index, { ...metric, op: event.target.value as NumericOperator })}
-                            sx={{ minWidth: 110 }}
-                        >
-                            {NUMERIC_OPERATORS.map((op) => (
-                                <MenuItem key={op} value={op}>
-                                    {operatorLabel(schema, op)}
-                                </MenuItem>
-                            ))}
-                        </TextField>
-                        <TextField
-                            size="small"
-                            type="number"
-                            value={metric.value}
-                            onChange={(event) => updateMetric(index, { ...metric, value: Number(event.target.value) })}
-                            slotProps={{ htmlInput: { min: 0, max: 1, step: 0.01 } }}
-                            sx={{ width: 110 }}
-                        />
-                        <IconButton
-                            size="small"
-                            aria-label="Remove metric"
-                            onClick={() => onChange({ ...condition, metrics: condition.metrics.filter((_item, position) => position !== index) })}
-                        >
-                            <DeleteIcon fontSize="small" />
-                        </IconButton>
-                    </Stack>
-                ))}
+                condition.metrics.map((metric, index) => {
+                    const spec = metrics.find((item) => item.name === metric.name);
+                    const unit = spec?.unit;
+                    const adornment = unit ? (
+                        <InputAdornment position={isPrefixUnit(unit) ? "start" : "end"}>{unit}</InputAdornment>
+                    ) : undefined;
+
+                    return (
+                        <Stack key={`metric-${index}`} direction="row" spacing={1} sx={{ alignItems: "center", ml: 9, mt: 0.5 }}>
+                            <TextField
+                                select
+                                size="small"
+                                value={metric.name}
+                                onChange={(event) => updateMetric(index, { ...metric, name: event.target.value })}
+                                sx={{ minWidth: 130 }}
+                            >
+                                {metrics.map((item) => (
+                                    <MenuItem key={item.name} value={item.name}>
+                                        {item.label}
+                                    </MenuItem>
+                                ))}
+                            </TextField>
+                            <TextField
+                                select
+                                size="small"
+                                value={metric.op}
+                                onChange={(event) => updateMetric(index, { ...metric, op: event.target.value as NumericOperator })}
+                                sx={{ minWidth: 110 }}
+                            >
+                                {NUMERIC_OPERATORS.map((op) => (
+                                    <MenuItem key={op} value={op}>
+                                        {operatorLabel(schema, op)}
+                                    </MenuItem>
+                                ))}
+                            </TextField>
+                            <TextField
+                                size="small"
+                                type="number"
+                                value={metric.value}
+                                onChange={(event) => updateMetric(index, { ...metric, value: Number(event.target.value) })}
+                                slotProps={{
+                                    htmlInput: { min: spec?.min, max: spec?.max, step: spec?.step ?? "any" },
+                                    input: adornment
+                                        ? isPrefixUnit(unit ?? "")
+                                            ? { startAdornment: adornment }
+                                            : { endAdornment: adornment }
+                                        : undefined,
+                                }}
+                                sx={{ width: 130 }}
+                            />
+                            <IconButton
+                                size="small"
+                                aria-label="Remove metric"
+                                onClick={() => onChange({ ...condition, metrics: condition.metrics.filter((_item, position) => position !== index) })}
+                            >
+                                <DeleteIcon fontSize="small" />
+                            </IconButton>
+                        </Stack>
+                    );
+                })}
         </Box>
     );
 }

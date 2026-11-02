@@ -8,7 +8,7 @@ from typing import Any
 from trailframe.models.photo import Photo
 from trailframe.services.rules.ast import Condition, Definition, DetectionCondition, ScalarCondition
 from trailframe.services.rules.metadata import MISSING, as_float, detections
-from trailframe.services.rules.schema import as_number, field_for, resolve
+from trailframe.services.rules.schema import METRIC_BY_NAME, as_number, field_for, metric_scale, resolve
 
 
 def tags_for_photo(photo: Photo, rules: Iterable[tuple[str, Definition]]) -> list[str]:
@@ -106,7 +106,10 @@ def _compare_metric(detection: dict[str, Any], name: str, op: str, expected: flo
     if value is None:
         return False
 
-    return _order(value, op, expected, "number")
+    spec = METRIC_BY_NAME.get(name)
+    scale = metric_scale(spec) if spec is not None else 1.0
+
+    return _order(value, op, expected / scale, "number")
 
 
 def _equals(value: Any, expected: Any, kind: str) -> bool:

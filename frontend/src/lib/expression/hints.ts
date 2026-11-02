@@ -14,6 +14,8 @@ export interface Hint {
     /** The tooltip. */
     detail: string;
     kind: HintKind;
+    /** Where to put the caret inside `insert`; defaults to its end. */
+    caret?: number;
 }
 
 export interface HintState {
@@ -80,12 +82,29 @@ function filterHints(hints: Hint[], partial: string): Hint[] {
 
 function fieldHints(schema: RuleSchema): Hint[] {
     return schema.groups.flatMap((group) =>
-        group.fields.map((field) => ({
-            insert: field.kind === "detection" ? `${field.path} has ` : `${field.path} `,
-            label: field.kind === "detection" ? `${field.path} has` : field.path,
-            detail: `${field.label} — ${field.description}`,
-            kind: "field" as const,
-        })),
+        group.fields.map((field) => {
+            const detail = `${field.label} — ${field.description}`;
+
+            if (field.kind === "detection") {
+                return { insert: `${field.path} has `, label: `${field.path} has`, detail, kind: "field" as const };
+            }
+
+            // Text-like values get their quotes and comparison filled in, with
+            // the caret inside the quotes so typing lands in the right place.
+            if (field.kind === "text" || field.kind === "enum") {
+                const insert = `${field.path} = ""`;
+
+                return { insert, label: field.path, detail, kind: "field" as const, caret: insert.length - 1 };
+            }
+
+            if (field.kind === "list") {
+                const insert = `${field.path} contains ""`;
+
+                return { insert, label: field.path, detail, kind: "field" as const, caret: insert.length - 1 };
+            }
+
+            return { insert: `${field.path} `, label: field.path, detail, kind: "field" as const };
+        }),
     );
 }
 
@@ -120,6 +139,19 @@ function metricHints(metric: SchemaMetric): Hint {
         detail: metric.description,
         kind: "metric",
     };
+}
+
+/** The advice shown where a free number is allowed. */
+function numberNote(unit: string | undefined): string {
+    if (unit === "%") {
+        return "A percentage from 0 to 100, e.g. 80%";
+    }
+
+    if (unit) {
+        return `A number in ${unit}`;
+    }
+
+    return "A number";
 }
 
 function labelHints(schema: RuleSchema): Hint[] {
@@ -172,7 +204,7 @@ function scalarHints(
                 end: 0,
                 title: `Values for ${field.path}`,
                 hints: [],
-                note: `A number${field.unit ? ` in ${field.unit}` : ""}`,
+                note: numberNote(field.unit),
             };
         }
 
@@ -200,7 +232,8 @@ function detectionHints(schema: RuleSchema, rest: Token[]): HintState | null {
     const withIndex = rest.findIndex((token) => word(token) === "with");
 
     if (withIndex >= 0) {
-        const metrics = rest.slice(withIndex + 1);
+        // Units (`80%`) are syntax, not a step, so they must not shift the maths.
+        const metrics = rest.slice(withIndex + 1).filter((token) => token.kind !== "unit");
         const step = metrics.length % 4;
 
         if (step === 0) {
@@ -234,12 +267,15 @@ function detectionHints(schema: RuleSchema, rest: Token[]): HintState | null {
         }
 
         if (step === 2) {
+            const name = word(metrics[metrics.length - 2]);
+            const metric = schema.detection.metrics.find((item) => item.name === name);
+
             return {
                 start: 0,
                 end: 0,
                 title: "Metric value",
                 hints: [],
-                note: "A number, e.g. 0.8",
+                note: numberNote(metric?.unit),
             };
         }
 

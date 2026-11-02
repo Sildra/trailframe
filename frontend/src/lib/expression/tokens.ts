@@ -1,6 +1,6 @@
 /** Tokens and source positions of the local rule-expression language. */
 
-export type TokenKind = "word" | "string" | "number" | "date" | "operator" | "punct" | "unknown" | "eof";
+export type TokenKind = "word" | "string" | "number" | "date" | "operator" | "unit" | "punct" | "unknown" | "eof";
 
 export interface Token {
     kind: TokenKind;
@@ -102,6 +102,13 @@ export function tokenize(source: string): { tokens: Token[]; issues: ParseIssue[
             }
         }
 
+        // Prefix units (`f/2.8`) come before words so the `f` stays with its slash.
+        if (character === "f" && source[index + 1] === "/" && /[0-9.-]/.test(source[index + 2] ?? "")) {
+            index += 2;
+            push("unit", "f/", start, index);
+            continue;
+        }
+
         if (WORD_START.test(character)) {
             index += 1;
 
@@ -130,6 +137,12 @@ export function tokenize(source: string): { tokens: Token[]; issues: ParseIssue[
         if (character === "=" || character === ">" || character === "<") {
             index += 1;
             push("operator", character, start, index);
+            continue;
+        }
+
+        if (character === "%") {
+            index += 1;
+            push("unit", character, start, index);
             continue;
         }
 

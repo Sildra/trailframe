@@ -105,8 +105,9 @@ class TestDatabaseService:
         finally:
             await _stop_database_service()
 
-        assert state == [("initialize_migration",)]
+        assert state == [("initialize_migration",), ("rule_metrics_percent",)]
         assert ("initialize_migration", "plan") in audit
+        assert ("rule_metrics_percent", "plan") in audit
 
     async def test_keeps_tables_already_matching_the_model(self, tmp_path):
         database = tmp_path / "gallery.db"

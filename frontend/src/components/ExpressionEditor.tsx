@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Box, Chip, Tooltip, Typography, useTheme } from "@mui/material";
 import { hintsFor, tokenize, type Hint, type ParseIssue, type RuleSchema, type Token } from "../lib/expression";
+import { ensureUnit, typeCharacter } from "../lib/expression/typing";
 
 const KEYWORDS = new Set([
     "and",
@@ -31,6 +32,7 @@ const DARK_COLORS: Record<string, string> = {
     string: "#c3e88d",
     number: "#f78c6c",
     date: "#ffcb6b",
+    unit: "#ffcb6b",
     operator: "#89ddff",
     punct: "#89ddff",
     unknown: "#ff5370",
@@ -42,6 +44,7 @@ const LIGHT_COLORS: Record<string, string> = {
     string: "#15803d",
     number: "#c2410c",
     date: "#a16207",
+    unit: "#a16207",
     operator: "#0e7490",
     punct: "#0e7490",
     unknown: "#dc2626",
@@ -115,6 +118,7 @@ export default function ExpressionEditor({
 }: ExpressionEditorProps) {
     const theme = useTheme();
     const area = useRef<HTMLTextAreaElement | null>(null);
+    const composing = useRef(false);
     const [caret, setCaret] = useState(value.length);
     const [focused, setFocused] = useState(false);
     const colors = theme.palette.mode === "dark" ? DARK_COLORS : LIGHT_COLORS;
@@ -135,17 +139,8 @@ export default function ExpressionEditor({
         return () => window.removeEventListener("resize", handleResize);
     }, []);
 
-    const applyHint = (hint: Hint) => {
-        if (hints === null) {
-            return;
-        }
-
-        // Hints after a step keyword are appended, so `objects has` becomes
-        // `objects has "dog"` rather than `objects has"dog"`.
-        const prefix = hints.start === hints.end && hints.start > 0 && !/\s/.test(value[hints.start - 1]) ? " " : "";
-        const position = hints.start + prefix.length + hint.insert.length;
-
-        onChange(value.slice(0, hints.start) + prefix + hint.insert + value.slice(hints.end));
+    const applyEdit = (next: string, position: number) => {
+        onChange(next);
         setCaret(position);
 
         requestAnimationFrame(() => {
@@ -156,6 +151,19 @@ export default function ExpressionEditor({
                 element.setSelectionRange(position, position);
             }
         });
+    };
+
+    const applyHint = (hint: Hint) => {
+        if (hints === null) {
+            return;
+        }
+
+        // Hints after a step keyword are appended, so `objects has` becomes
+        // `objects has "dog"` rather than `objects has"dog"`.
+        const prefix = hints.start === hints.end && hints.start > 0 && !/\s/.test(value[hints.start - 1]) ? " " : "";
+        const offset = prefix.length + (hint.caret ?? hint.insert.length);
+
+        applyEdit(value.slice(0, hints.start) + prefix + hint.insert + value.slice(hints.end), hints.start + offset);
     };
 
     return (
@@ -200,8 +208,21 @@ export default function ExpressionEditor({
                     ref={area}
                     value={value}
                     onChange={(event) => {
-                        onChange(event.target.value);
-                        setCaret(event.target.selectionStart ?? event.target.value.length);
+                        const next = event.target.value;
+                        let position = event.target.selectionStart ?? next.length;
+                        let text = next;
+
+                        if (schema && !composing.current) {
+                            const filled = ensureUnit(schema, next, position);
+
+                            if (filled) {
+                                text = filled.text;
+                                position = filled.caret;
+                            }
+                        }
+
+                        onChange(text);
+                        setCaret(position);
                     }}
                     onSelect={(event) => setCaret(event.currentTarget.selectionStart)}
                     onFocus={() => setFocused(true)}
@@ -210,17 +231,38 @@ export default function ExpressionEditor({
                         if (event.key === "Tab" && hints !== null && hints.hints.length > 0) {
                             event.preventDefault();
                             applyHint(hints.hints[0]);
+                            return;
+                        }
+
+                        if (schema === null || composing.current || event.ctrlKey || event.metaKey || event.altKey) {
+                            return;
+                        }
+
+                        if (event.key.length !== 1) {
+                            return;
+                        }
+
+                        const position = event.currentTarget.selectionStart ?? 0;
+                        const edited = typeCharacter(schema, event.currentTarget.value, position, event.key);
+
+                        if (edited) {
+                            event.preventDefault();
+                            applyEdit(edited.text, edited.caret);
                         }
                     }}
-                    onCompositionStart={() => onCompositionChange?.(true)}
+                    onCompositionStart={() => {
+                        composing.current = true;
+                        onCompositionChange?.(true);
+                    }}
                     onCompositionEnd={(event) => {
+                        composing.current = false;
                         onCompositionChange?.(false);
                         onChange(event.currentTarget.value);
                     }}
                     spellCheck={false}
                     autoCapitalize="off"
                     autoCorrect="off"
-                    placeholder='objects has "dog" with confidence >= 0.8 and is_favorite is true'
+                    placeholder='objects has "dog" with confidence >= 80% and is_favorite is true'
                     aria-label="Rule expression"
                     sx={{
                         position: "relative",
