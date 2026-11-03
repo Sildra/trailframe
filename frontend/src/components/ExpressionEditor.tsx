@@ -119,6 +119,8 @@ export default function ExpressionEditor({
     const theme = useTheme();
     const area = useRef<HTMLTextAreaElement | null>(null);
     const composing = useRef(false);
+    /** Unit filling is armed by an operator hint and disarmed once it fired. */
+    const unitFill = useRef(false);
     const [caret, setCaret] = useState(value.length);
     const [focused, setFocused] = useState(false);
     const colors = theme.palette.mode === "dark" ? DARK_COLORS : LIGHT_COLORS;
@@ -163,6 +165,9 @@ export default function ExpressionEditor({
         const prefix = hints.start === hints.end && hints.start > 0 && !/\s/.test(value[hints.start - 1]) ? " " : "";
         const offset = prefix.length + (hint.caret ?? hint.insert.length);
 
+        // Only an operator pick arms unit filling: the next number typed in that
+        // slot then gets its unit, while ordinary typing never inserts one.
+        unitFill.current = hint.kind === "operator";
         applyEdit(value.slice(0, hints.start) + prefix + hint.insert + value.slice(hints.end), hints.start + offset);
     };
 
@@ -212,12 +217,13 @@ export default function ExpressionEditor({
                         let position = event.target.selectionStart ?? next.length;
                         let text = next;
 
-                        if (schema && !composing.current) {
+                        if (schema && !composing.current && unitFill.current) {
                             const filled = ensureUnit(schema, next, position);
 
                             if (filled) {
                                 text = filled.text;
                                 position = filled.caret;
+                                unitFill.current = false;
                             }
                         }
 
@@ -226,7 +232,10 @@ export default function ExpressionEditor({
                     }}
                     onSelect={(event) => setCaret(event.currentTarget.selectionStart)}
                     onFocus={() => setFocused(true)}
-                    onBlur={() => setFocused(false)}
+                    onBlur={() => {
+                        unitFill.current = false;
+                        setFocused(false);
+                    }}
                     onKeyDown={(event) => {
                         if (event.key === "Tab" && hints !== null && hints.hints.length > 0) {
                             event.preventDefault();

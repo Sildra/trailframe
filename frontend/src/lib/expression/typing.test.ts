@@ -97,6 +97,13 @@ describe("ensureUnit", () => {
         expect(ensureUnit(SCHEMA, text, text.length)).toEqual({ text: `${text}%`, caret: text.length });
     });
 
+    it("does not stack a unit when applied again", () => {
+        const first = ensureUnit(SCHEMA, "width >= 12", 11);
+
+        expect(first).toEqual({ text: "width >= 12px", caret: 11 });
+        expect(ensureUnit(SCHEMA, first?.text ?? "", first?.caret ?? 0)).toBeNull();
+    });
+
     it("leaves fields without a unit alone", () => {
         expect(ensureUnit(SCHEMA, "filename = sunset", 18)).toBeNull();
         expect(ensureUnit(SCHEMA, "width >= ", 9)).toBeNull();

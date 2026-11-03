@@ -1,5 +1,6 @@
 /** Typing aids for the rule expression editor: units and quotes fill themselves in. */
 
+import { parseExpression } from "./parser";
 import { fieldFor, type RuleSchema, type SchemaField, type SchemaMetric } from "./schema";
 import { tokenize, type Token } from "./tokens";
 import { isPrefixUnit } from "./units";
@@ -125,11 +126,15 @@ export function unitSlot(schema: RuleSchema, text: string, caret: number): Slot 
 }
 
 /**
- * Keep the unit attached to the number being typed. A suffix unit appears as
- * soon as a digit is typed (the caret stays before it, so more digits grow the
- * number); a prefix unit such as `f/` goes in front of the number.
+ * Keep the unit attached to the number being typed, but only while the
+ * expression does not parse yet: once the unit is there the expression is valid
+ * again, so a second pass cannot stack units or metrics.
  */
 export function ensureUnit(schema: RuleSchema, text: string, caret: number): { text: string; caret: number } | null {
+    if (parseExpression(text, schema).issues.length === 0) {
+        return null;
+    }
+
     const position = Math.max(0, Math.min(caret, text.length));
     const slot = unitSlot(schema, text, position);
 
