@@ -23,6 +23,7 @@ class ForceFlag:
 class Scanner(ABC):
     _can_be_disabled: bool = True
     _can_be_remote: bool = False
+    _heavy: bool = False
     _definition: str | None = None
 
     def __init__(self, name: str):

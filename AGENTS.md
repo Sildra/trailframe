@@ -48,9 +48,11 @@ Trailframe — photo gallery app: Python/FastAPI backend + React/TS/Vite fronten
 
 - **Pipeline** base: eager thread-safe queue (sync `add`/`start`/`stop`, `get_queue_size`, `accepts`); `stop()` drains worker and flushes run stats; `take_pending()` returns leftover items; `PipelineEmpty` sentinel accepted everywhere and dropped
 
-- **Start order**: `ThreadPoolService` → `ExpressionEngineService` → `DatabaseService` (creates tables) → `PhotoService` → `TagService` → `RuleService` → `PipelineService` → `FolderService` → `ThumbnailService` → `MapService` → `GarminConnectService` → `GpxService` → `ActivityService` → `LocationService` → `TileService` → `StatisticsService` → `DuplicatesService` (order must satisfy `_requires`: DB→TP, Photos→DB, Tag→DB, Rule→DB+Tag, Pipeline→DB, Folder→DB+Pipeline, Thumbnail→Photos, Garmin→DB+TP, Gpx→DB, Activity→DB+TP+Garmin+Map, Location→DB+TP, Tile→TP, Statistics→DB, Duplicates→DB+TP)
+- **Start order**: `ThreadPoolService` → `ExpressionEngineService` → `DatabaseService` (creates tables) → `HardwareService` → `PhotoService` → `TagService` → `RuleService` → `PipelineService` → `FolderService` → `ThumbnailService` → `MapService` → `GarminConnectService` → `GpxService` → `ActivityService` → `LocationService` → `TileService` → `StatisticsService` → `DuplicatesService` (order must satisfy `_requires`: DB→TP, Hardware→DB, Photos→DB, Tag→DB, Rule→DB+Tag, Pipeline→DB, Folder→DB+Pipeline, Thumbnail→Photos, Garmin→DB+TP, Gpx→DB, Activity→DB+TP+Garmin+Map, Location→DB+TP, Tile→TP, Statistics→DB, Duplicates→DB+TP)
 
 - **Concurrency**: one shared pool (`ThreadPoolService`, size `general.thread_pool_size`, default 2); all heavy work (scanners, maps, Garmin, tiles, geo); each pipeline = 1 worker task (`Pipeline._worker_count = 1`) — bounds memory (one YOLO inference at a time); DB work stays on event loop
+
+- **Hardware detection** (`core/hardware_service.py`): `HardwareService` runs before `PipelineService` at configure time so scanner flags are already settled. It reads the free (available) physical memory with stdlib only (`GlobalMemoryStatusEx`/`ullAvailPhys` on Windows, `MemAvailable` from `/proc/meminfo` on Linux, `vm_stat` on macOS) and, below `MIN_FREE_RAM_GB` (1 GB), sets `scanners.<Name>.enabled = false` for every heavy scanner. The outcome is recorded only in the generic `app_data` table (key `hardware_detection`): free memory, threshold, heavy scanner names and the ones auto-disabled. Detection only re-evaluates heavy scanners missing from that record, so scanners added by a later release are covered without overriding a user's earlier enable/disable choice. The result is internal and deliberately not exposed through the API; `Hardware & performance` (`trailframe/docs/hardware.md`, `GET /api/docs/hardware`) explains the behaviour in the Help menu.
 
 - **Call hierarchy**: content/enrichment = `Pipeline → Scanner → Service`; API content = `API → Service`, never a Scanner (map/wireframe via `LocationService`/`MapService`)
 
@@ -74,6 +76,7 @@ Trailframe — photo gallery app: Python/FastAPI backend + React/TS/Vite fronten
   - `DatabaseScanner.accept` = `isinstance(item, Item) and item.updated`
 
 - **Scanner tracking**: `self.add_scanner(photo)` appends name to `photo.scanners` (JSON column, NULL-safe; read via `photo.scanners or []`); `ObjectScanner` runs YOLO on `item.image` (in-memory PIL, no path needed; model `yolo26n.pt`/`yolo26m.pt` in `general.models_folder`), stores `photo.objects` (`[{label, confidence, box}]`), gates on `"Object" not in photo.scanners`; image-bearing scanners (`EXIF`/`PerceptualHash`/`Object`) all consume `item.image`, which can be preloaded via `Item(photo, image=...)` for in-memory sources
+- **Heavy flag**: `Scanner._heavy` (default `False`) marks memory-intensive scanners; exposed by `get_scanner_definitions()` and the pipeline scanner chooser. `Object` is the only heavy scanner today, so `HardwareService` can disable it on small machines.
 - **No tag scanner**: tags are never inferred from the photo content (not from the YOLO objects, not from the EXIF data) — they are only assigned by the user through the tag API, or by a user-defined **rule** (see Rules)
 
 ### Tags
@@ -105,6 +108,8 @@ Trailframe — photo gallery app: Python/FastAPI backend + React/TS/Vite fronten
 
 - **DB models**: SQLModel classes in `trailframe/models/` (converter classmethods, e.g. `GarminActivity.to_activity`); tables auto-created at startup, no migrations
 
+- **Generic data** (`core/app_data.py`, model `models/app_data.py`): `app_data` is a key/value table (`key` PK, `value`, `updated_at`) for misc state; `AppData.get_value/set_value` use the running DB session, `read_value(path, key)` reads it synchronously before `DatabaseService` starts (used by `HardwareService._configure`)
+
 - **Thumbnails** (`photos/thumbnail_service.py`): multi-size via `general.thumbnail_sizes` (default `[160, 400]`); files at `{safe_filename[:2]}/{safe_filename}_{file_size}_{size}.webp` (fallback `{safe_filename}_{size}.webp`); `generate_all` writes all; `exists` = all present; `select_size` picks lowest ≥ preferred when ≤ 2×preferred else highest below; `GET /api/photos/{id}/thumbnail?size=<p>`
 
 - **Location boundaries cache** (`map/location_service.py`): `maps/_cache/*.jsonl` — JSON Lines, geometry as base64 WKB; `_read_entries`/`_write_entries` stream line-by-line (never a whole-file parse — the old array format peaked at file+parsed structure, measured 311 MB for `adm0`); unparseable/empty file = cache miss → re-download; superseded `.json` array caches are ignored and deleted on rewrite (no retrocompat); ADM0 download is strictly sequential (convert-to-shapely-and-drop per country, never parallel); `_adm0` resident, `_adm1`/`_adm2` LRU-bounded (`_ADM_CACHE_SIZE`, 16); `_find`/wireframe prefilter use `STRtree`; `_timed_load` logs duration/traced-peak/geometry-size at DEBUG (`LocationService` logger)
@@ -128,7 +133,7 @@ Trailframe — photo gallery app: Python/FastAPI backend + React/TS/Vite fronten
 
 - **Statistics** (`core/statistics_service.py`): `Scanner._record` times scans; `Pipeline._flush_stats` persists `ScannerStat` row per scanner via `record_run`; `GET /api/statistics/scanners` (items/s); `GET /api/statistics/storage` (DB + folder sizes); `FolderStat`/`StorageStats` are pydantic shapes in `api/statistics.py`, not DB tables; for tests: insert mock `ScannerStat` rows, don't run real scans
 
-- **Docs/version** (`api/docs.py`, `api/about.py`): `GET /api/docs` lists bundled Markdown documents, `GET /api/docs/{name}` returns `{name, title, description, content}` from `trailframe/docs/*.md` (whitelisted names, `importlib.resources` so the wheel works); `GET /api/about/version` returns `trailframe.version.app_version()` (installed metadata → generated `_version.py` → `0.0.0`), also used as the FastAPI version
+- **Docs/version** (`api/docs.py`, `api/about.py`): `GET /api/docs` lists bundled Markdown documents (`hardware`, `tutorial`, `whats-new`), `GET /api/docs/{name}` returns `{name, title, description, content}` from `trailframe/docs/*.md` (whitelisted names, `importlib.resources` so the wheel works); `GET /api/about/version` returns `trailframe.version.app_version()` (installed metadata → generated `_version.py` → `0.0.0`), also used as the FastAPI version
 
 ## Frontend (Vite + React 19 + TS)
 
@@ -168,8 +173,8 @@ Trailframe — photo gallery app: Python/FastAPI backend + React/TS/Vite fronten
 
 - **`src/lib/markdownSlides.ts`**: `splitSlides(markdown)` splits a document on `---` lines outside fenced code blocks; Vitest covers CRLF, fences, empty slides.
 - **`src/components/MarkdownSlidesDialog.tsx`**: one MUI dialog per document, `react-markdown` + `remark-gfm` mapped to theme typography/tables; bottom `‹` / `›` controls with a `current / total` counter, arrow-key navigation, scroll reset per slide; `initialSlide` selects `first` or `last`.
-- **`src/App.tsx`**: Help button in the AppBar opens **Tutorial** or **What's new**; version is fetched from `GET /api/about/version`, the last seen version lives in `localStorage["trailframe.seenVersion"]`, and What's new auto-opens at the last slide after a version change (then stores the version on close).
-- **Content**: `trailframe/docs/tutorial.md` and `trailframe/docs/whats-new.md`; What's new keeps one slide per minor `0.X` release in ascending order (patch releases are folded into the minor slide).
+- **`src/App.tsx`**: Help button in the AppBar opens **Tutorial**, **Hardware & performance**, or **What's new**; version is fetched from `GET /api/about/version`, the last seen version lives in `localStorage["trailframe.seenVersion"]`, and What's new auto-opens at the last slide after a version change (then stores the version on close).
+- **Content**: `trailframe/docs/tutorial.md`, `trailframe/docs/hardware.md` and `trailframe/docs/whats-new.md`; What's new keeps one slide per minor `0.X` release in ascending order (patch releases are folded into the minor slide).
 
 ## Verification
 

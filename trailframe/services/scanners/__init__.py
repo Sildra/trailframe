@@ -19,6 +19,7 @@ class ScannerDefinition:
     cls: type[Scanner]
     can_be_disabled: bool | None = None
     can_be_remote: bool | None = None
+    heavy: bool | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -27,6 +28,7 @@ class ScannerDefinition:
         object.__setattr__(
             self, "can_be_remote", self.cls._can_be_remote if self.can_be_remote is None else self.can_be_remote
         )
+        object.__setattr__(self, "heavy", self.cls._heavy if self.heavy is None else self.heavy)
 
 
 SCANNER_DEFINITIONS: tuple[ScannerDefinition, ...] = (
@@ -109,6 +111,7 @@ def get_scanner_definitions() -> list[dict]:
             "name": definition.name,
             "can_be_disabled": definition.can_be_disabled,
             "can_be_remote": definition.can_be_remote,
+            "heavy": definition.heavy,
         }
         for definition in SCANNER_DEFINITIONS
     ]

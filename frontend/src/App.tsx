@@ -17,7 +17,7 @@ import type { components } from "./api/generated/schema";
 
 type Page = "gallery" | "activities" | "slideshow" | "configuration" | "tags" | "tools";
 
-type DocumentName = "tutorial" | "whats-new";
+type DocumentName = "hardware" | "tutorial" | "whats-new";
 
 type Activity = components["schemas"]["ActivitySummary"];
 
@@ -31,6 +31,7 @@ const PAGES: Array<{ id: Page; label: string }> = [
 ];
 
 const DOCUMENTS: Record<DocumentName, string> = {
+    hardware: "Hardware & performance",
     tutorial: "Tutorial",
     "whats-new": "What's new",
 };
@@ -166,21 +167,24 @@ export default function App() {
                         elevation={0}
                         sx={{ borderBottom: 1, borderColor: "divider" }}
                     >
-                        <Toolbar variant="dense" disableGutters sx={{ px: 1 }}>
+                        <Toolbar variant="dense" disableGutters sx={{ px: 1, minWidth: 0 }}>
                             <Tabs
                                 value={pageIndex}
+                                variant="scrollable"
+                                scrollButtons="auto"
+                                sx={{ flex: 1, minWidth: 0 }}
                                 onChange={(_event, value) => {
                                     setPage(PAGES[value as number].id);
                                 }}
                             >
                                 {PAGES.map(({ id, label }) => (
-                                    <Tab key={id} label={label} />
+                                    <Tab key={id} label={label} sx={{ flexShrink: 0 }} />
                                 ))}
                             </Tabs>
-                            <Box sx={{ flexGrow: 1 }} />
                             <IconButton
                                 size="small"
                                 aria-label="Help"
+                                sx={{ flexShrink: 0 }}
                                 onClick={(event) => setHelpAnchor(event.currentTarget)}
                             >
                                 <HelpOutlinedIcon />
@@ -191,6 +195,7 @@ export default function App() {
                                 onClose={() => setHelpAnchor(null)}
                             >
                                 <MenuItem onClick={() => showDocument("tutorial")}>Tutorial</MenuItem>
+                                <MenuItem onClick={() => showDocument("hardware")}>Hardware & performance</MenuItem>
                                 <MenuItem onClick={() => showDocument("whats-new")}>What's new</MenuItem>
                             </Menu>
                         </Toolbar>

@@ -5,6 +5,7 @@ from trailframe.services.activities.garmin_connect_service import GarminConnectS
 from trailframe.services.activities.gpx_service import GpxService
 from trailframe.services.core.configuration_service import Node
 from trailframe.services.core.database_service import DatabaseService
+from trailframe.services.core.hardware_service import HardwareService
 from trailframe.services.core.statistics_service import StatisticsService
 from trailframe.services.core.thread_pool_service import ThreadPoolService
 from trailframe.services.map.location_service import LocationService
@@ -34,6 +35,7 @@ class ServiceRegistry(Service):
         ThreadPoolService,
         ExpressionEngineService,
         DatabaseService,
+        HardwareService,
         PhotoService,
         TagService,
         RuleService,

@@ -212,7 +212,7 @@ class TestDocsApi:
 
         assert response.status_code == 200
         documents = response.json()
-        assert {document["name"] for document in documents} == {"tutorial", "whats-new"}
+        assert {document["name"] for document in documents} == {"hardware", "tutorial", "whats-new"}
         assert all({"name", "title", "description"} <= set(document) for document in documents)
 
     @allure.title("Returns the Markdown content of a document")

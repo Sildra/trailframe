@@ -76,6 +76,7 @@ class PipelineService(Service):
                     "name": definition["name"],
                     "can_be_disabled": definition["can_be_disabled"],
                     "can_be_remote": definition["can_be_remote"],
+                    "heavy": definition["heavy"],
                 }
                 for definition in get_scanner_definitions()
                 if definition["can_be_disabled"]

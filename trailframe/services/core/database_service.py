@@ -23,6 +23,7 @@ from sqlmodel import SQLModel
 
 from trailframe.migrations.runner import run_migration_plans
 from trailframe.models.activity import Activity, GarminActivity  # noqa: F401  (registers models with SQLModel metadata)
+from trailframe.models.app_data import AppDataRecord  # noqa: F401  (registers models with SQLModel metadata)
 from trailframe.models.group import PhotoGroup  # noqa: F401  (registers models with SQLModel metadata)
 from trailframe.models.migration import MigrationAudit, MigrationPlanState  # noqa: F401  (registers models with SQLModel metadata)
 from trailframe.models.photo import Photo  # noqa: F401  (registers models with SQLModel metadata)

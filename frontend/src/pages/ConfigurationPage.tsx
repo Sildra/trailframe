@@ -49,6 +49,7 @@ type ScannerDefinition = {
     name: string;
     can_be_disabled: boolean;
     can_be_remote: boolean;
+    heavy: boolean;
 };
 
 interface FieldDescriptor {
@@ -332,6 +333,7 @@ function Chooser({
                               sx={{ fontSize: 12, color: "text.secondary", ml: 0.75, whiteSpace: "nowrap" }}
                           >
                               {remote ? (definition.can_be_remote ? "remote" : "local only") : "local"}
+                              {definition.heavy ? ", heavy" : ""}
                           </Typography>
                       </MenuItem>
                   ))

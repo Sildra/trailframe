@@ -1,10 +1,34 @@
 from __future__ import annotations
 
+import sqlite3
 from datetime import datetime
+from pathlib import Path
 
 from sqlalchemy import text
 
 TABLE = "app_data"
+
+HARDWARE_DETECTION = "hardware_detection"
+
+
+def read_value(database_path: Path, key: str) -> str | None:
+    """Read a value without the DatabaseService (used while services are configured).
+
+    The database file may not exist yet (first run) or the table may predate the
+    record, in which case the value is simply missing.
+    """
+    path = Path(database_path)
+
+    if not path.is_file():
+        return None
+
+    try:
+        with sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True, timeout=1) as connection:
+            row = connection.execute(f"SELECT value FROM {TABLE} WHERE key = ?", (key,)).fetchone()
+    except sqlite3.Error:
+        return None
+
+    return row[0] if row else None
 
 
 class AppData:

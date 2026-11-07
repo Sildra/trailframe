@@ -8,6 +8,7 @@ from pydantic import BaseModel
 router = APIRouter(prefix="/api/docs", tags=["docs"])
 
 _DOCUMENTS: dict[str, tuple[str, str]] = {
+    "hardware": ("Hardware & performance", "Memory requirements and heavy scanners"),
     "tutorial": ("Tutorial", "A short tour of Trailframe"),
     "whats-new": ("What's new", "Highlights from each release"),
 }
