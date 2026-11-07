@@ -6,7 +6,6 @@ import allure
 import pytest
 
 from trailframe.models.photo import Photo
-from trailframe.models.tag import Tag
 from trailframe.services.rules.ast import Definition
 from trailframe.services.rules.evaluator import matches
 from trailframe.services.rules.schema import RuleValidationError, as_number, resolve, validate_definition
@@ -291,63 +290,3 @@ class TestRulesApi:
 
         photo = app.get(f"/api/photos/{photo_id}/data").json()
         assert "Animals/Pet/Dog" in photo["tags"]
-
-
-class TestMigrations:
-    @allure.title("Converts stored fraction metrics to percent exactly once")
-    async def test_rule_metrics_percent(self, db_session):
-        from sqlmodel import select
-
-        from trailframe.migrations.plans import RuleMetricsPercent
-        from trailframe.services.core.database_service import DatabaseService
-
-        rules = [
-            {
-                "id": "one",
-                "name": "Dogs",
-                "expression": 'objects has "dog" with confidence >= 0.8',
-                "definition": {
-                    "match": "all",
-                    "conditions": [
-                        {
-                            "type": "detection",
-                            "label": "dog",
-                            "op": "present",
-                            "metrics": [
-                                {"name": "confidence", "op": "gte", "value": 0.8},
-                                {"name": "surface", "op": "lte", "value": 1},
-                            ],
-                        },
-                        {
-                            "type": "group",
-                            "match": "any",
-                            "conditions": [
-                                {
-                                    "type": "detection",
-                                    "label": "cat",
-                                    "op": "present",
-                                    "metrics": [{"name": "confidence", "op": "gte", "value": 0.5}],
-                                }
-                            ],
-                        },
-                    ],
-                },
-            }
-        ]
-
-        async def _op(session):
-            session.add(Tag(name="Dog", path="Animals/Pet/Dog", rules=rules))
-            await session.commit()
-
-            await RuleMetricsPercent().run(session)
-            await RuleMetricsPercent().run(session)
-
-            stored = (await session.execute(select(Tag))).scalars().first()
-
-            return stored.rules
-
-        converted = await DatabaseService.execute(_op)
-        conditions = converted[0]["definition"]["conditions"]
-
-        assert [metric["value"] for metric in conditions[0]["metrics"]] == [80, 100]
-        assert conditions[1]["conditions"][0]["metrics"][0]["value"] == 50

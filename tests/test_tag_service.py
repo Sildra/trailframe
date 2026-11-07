@@ -59,6 +59,18 @@ def _find_json(tree, path):
     return None
 
 
+def _default_paths(nodes: dict, prefix: str = "") -> list[str]:
+    """Every path declared by the default vocabulary, whatever it contains."""
+    paths: list[str] = []
+
+    for name, children in nodes.items():
+        path = f"{prefix}{name}"
+        paths.append(path)
+        paths.extend(_default_paths(children, f"{path}/"))
+
+    return paths
+
+
 async def _photo_tags() -> list[list[str]]:
     """The tags of every photo, in insertion order."""
 
@@ -107,16 +119,15 @@ class TestTagService:
     @allure.title("Seeds the default vocabulary and keeps it idempotent")
     @pytest.mark.asyncio
     async def test_seed_defaults_is_idempotent(self, db_session):
+        expected = set(_default_paths(TagService.DEFAULT_TAGS))
+
         created = await TagService.seed_defaults()
-        assert created > 0
+        assert created == len(expected)
 
         tree = await TagService.get_tree()
         paths = {entry["path"] for entry in _flatten(tree)}
 
-        assert "Landscape" in paths
-        assert "Landscape/Mountain" in paths
-        assert "Architecture/Building/Church" in paths
-
+        assert paths == expected
         assert await TagService.seed_defaults() == 0
 
     @allure.title("Registers a path together with its ancestors")
@@ -320,11 +331,13 @@ class TestTagCreate:
 class TestTagApi:
     @allure.title("Lists the tag tree")
     def test_list_tags(self, app):
+        assert app.post("/api/tags", json={"path": "Test/Listed"}).status_code == 200
+
         response = app.get("/api/tags")
         assert response.status_code == 200
 
         paths = {entry["path"] for entry in _flatten_json(response.json())}
-        assert "Landscape" in paths
+        assert "Test/Listed" in paths
 
     @allure.title("Saves the whole vocabulary in one request")
     def test_update_tags(self, app):
@@ -345,16 +358,18 @@ class TestTagApi:
 
     @allure.title("Deletes a tag and its descendants")
     def test_delete_tag(self, app):
-        node = _find_json(app.get("/api/tags").json(), "Quality")
+        assert app.post("/api/tags", json={"path": "Delete/Me/Child"}).status_code == 200
 
+        node = _find_json(app.get("/api/tags").json(), "Delete/Me")
         assert node is not None
 
         response = app.delete(f"/api/tags/{node['id']}")
         assert response.status_code == 200
         assert response.json()["deleted"] is True
 
-        assert _find_json(app.get("/api/tags").json(), "Quality") is None
-        assert _find_json(app.get("/api/tags").json(), "Quality/Macro") is None
+        tree = app.get("/api/tags").json()
+        assert _find_json(tree, "Delete/Me") is None
+        assert _find_json(tree, "Delete/Me/Child") is None
 
     @allure.title("Returns a 404 for an unknown tag")
     def test_delete_unknown_tag(self, app):
@@ -362,6 +377,8 @@ class TestTagApi:
 
     @allure.title("Adds a single tag with its missing ancestors")
     def test_create_tag(self, app):
+        before = {entry["path"] for entry in _flatten_json(app.get("/api/tags").json())}
+
         response = app.post("/api/tags", json={"path": "Brand/New"})
         assert response.status_code == 200
 
@@ -371,11 +388,12 @@ class TestTagApi:
 
         tree = app.get("/api/tags").json()
         assert _find_json(tree, "Brand") is not None
-        assert _find_json(tree, "Landscape") is not None
+        assert before <= {entry["path"] for entry in _flatten_json(tree)}
 
     @allure.title("Returns a 409 when the tag path is already taken")
     def test_create_tag_conflict(self, app):
-        assert app.post("/api/tags", json={"path": "Landscape"}).status_code == 409
+        assert app.post("/api/tags", json={"path": "Brand/New"}).status_code == 200
+        assert app.post("/api/tags", json={"path": "Brand/New"}).status_code == 409
 
     @allure.title("Returns a 400 for an empty tag path")
     def test_create_tag_invalid(self, app):

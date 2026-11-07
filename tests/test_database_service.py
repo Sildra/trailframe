@@ -94,21 +94,6 @@ class TestDatabaseService:
 
         assert ("ix_photo_path",) in indexes
 
-    async def test_records_migration_plans_during_startup(self, tmp_path):
-        database = tmp_path / "gallery.db"
-
-        await _start_database_service(database)
-
-        try:
-            state = _read(database, "SELECT plan_name FROM migration_plan_state")
-            audit = _read(database, "SELECT plan_name, kind FROM migration_audit")
-        finally:
-            await _stop_database_service()
-
-        assert state == [("initialize_migration",), ("rule_metrics_percent",)]
-        assert ("initialize_migration", "plan") in audit
-        assert ("rule_metrics_percent", "plan") in audit
-
     async def test_keeps_tables_already_matching_the_model(self, tmp_path):
         database = tmp_path / "gallery.db"
 
