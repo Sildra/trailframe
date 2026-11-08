@@ -10,6 +10,7 @@ dist/
 /config.yaml
 /gallery.db
 /photos/
+/originals/
 /thumbnails/
 /trash/
 /maps/

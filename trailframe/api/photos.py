@@ -12,8 +12,8 @@ from trailframe.models.photo import Photo, PhotoDetail, RelatedPhotoGroup
 from trailframe.services.core.database_service import DatabaseService
 from trailframe.services.map.location_service import LocationService
 from trailframe.services.photos.duplicates_service import DuplicatesService
-from trailframe.services.photos.folder_service import FolderService
 from trailframe.services.photos.photo_service import PhotoService
+from trailframe.services.photos.processing_service import ProcessingService
 from trailframe.services.photos.tag_service import TagService
 from trailframe.services.photos.thumbnail_service import ThumbnailService
 
@@ -487,6 +487,6 @@ async def get_wireframe(photo_id: int):
 
 @router.post("/upload")
 async def upload_photo(file: UploadFile = File(...)):
-    path = await FolderService.upload(file.filename, file)
+    path = await ProcessingService.upload(file.filename or "photo", file)
 
     return {"filename": file.filename, "path": str(path)}

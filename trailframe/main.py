@@ -46,11 +46,14 @@ def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Photo Gallery API")
     parser.add_argument("--config", type=parse_path_arg, default=Path("config.yaml"), help="Configuration file")
     parser.add_argument(
-        "--folder", type=parse_path_arg, default=None, help="Base folder where photos and thumbnails are stored"
+        "--folder",
+        type=parse_path_arg,
+        default=None,
+        help="Base folder where photos, originals and thumbnails are stored",
     )
     parser.add_argument("--database", type=parse_path_arg, default=None, help="SQLite database")
     parser.add_argument("--port", type=int, default=None, help="API port")
-    parser.add_argument("--failsafe", action="store_true", help="Start without the FolderService (no scan/watch)")
+    parser.add_argument("--failsafe", action="store_true", help="Start without the folder services (no scan/watch)")
     parser.add_argument(
         "--openapi", type=parse_path_arg, default=None, metavar="FILE", help="Write OpenAPI schema to FILE and exit"
     )
@@ -67,6 +70,7 @@ def create_app(args: argparse.Namespace) -> FastAPI:
     database_node = general_node.get_node("database")
     if args.folder:
         general_node.get_node("photos_folder").set_value(str(args.folder / "photos"))
+        general_node.get_node("originals_folder").set_value(str(args.folder / "originals"))
         general_node.get_node("thumbnails_folder").set_value(str(args.folder / "thumbnails"))
         general_node.get_node("activities_folder").set_value(str(args.folder / "activities"))
         general_node.get_node("maps_folder").set_value(str(args.folder / "maps"))

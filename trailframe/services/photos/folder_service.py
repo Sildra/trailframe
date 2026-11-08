@@ -165,18 +165,35 @@ class FolderService(Service):
             cls._log(f"Found {items} new files")
 
     @classmethod
-    async def upload(cls, filename: str, content) -> Path:
-        destination = cls._folder / filename
+    def get_folder(cls) -> Path:
+        """The photos folder, where processed photos live."""
+        if cls._folder is None:
+            raise RuntimeError("FolderService is not configured")
 
+        return cls._folder
+
+    @classmethod
+    async def ingest(cls, path: Path) -> Photo:
+        """Queue a file already inside the photos folder for scanning."""
+        from trailframe.services.pipelines.pipeline_service import PipelineService
+
+        destination = path if path.is_absolute() else cls.get_folder() / path
         cls._known_files.add(destination)
+
+        photo = await cls.to_photo(destination)
+        await PipelineService.next(photo)
+
+        return photo
+
+    @classmethod
+    async def upload(cls, filename: str, content) -> Path:
+        destination = cls.get_folder() / Path(filename).name
 
         with destination.open("wb") as output:
             while chunk := await content.read(1024 * 1024):
                 output.write(chunk)
 
-        from trailframe.services.pipelines.pipeline_service import PipelineService
-
-        await PipelineService.next(await cls.to_photo(destination))
+        await cls.ingest(destination)
 
         return destination
 

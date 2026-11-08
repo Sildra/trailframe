@@ -30,6 +30,10 @@ def _photos_folder(tmp_path):
     return tmp_path / "data" / "photos"
 
 
+def _originals_folder(tmp_path):
+    return tmp_path / "data" / "originals"
+
+
 def _make_image(path, size=(320, 240), color=(200, 60, 60)):
     path.parent.mkdir(parents=True, exist_ok=True)
     Image.new("RGB", size, color).save(path, format="JPEG")
@@ -121,7 +125,7 @@ class TestPhotoFileEndpoints:
 
         assert app.get("/api/photos/count").json() == 0
 
-    @allure.title("Uploads a photo file and records it")
+    @allure.title("Uploads a photo into the originals folder and copies it to the library")
     def test_upload_photo(self, app, tmp_path):
         buffer = BytesIO()
         Image.new("RGB", (20, 20)).save(buffer, format="PNG")
@@ -129,6 +133,13 @@ class TestPhotoFileEndpoints:
         response = app.post("/api/photos/upload", files={"file": ("up.png", buffer.getvalue(), "image/png")})
         assert response.status_code == 200
         assert response.json()["filename"] == "up.png"
+
+        original = _originals_folder(tmp_path) / "up.png"
+        copy = _photos_folder(tmp_path) / "up.png"
+
+        assert original.is_file()
+        assert copy.is_file()
+        assert response.json()["path"] == str(copy)
 
 
 class TestPhotoPhashSimilar:

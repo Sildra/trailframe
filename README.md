@@ -77,7 +77,7 @@ All Python dependencies are pulled in automatically; the web UI is bundled insid
 
 ## Running
 
-Run the `trailframe` command from the folder where all data (database, thumbnails, caches, trash) should live:
+Run the `trailframe` command from the folder where all data (database, photos, originals, thumbnails, caches, trash) should live:
 
 ```bash
 trailframe --config path/to/config.yaml

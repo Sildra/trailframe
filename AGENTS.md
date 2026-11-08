@@ -29,9 +29,9 @@ Trailframe — photo gallery app: Python/FastAPI backend + React/TS/Vite fronten
 
 - **Run**: `python -m trailframe.main` from repo root
   - `main.py` serves `frontend/dist` from CWD if present, else packaged copy
-  - Flags: `--config` (default `config.yaml`), `--folder` (sets `*_folder` subdirs), `--database`, `--port` (8000), `--failsafe` (skip `FolderService.start()`, no scan/watch), `--openapi FILE`
+  - Flags: `--config` (default `config.yaml`), `--folder` (sets `*_folder` subdirs), `--database`, `--port` (8000), `--failsafe` (skip `FolderService`/`ProcessingService` start, no scan/watch), `--openapi FILE`
 
-- **Artifacts** (CWD, all gitignored): `config.yaml`, `gallery.db`, `photos/`, `thumbnails/`, `trash/`, `maps/`, `activities/`, `models/`, `tiles/`
+- **Artifacts** (CWD, all gitignored): `config.yaml`, `gallery.db`, `photos/`, `originals/`, `thumbnails/`, `trash/`, `maps/`, `activities/`, `models/`, `tiles/`
 
 - **Style**: ruff from root `pyproject.toml`
 
@@ -42,13 +42,13 @@ Trailframe — photo gallery app: Python/FastAPI backend + React/TS/Vite fronten
 ### Architecture
 
 - **Services** (`trailframe/services/`): class-based `Service` singletons wired in `main.py` lifespan
-  - `service.py` (base), `core/` (Configuration, Database, Statistics, ThreadPool), `photos/` (Folder, Thumbnail, Photo), `rules/` (Rule), `activities/` (Activity, GarminConnect, Gpx), `map/` (Map, Location, Tile), plus `pipelines/`, `scanners/`
+  - `service.py` (base), `core/` (Configuration, Database, Statistics, ThreadPool), `photos/` (Folder, Processing, Thumbnail, Photo), `rules/` (Rule), `activities/` (Activity, GarminConnect, Gpx), `map/` (Map, Location, Tile), plus `pipelines/`, `scanners/`
   - `Service`: non-virtual `configure/start/stop` → virtual `_configure/_start/_stop`, `_log` (`[Name]` prefixed on stderr via `log.py`), state tracking; `_name` overrides
   - `_requires`: each service declares its direct dependencies as names (resolved against `ServiceRegistry` at start); `start()` verifies them — on violation logs an `ERROR` and raises (`Service._require_started`)
 
 - **Pipeline** base: eager thread-safe queue (sync `add`/`start`/`stop`, `get_queue_size`, `accepts`); `stop()` drains worker and flushes run stats; `take_pending()` returns leftover items; `PipelineEmpty` sentinel accepted everywhere and dropped
 
-- **Start order**: `ThreadPoolService` → `ExpressionEngineService` → `DatabaseService` (creates tables) → `HardwareService` → `PhotoService` → `TagService` → `RuleService` → `PipelineService` → `FolderService` → `ThumbnailService` → `MapService` → `GarminConnectService` → `GpxService` → `ActivityService` → `LocationService` → `TileService` → `StatisticsService` → `DuplicatesService` (order must satisfy `_requires`: DB→TP, Hardware→DB, Photos→DB, Tag→DB, Rule→DB+Tag, Pipeline→DB, Folder→DB+Pipeline, Thumbnail→Photos, Garmin→DB+TP, Gpx→DB, Activity→DB+TP+Garmin+Map, Location→DB+TP, Tile→TP, Statistics→DB, Duplicates→DB+TP)
+- **Start order**: `ThreadPoolService` → `ExpressionEngineService` → `DatabaseService` (creates tables) → `HardwareService` → `PhotoService` → `TagService` → `RuleService` → `PipelineService` → `FolderService` → `ProcessingService` → `ThumbnailService` → `MapService` → `GarminConnectService` → `GpxService` → `ActivityService` → `LocationService` → `TileService` → `StatisticsService` → `DuplicatesService` (order must satisfy `_requires`: DB→TP, Hardware→DB, Photos→DB, Tag→DB, Rule→DB+Tag, Pipeline→DB, Folder→DB+Pipeline, Processing→TP+Folder, Thumbnail→Photos, Garmin→DB+TP, Gpx→DB, Activity→DB+TP+Garmin+Map, Location→DB+TP, Tile→TP, Statistics→DB, Duplicates→DB+TP)
 
 - **Concurrency**: one shared pool (`ThreadPoolService`, size `general.thread_pool_size`, default 2); all heavy work (scanners, maps, Garmin, tiles, geo); each pipeline = 1 worker task (`Pipeline._worker_count = 1`) — bounds memory (one YOLO inference at a time); DB work stays on event loop
 
@@ -58,7 +58,9 @@ Trailframe — photo gallery app: Python/FastAPI backend + React/TS/Vite fronten
 
 ### Photos & Pipelines
 
-- **PhotoService** (`photos/photo_service.py`): routes photo-source ops (resolve → local path, delete) to `PhotoProvider` keyed by `photo.source` (default `FolderService`, `SOURCE = "File"`, plus `RemoteProvider` `SOURCE = "Remote"` for in-memory photos with no disk file); extensible to network/NAS backends; upload/scan/folder-watching stay in `FolderService`
+- **PhotoService** (`photos/photo_service.py`): routes photo-source ops (resolve → local path, delete) to `PhotoProvider` keyed by `photo.source` (default `FolderService`, `SOURCE = "File"`, plus `RemoteProvider` `SOURCE = "Remote"` for in-memory photos with no disk file); extensible to network/NAS backends; FolderService owns the photos folder, scanning and watching
+
+- **ProcessingService** (`photos/processing_service.py`): staging for uploads. `POST /api/photos/upload` writes the file into `general.originals_folder` (default `originals`, unique `name_1.ext` names, `.part` temp file), then copies it as-is into the photos folder and hands it to the pipeline via `FolderService.ingest()`. No processing for now (bare copy); the original is kept as an archive. Leftover originals are processed at startup and every 10 s by a watcher, and skipped when a same-named copy already exists. `--folder` maps the originals folder to `<base>/originals`; `_requires = ("ThreadPoolService", "FolderService")`; honors `general.failsafe`.
 
 - **Pipelines** (`pipelines/pipeline_service.py`): explicitly registers `CreationPipeline`/`BasicPipeline` (not auto-discovered); `next(item, pipeline=None)` routes to first accepting pipeline — without a `pipeline` arg to the whole list, else after it; when the handing-off pipeline vanished from the list during reconfigure it continues from `pipeline._index` (stored position), so remote photos never re-enter the standard pipeline at index 0
   - External items: `Photo` (`FolderService.to_photo`) → `Item` (`photo` + `updated` flag + lazily-cached PIL `image`)
