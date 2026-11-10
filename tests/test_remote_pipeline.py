@@ -296,7 +296,10 @@ class TestRemoteScanner:
                 "file_size": 4,
                 "date": "2024-05-06T12:34:56",
                 "exif": {"ImageWidth": 1},
-                "objects": [{"label": "person", "confidence": 0.9, "box": [1, 2, 3, 4]}],
+                "objects": {
+                    "reference": {"width": 100, "height": 100},
+                    "detections": [{"label": "person", "confidence": 0.9, "box": [1, 2, 3, 4], "surface": 0.001}],
+                },
                 "scanners": ["Object", "EXIF", "PerceptualHash"],
                 "phash": "0102",
             }
@@ -312,7 +315,10 @@ class TestRemoteScanner:
         assert result is ScannerResult.SUCCESS
         assert item.updated is True
         assert photo.exif == {"ImageWidth": 1}
-        assert photo.objects == [{"label": "person", "confidence": 0.9, "box": [1, 2, 3, 4]}]
+        assert photo.objects == {
+            "reference": {"width": 100, "height": 100},
+            "detections": [{"label": "person", "confidence": 0.9, "box": [1, 2, 3, 4], "surface": 0.001}],
+        }
         assert photo.phash == bytes.fromhex("0102")
         assert item.phash_changed is True
         assert photo.scanners == ["EXIF", "Object", "PerceptualHash"]
@@ -365,13 +371,16 @@ class TestRemotePipelineApi:
         assert calls == []
         assert scanner._forced is False
 
-        photo.objects = [{"label": "person", "confidence": 0.9, "box": [1, 2, 3, 4]}]
+        photo.objects = {
+            "reference": {"width": 100, "height": 100},
+            "detections": [{"label": "person", "confidence": 0.9, "box": [1, 2, 3, 4], "surface": 0.001}],
+        }
         photo.scanners = ["Object"]
 
         _execute_remote_scanners(item, [scanner], ["Object"])
 
         assert calls == [image]
-        assert photo.objects == []
+        assert photo.objects == {"reference": {"width": 16, "height": 16}, "detections": []}
         assert photo.scanners == ["Object"]
         assert scanner._forced is False
 

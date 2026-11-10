@@ -492,7 +492,7 @@ def resolve(photo: Photo, path: str) -> Any:
         return MISSING
 
     if path == "objects":
-        return photo.objects or []
+        return (photo.objects or {}).get("detections") or []
 
     if path.startswith("exif."):
         raw = exif_value(photo, path)

@@ -91,13 +91,12 @@ def image_size(photo: Photo) -> tuple[int | None, int | None]:
 
 
 def detections(photo: Photo, label: str | None, ignore_constraints: bool = False) -> list[dict[str, float]]:
-    """The detections of the photo, with `confidence` and `surface` computed."""
+    """The detections of the photo, with `confidence` and `surface` read as stored."""
     wanted = str(label).strip().lower() if label else None
-    width, height = image_size(photo)
-    area = (width or 0) * (height or 0)
+    objects = photo.objects or {}
     found: list[dict[str, float]] = []
 
-    for raw in photo.objects or []:
+    for raw in objects.get("detections") or []:
         if not isinstance(raw, dict):
             continue
 
@@ -111,21 +110,14 @@ def detections(photo: Photo, label: str | None, ignore_constraints: bool = False
         if confidence is None:
             confidence = 0.0
 
-        surface = 0.0
-
-        if area:
-            box = raw.get("box") or []
-
-            if isinstance(box, list) and len(box) == 4:
-                x1, y1, x2, y2 = (as_float(part) or 0.0 for part in box)
-                surface = max(0.0, x2 - x1) * max(0.0, y2 - y1) / area
+        surface = as_float(raw.get("surface")) or 0.0
 
         found.append(
             {
                 "label": detected,  # type: ignore[dict-item]
                 "confidence": confidence,
                 "score": confidence,
-                "surface": round(surface, 6),
+                "surface": surface,
             }
         )
 

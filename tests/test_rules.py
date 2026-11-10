@@ -129,10 +129,13 @@ class TestEvaluation:
         photo = Photo(
             path="a.jpg",
             exif={"ExifImageWidth": "1000", "ExifImageHeight": "500"},
-            objects=[
-                {"label": "dog", "confidence": 0.95, "box": [0, 0, 10, 10]},
-                {"label": "cat", "confidence": 0.5, "box": [0, 0, 100, 100]},
-            ],
+            objects={
+                "reference": {"width": 1000, "height": 500},
+                "detections": [
+                    {"label": "dog", "confidence": 0.95, "box": [0, 0, 10, 10], "surface": 0.0},
+                    {"label": "cat", "confidence": 0.5, "box": [0, 0, 100, 100], "surface": 0.02},
+                ],
+            },
         )
 
         definition = _definition(
@@ -158,6 +161,31 @@ class TestEvaluation:
             ]
         )
         assert not matches(photo, definition)
+
+    @allure.title("Reads the stored surface instead of recomputing it from the main file")
+    def test_surface_uses_stored_reference(self):
+        # The main/EXIF size is 1000x500 (area 500000); the box covers 50x50. Recomputed
+        # from those dimensions the surface would be 0.005, but the stored value is 0.25.
+        photo = Photo(
+            path="a.jpg",
+            exif={"ExifImageWidth": "1000", "ExifImageHeight": "500"},
+            objects={
+                "reference": {"width": 200, "height": 100},
+                "detections": [{"label": "dog", "confidence": 0.95, "box": [0, 0, 50, 50], "surface": 0.25}],
+            },
+        )
+
+        definition = _definition(
+            conditions=[
+                {
+                    "type": "detection",
+                    "label": "dog",
+                    "op": "present",
+                    "metrics": [{"name": "surface", "op": "gte", "value": 20}],
+                }
+            ]
+        )
+        assert matches(photo, definition)
 
     @allure.title("Compares numbers, dates, booleans and lists in a typed way")
     def test_scalars(self):
@@ -225,9 +253,19 @@ class TestRulesApi:
                 Photo(
                     path="dog.jpg",
                     filename="dog.jpg",
-                    objects=[{"label": "dog", "confidence": 0.95, "box": [0, 0, 10, 10]}],
+                    objects={
+                        "reference": {"width": 1000, "height": 500},
+                        "detections": [{"label": "dog", "confidence": 0.95, "box": [0, 0, 10, 10], "surface": 0.0}],
+                    },
                 ),
-                Photo(path="cat.jpg", filename="cat.jpg", objects=[{"label": "cat", "confidence": 0.99}]),
+                Photo(
+                    path="cat.jpg",
+                    filename="cat.jpg",
+                    objects={
+                        "reference": {"width": 1000, "height": 500},
+                        "detections": [{"label": "cat", "confidence": 0.99, "box": [0, 0, 10, 10], "surface": 0.0}],
+                    },
+                ),
             ],
         )
 
@@ -279,7 +317,17 @@ class TestRulesApi:
     @allure.title("Applies enabled rules to the library, add-only")
     def test_apply(self, app):
         photo_id = _add_photos(
-            app, [Photo(path="dog.jpg", filename="dog.jpg", objects=[{"label": "dog", "confidence": 0.99}])]
+            app,
+            [
+                Photo(
+                    path="dog.jpg",
+                    filename="dog.jpg",
+                    objects={
+                        "reference": {"width": 1000, "height": 500},
+                        "detections": [{"label": "dog", "confidence": 0.99, "box": [0, 0, 10, 10], "surface": 0.0}],
+                    },
+                )
+            ],
         )[0]
 
         app.post("/api/rules", json=_dog_rule())

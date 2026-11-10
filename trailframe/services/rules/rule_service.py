@@ -288,7 +288,7 @@ class RuleService(Service):
             rows = await session.execute(
                 text(
                     f"SELECT DISTINCT json_extract(value, '$.label') AS label FROM {Photo.__tablename__}, "
-                    "json_each(objects) WHERE label IS NOT NULL AND label != '' ORDER BY label LIMIT 200"
+                    "json_each(objects, '$.detections') WHERE label IS NOT NULL AND label != '' ORDER BY label LIMIT 200"
                 )
             )
             result["objects"] = [str(row[0]) for row in rows.all()]

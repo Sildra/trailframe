@@ -1484,11 +1484,11 @@ export interface components {
             scanners: string[];
             /**
              * Objects
-             * @default []
+             * @default {}
              */
             objects: {
                 [key: string]: unknown;
-            }[];
+            };
             /** Phash */
             phash?: string | null;
             /**

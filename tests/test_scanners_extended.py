@@ -180,7 +180,10 @@ class TestObjectScanner:
         result = await scanner.execute(item)
 
         assert result.value == "success"
-        assert item.photo.objects == [{"label": "person", "confidence": 0.95, "box": [1.0, 2.0, 3.0, 4.0]}]
+        assert item.photo.objects == {
+            "reference": {"width": 40, "height": 40},
+            "detections": [{"label": "person", "confidence": 0.95, "box": [1.0, 2.0, 3.0, 4.0], "surface": 0.003}],
+        }
         assert "Object" in (item.photo.scanners or [])
         assert item.updated is True
 

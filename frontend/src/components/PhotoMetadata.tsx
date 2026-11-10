@@ -17,6 +17,7 @@ import EditIcon from "@mui/icons-material/Edit";
 import { api } from "../api/client";
 import type { components } from "../api/generated/schema";
 import { formatDateTime } from "../lib/format";
+import type { HoveredObject, ObjectReference } from "../lib/objectBoxes";
 import PhotoLocationMap from "./PhotoLocationMap";
 import TagPicker from "./TagPicker";
 import ThumbnailGallery from "./ThumbnailGallery";
@@ -27,13 +28,19 @@ interface DetectedObject {
     label: string;
     confidence: number;
     box?: number[];
+    surface?: number;
+}
+
+interface PhotoObjects {
+    reference?: ObjectReference;
+    detections?: DetectedObject[];
 }
 
 interface PhotoMetadataProps {
     photoId: number;
     favorite?: boolean;
     onToggleFavorite?: () => void;
-    onHoverObject?: (box: number[] | null) => void;
+    onHoverObject?: (object: HoveredObject | null) => void;
     onSelectPhoto?: (photoId: number) => void;
 }
 
@@ -168,7 +175,9 @@ export default function PhotoMetadata({ photoId, favorite = false, onToggleFavor
         }
     }
 
-    const objects = ((photo.objects ?? []) as unknown as DetectedObject[]).filter((obj) => obj && typeof obj.label === "string");
+    const photoObjects = (photo.objects ?? {}) as unknown as PhotoObjects;
+    const objectReference = photoObjects.reference;
+    const objects = (photoObjects.detections ?? []).filter((obj) => obj && typeof obj.label === "string");
 
     const exifEntries = Object.entries(photo.exif ?? {}).filter(
         ([, value]) => formatValue(value) !== "",
@@ -274,7 +283,9 @@ export default function PhotoMetadata({ photoId, favorite = false, onToggleFavor
                                         cursor: "default",
                                         "&:hover": { bgcolor: "action.hover" },
                                     }}
-                                    onMouseEnter={() => obj.box && onHoverObject?.(obj.box)}
+                                    onMouseEnter={() =>
+                                        obj.box && objectReference && onHoverObject?.({ box: obj.box, reference: objectReference })
+                                    }
                                 >
                                     <span>{obj.label}</span>
                                     <span style={{ opacity: 0.6 }}>{Math.round((obj.confidence ?? 0) * 100)}%</span>

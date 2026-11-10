@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Box, Typography } from "@mui/material";
 
+import { objectRect, type HoveredObject } from "../lib/objectBoxes";
+
 interface ImageViewerProps {
     photoId: number | null;
-    hoveredBox?: number[] | null;
+    hoveredObject?: HoveredObject | null;
 }
 
 function computeDims(img: HTMLImageElement) {
@@ -20,7 +22,7 @@ function computeDims(img: HTMLImageElement) {
     return { cw, ch, nw, nh, scale, ox, oy };
 }
 
-export default function ImageViewer({ photoId, hoveredBox }: ImageViewerProps) {
+export default function ImageViewer({ photoId, hoveredObject }: ImageViewerProps) {
     const imgRef = useRef<HTMLImageElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
     const [dims, setDims] = useState<ReturnType<typeof computeDims> | null>(null);
@@ -57,11 +59,14 @@ export default function ImageViewer({ photoId, hoveredBox }: ImageViewerProps) {
                         onLoad={recalc}
                         style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%", objectFit: "contain" }}
                     />
-                    {hoveredBox &&
+                    {hoveredObject &&
                         dims &&
                         (() => {
-                            const { scale, ox, oy } = dims;
-                            const [x1, y1, x2, y2] = hoveredBox;
+                            const rect = objectRect(hoveredObject, dims);
+
+                            if (!rect) {
+                                return null;
+                            }
 
                             return (
                                 <svg
@@ -75,10 +80,10 @@ export default function ImageViewer({ photoId, hoveredBox }: ImageViewerProps) {
                                     }}
                                 >
                                     <rect
-                                        x={ox + x1 * scale}
-                                        y={oy + y1 * scale}
-                                        width={(x2 - x1) * scale}
-                                        height={(y2 - y1) * scale}
+                                        x={rect.x}
+                                        y={rect.y}
+                                        width={rect.width}
+                                        height={rect.height}
                                         fill="rgba(255,0,0,0.15)"
                                         stroke="red"
                                         strokeWidth={2}

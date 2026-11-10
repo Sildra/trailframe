@@ -86,7 +86,7 @@ def _matches_detection(photo: Photo, condition: DetectionCondition) -> bool:
         return not found
 
     if not condition.label and not condition.metrics:
-        return bool(photo.objects)
+        return bool((photo.objects or {}).get("detections"))
 
     if not found:
         return False

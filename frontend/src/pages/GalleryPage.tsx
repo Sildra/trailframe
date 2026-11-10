@@ -23,6 +23,7 @@ import TagTree from "../components/TagTree";
 import ThumbnailGallery from "../components/ThumbnailGallery";
 import UploadButton from "../components/UploadButton";
 import { duplicateKey, groupKey, locationIssueKey } from "../lib/groups";
+import type { HoveredObject } from "../lib/objectBoxes";
 import type { TagNode } from "../lib/tags";
 
 type PhotoGroupSummary = components["schemas"]["PhotoGroupSummary"];
@@ -43,7 +44,7 @@ export default function GalleryPage() {
     const [locationIssuesCollapsed, setLocationIssuesCollapsed] = useState<Set<string>>(new Set());
     const [leftCollapsed, setLeftCollapsed] = useState(false);
     const [rightCollapsed, setRightCollapsed] = useState(false);
-    const [hoveredBox, setHoveredBox] = useState<number[] | null>(null);
+    const [hoveredObject, setHoveredObject] = useState<HoveredObject | null>(null);
     const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
     const [favoriteIds, setFavoriteIds] = useState<Set<number>>(new Set());
     const [tagTree, setTagTree] = useState<TagNode[]>([]);
@@ -296,7 +297,7 @@ export default function GalleryPage() {
 
         setSelectedPhotoId(nextId);
         setConfirmDeleteOpen(false);
-        setHoveredBox(null);
+        setHoveredObject(null);
 
         setGroups((previous) =>
             previous?.map((group) => ({
@@ -376,7 +377,7 @@ export default function GalleryPage() {
 
                 return orderedPhotoIds[(index - 1 + orderedPhotoIds.length) % orderedPhotoIds.length];
             });
-            setHoveredBox(null);
+            setHoveredObject(null);
         }
 
         window.addEventListener("keydown", onKeyDown);
@@ -559,7 +560,7 @@ export default function GalleryPage() {
                 )}
             </Box>
             <Box sx={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                <ImageViewer photoId={selectedPhotoId} hoveredBox={hoveredBox} />
+                <ImageViewer photoId={selectedPhotoId} hoveredObject={hoveredObject} />
             </Box>
             <Box
                 sx={{
@@ -605,7 +606,7 @@ export default function GalleryPage() {
                                 photoId={selectedPhotoId}
                                 favorite={favoriteIds.has(selectedPhotoId)}
                                 onToggleFavorite={() => toggleFavorite(selectedPhotoId)}
-                                onHoverObject={setHoveredBox}
+                                onHoverObject={setHoveredObject}
                                 onSelectPhoto={setSelectedPhotoId}
                             />
                         )}

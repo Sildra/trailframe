@@ -117,7 +117,7 @@ async def remote_scan(file: UploadFile = File(...), scanners: str = Form(""), fo
         "filename": photo.filename,
         "file_size": photo.file_size,
         "date": photo.date,
-        "objects": photo.objects or [],
+        "objects": photo.objects or {},
         "scanners": photo.scanners or [],
         "exif": photo.exif or {},
         "latitude": photo.latitude,

@@ -31,7 +31,7 @@ class Photo(SQLModel, table=True):
     tags: list[str] = Field(default_factory=list, sa_column=Column(JSON))
     scores: dict = Field(default_factory=dict, sa_column=Column(JSON))
     scanners: list[str] = Field(default_factory=list, sa_column=Column(JSON))
-    objects: list[dict] = Field(default_factory=list, sa_column=Column(JSON))
+    objects: dict = Field(default_factory=dict, sa_column=Column(JSON))
     phash: bytes | None = Field(default=None, sa_column=Column(LargeBinary(8)))
 
     # Processed files, path relative to the processed folder. Each entry is plain
@@ -105,7 +105,7 @@ class PhotoDetail(BaseModel):
     tags: list[str] = []
     scores: dict = {}
     scanners: list[str] = []
-    objects: list[dict] = []
+    objects: dict = {}
     phash: str | None = None
     alternatives: list[dict] = []
     processing: list[dict] = []
@@ -147,7 +147,7 @@ class PhotoDetail(BaseModel):
             tags=photo.tags or [],
             scores=photo.scores or {},
             scanners=photo.scanners or [],
-            objects=photo.objects or [],
+            objects=photo.objects or {},
             phash=photo.phash.hex() if photo.phash else None,
             alternatives=photo.alternatives or [],
             processing=photo.processing or [],

@@ -120,7 +120,7 @@ class RemoteScanner(Scanner):
                 photo.location_source = result["location_source"]
 
         if "Object" in requested:
-            photo.objects = result.get("objects") or []
+            photo.objects = result.get("objects") or {}
 
         if "PerceptualHash" in requested:
             phash = result.get("phash")

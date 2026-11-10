@@ -52,6 +52,8 @@ class ObjectScanner(Scanner):
 
         model = self._get_model()
         results = model(image, verbose=False)
+        width, height = image.size
+        area = width * height
         detections = []
 
         for result in results:
@@ -64,10 +66,13 @@ class ObjectScanner(Scanner):
                 x1, y1, x2, y2 = (round(float(value), 1) for value in box.xyxy[0].tolist())
                 label = names.get(int(box.cls[0]), str(int(box.cls[0])))
                 confidence = round(float(box.conf[0]), 3)
+                surface = round(min(1.0, max(0.0, (x2 - x1) * (y2 - y1) / area)), 3) if area else 0.0
 
-                detections.append({"label": label, "confidence": confidence, "box": [x1, y1, x2, y2]})
+                detections.append(
+                    {"label": label, "confidence": confidence, "box": [x1, y1, x2, y2], "surface": surface}
+                )
 
-        photo.objects = detections
+        photo.objects = {"reference": {"width": width, "height": height}, "detections": detections}
         self.add_scanner(photo)
 
         return True
