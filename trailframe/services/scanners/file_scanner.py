@@ -19,7 +19,7 @@ class FileScanner(Scanner):
         photo = item.photo
         changed = photo.filename is None or photo.file_size is None
 
-        source = PhotoService.resolve(photo)
+        source = PhotoService.resolve(photo, photo.original)
         photo.filename = source.name
 
         try:

@@ -63,3 +63,7 @@ The processing core was rebuilt around a shared thread pool.
 - Default tags now seed on first start when the `tags` table is empty (no config flag).
 - Rule expressions spell out their units (`80%`, `f/2.8`, `1200px`); detection metrics are written in percent, and existing rules are migrated automatically.
 - The rule editor fills in units and quotes as you type, steps over them with space or comma, and selecting a field inserts its quoted value with the caret inside.
+- Photo storage now separates an untouched originals archive from derived processed alternatives; pipelines analyse the main alternative and EXIF always comes from the original.
+- Alternatives are generated for the configured target sizes on import (WebP by default), with processing provenance recorded on the photo.
+- Thumbnails are keyed by the original path and main target, so they survive reprocessing.
+- Deleting a photo discards its processed files and thumbnails and moves the original to the trash.

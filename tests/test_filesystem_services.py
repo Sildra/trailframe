@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 
 import allure
@@ -51,42 +52,72 @@ class TestThumbnailPaths:
         yield
         ThumbnailService._folder = old
 
-    @allure.title("Builds a hashed-by-prefix thumbnail path including the file size")
-    def test_path_with_file_size(self):
-        path = ThumbnailService._path_for("myphoto.jpg", 123, 400)
-        assert path.relative_to(ThumbnailService._folder) == Path("my") / "myphoto.jpg_123_400.webp"
+    @allure.title("Builds a path from the original path hash and the main target")
+    def test_path_uses_path_hash_and_main_target(self):
+        photo = Photo(path="myphoto.jpg")
+        path = ThumbnailService._path_for(photo, 400)
+        digest = hashlib.sha1(b"myphoto.jpg").hexdigest()
 
-    @allure.title("Builds a thumbnail path without a file size suffix")
-    def test_path_without_file_size(self):
-        path = ThumbnailService._path_for("myphoto.jpg", None, 160)
-        assert path.relative_to(ThumbnailService._folder) == Path("my") / "myphoto.jpg_160.webp"
+        assert path.relative_to(ThumbnailService._folder) == Path(digest[:2]) / f"{digest}_original_400.webp"
 
-    @allure.title("Sanitizes unsafe characters out of thumbnail filenames")
-    def test_safe_name_strips_invalid_chars(self):
-        assert ThumbnailService._safe_name('a<b>c:"d/e') == "a_b_c__d_e"
-        assert ThumbnailService._safe_name("") == "photo"
+    @allure.title("Keys the thumbnail by the main alternative's target size")
+    def test_path_uses_alternative_target(self):
+        photo = Photo(
+            path="myphoto.jpg", alternatives=[{"target_size": 1080, "path": "myphoto_1080.webp", "main": True}]
+        )
+        path = ThumbnailService._path_for(photo, 160)
+        digest = hashlib.sha1(b"myphoto.jpg").hexdigest()
+
+        assert path.relative_to(ThumbnailService._folder) == Path(digest[:2]) / f"{digest}_1080_160.webp"
 
     @allure.title("Uses the largest configured size by default")
     def test_get_thumbnail_path_uses_last_size_by_default(self):
         ThumbnailService._sizes = [160, 400]
-        path = ThumbnailService.get_thumbnail_path(Photo(filename="x.jpg", file_size=9))
-        assert path.name == "x.jpg_9_400.webp"
+        photo = Photo(path="x.jpg", filename="x.jpg", file_size=9)
+        path = ThumbnailService.get_thumbnail_path(photo)
+        digest = hashlib.sha1(b"x.jpg").hexdigest()
+
+        assert path.name == f"{digest}_original_400.webp"
+
+    @allure.title("Deletes every generated thumbnail of a photo")
+    def test_delete_removes_all_sizes(self):
+        ThumbnailService._sizes = [160, 400]
+        photo = Photo(path="x.jpg")
+        paths = [ThumbnailService.get_thumbnail_path(photo, size) for size in (160, 400)]
+
+        for path in paths:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"x")
+
+        ThumbnailService.delete(photo)
+
+        assert not any(path.exists() for path in paths)
 
 
 class TestFolderService:
-    @allure.title("Resolves an absolute path as-is, ignoring the photos folder")
+    @allure.title("Resolves an absolute path as-is, ignoring the processed folder")
     def test_resolve_absolute_path_ignores_folder(self, tmp_path):
         absolute = tmp_path / "a.jpg"
         absolute.write_bytes(b"x")
         assert FolderService.resolve(absolute) == absolute
 
-    @allure.title("Returns a relative path unchanged when no photos folder is configured")
-    def test_resolve_relative_when_no_folder(self, tmp_path, monkeypatch):
-        target = tmp_path / "in_cwd.jpg"
-        target.write_bytes(b"x")
-        monkeypatch.chdir(tmp_path)
-        # With no photos folder configured, the stored path is returned unchanged.
-        assert FolderService.resolve("in_cwd.jpg") == Path("in_cwd.jpg")
+    @allure.title("Resolves a relative path against the processed folder")
+    def test_resolve_relative_to_processed_folder(self, tmp_path):
+        folder_old = FolderService._folder
+        FolderService._folder = tmp_path / "processed"
+        try:
+            assert FolderService.resolve("sub/x.jpg") == tmp_path / "processed" / "sub" / "x.jpg"
+        finally:
+            FolderService._folder = folder_old
+
+    @allure.title("Returns a relative path unchanged when no processed folder is configured")
+    def test_resolve_relative_when_no_folder(self):
+        folder_old = FolderService._folder
+        FolderService._folder = None
+        try:
+            assert FolderService.resolve("in_cwd.jpg") == Path("in_cwd.jpg")
+        finally:
+            FolderService._folder = folder_old
 
     @allure.title("Recognizes image files by extension, case-insensitively")
     def test_is_image(self, tmp_path):
@@ -97,109 +128,36 @@ class TestFolderService:
         txt.write_bytes(b"x")
         assert FolderService._is_image(txt) is False
 
-    @allure.title("Canonicalizes a nested photo path relative to the photos folder")
-    def test_canonical_relative_to_photo_folder(self, tmp_path):
-        photos = tmp_path / "photos"
-        photos.mkdir()
-        folder_old = FolderService._folder
-        FolderService._folder = photos
-        try:
-            photo = photos / "sub" / "x.jpg"
-            photo.parent.mkdir()
-            photo.write_bytes(b"x")
-            assert FolderService.canonical(str(photo)) == "sub/x.jpg"
-        finally:
-            FolderService._folder = folder_old
-
-    @allure.title("Canonicalizes an absolute photo path to the photos folder root")
-    def test_canonical_absolute_inside_photo_folder(self, tmp_path):
-        photos = tmp_path / "photos"
-        photos.mkdir()
-        folder_old = FolderService._folder
-        FolderService._folder = photos
-        try:
-            photo = photos / "x.jpg"
-            photo.write_bytes(b"x")
-            assert FolderService.canonical(str(photo)) == "x.jpg"
-        finally:
-            FolderService._folder = folder_old
-
-
-class TestFolderServiceEdges:
-    @allure.title("Resolves a legacy CWD-relative path when it exists on disk")
-    def test_resolve_legacy_cwd(self, tmp_path, monkeypatch):
-        monkeypatch.chdir(tmp_path)
-        target = tmp_path / "legacy.jpg"
-        target.write_bytes(b"x")
-        folder_old = FolderService._folder
-        FolderService._folder = tmp_path / "photos"
-        try:
-            assert FolderService.resolve("legacy.jpg") == target
-        finally:
-            FolderService._folder = folder_old
-
-    @allure.title("Keeps the path as-is when no photos folder is configured")
-    def test_canonical_without_folder(self):
-        folder_old = FolderService._folder
-        FolderService._folder = None
-        try:
-            assert FolderService.canonical("a/b.jpg") == "a/b.jpg"
-        finally:
-            FolderService._folder = folder_old
-
     @allure.title("Does not treat a directory as an image file")
     def test_is_image_ignores_directories(self, tmp_path):
         tmp_path.mkdir(parents=True, exist_ok=True)
         assert FolderService._is_image(tmp_path) is False
 
-    @allure.title("Delete is a no-op when the source file is missing")
-    def test_delete_missing_source(self, tmp_path):
+    @allure.title("Deletes every processed file of a photo, tolerating missing ones")
+    def test_delete_alternatives(self, tmp_path):
         folder_old = FolderService._folder
-        trash_old = FolderService._trash_folder
-        FolderService._folder = tmp_path / "photos"
-        FolderService._trash_folder = tmp_path / "trash"
+        FolderService._folder = tmp_path / "processed"
+        FolderService._folder.mkdir(parents=True)
         try:
-            FolderService.delete(tmp_path / "photos" / "gone.jpg")
-            assert not (tmp_path / "trash").exists()
+            existing = FolderService._folder / "a_1080.webp"
+            existing.write_bytes(b"x")
+            photo = Photo(
+                path="a.jpg",
+                alternatives=[
+                    {"target_size": 1080, "path": "a_1080.webp", "main": True},
+                    {"target_size": 400, "path": "a_400.webp"},
+                ],
+            )
+
+            FolderService.delete_alternatives(photo)
+
+            assert not existing.exists()
         finally:
             FolderService._folder = folder_old
-            FolderService._trash_folder = trash_old
 
-    @allure.title("Delete disambiguates an existing trash name by file size")
-    def test_delete_trash_conflict(self, tmp_path):
-        source = tmp_path / "photos" / "dup.jpg"
-        source.parent.mkdir(parents=True, exist_ok=True)
-        source.write_bytes(b"photo-content")
-        trash = tmp_path / "trash"
-        trash.mkdir(parents=True, exist_ok=True)
-        (trash / "dup.jpg").write_bytes(b"old")
-
-        folder_old = FolderService._folder
-        trash_old = FolderService._trash_folder
-        FolderService._folder = tmp_path / "photos"
-        FolderService._trash_folder = trash
-        FolderService._known_files.add(source)
-        try:
-            size = source.stat().st_size
-            FolderService.delete(source)
-            assert not source.exists()
-            assert (trash / f"dup_{size}.jpg").exists()
-        finally:
-            FolderService._folder = folder_old
-            FolderService._trash_folder = trash_old
-            FolderService._known_files.discard(source)
-
-    @allure.title("Forget removes a path from the known set")
-    def test_forget(self):
-        from pathlib import Path
-
-        target = Path("x.jpg")
-        FolderService._known_files.add(target)
-        try:
-            FolderService.forget(target)
-            assert target not in FolderService._known_files
-        finally:
-            FolderService._known_files.discard(target)
+    @allure.title("Delete is a no-op when the processed file is missing")
+    def test_delete_missing_file(self, tmp_path):
+        FolderService.delete_file(tmp_path / "gone.webp")
 
 
 class TestLocationProjection:

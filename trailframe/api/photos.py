@@ -4,6 +4,7 @@ from datetime import date, datetime, time, timedelta
 
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
+from PIL import Image
 from pydantic import BaseModel
 from sqlalchemy import func, select, text
 
@@ -319,12 +320,7 @@ async def delete_photo(photo_id: int):
         raise HTTPException(404, f"Photo {photo_id} not found")
 
     PhotoService.delete(photo)
-
-    for size in ThumbnailService.sizes():
-        thumbnail_path = ThumbnailService.get_thumbnail_path(photo, size)
-
-        if thumbnail_path.exists():
-            thumbnail_path.unlink()
+    ThumbnailService.delete(photo)
 
     async def _delete(session):
         stored = (await session.execute(select(Photo).where(Photo.id == photo_id))).scalar_one()
@@ -428,7 +424,7 @@ async def get_photo(photo_id: int) -> PhotoDetail:
 
 
 @router.get("/{photo_id}/image")
-async def get_image(photo_id: int):
+async def get_image(photo_id: int, size: int | None = Query(None)):
     async def _get(session):
         photo = (await session.execute(select(Photo).where(Photo.id == photo_id))).scalar_one_or_none()
 
@@ -439,8 +435,17 @@ async def get_image(photo_id: int):
 
     photo = await DatabaseService.execute(_get)
 
-    source = PhotoService.resolve(photo)
+    file = photo.alternative(size) if size is not None else photo.main()
+
+    if file is None:
+        file = photo.main()
+
+    source = PhotoService.resolve(photo, file)
     media_type, _ = mimetypes.guess_type(source.name)
+
+    if not media_type or media_type == "application/octet-stream":
+        media_type = Image.MIME.get(source.suffix.lstrip(".").upper(), media_type)
+
     return FileResponse(source, media_type=media_type)
 
 
@@ -487,6 +492,6 @@ async def get_wireframe(photo_id: int):
 
 @router.post("/upload")
 async def upload_photo(file: UploadFile = File(...)):
-    path = await ProcessingService.upload(file.filename or "photo", file)
+    photo = await ProcessingService.upload(file.filename or "photo", file)
 
-    return {"filename": file.filename, "path": str(path)}
+    return {"filename": photo.filename, "path": photo.path, "alternatives": photo.alternatives}

@@ -1,15 +1,14 @@
-import re
+import hashlib
 from pathlib import Path
 from typing import ClassVar
 
-from PIL import Image
+from PIL import Image, ImageOps
 
 from trailframe.models.photo import Photo
+from trailframe.models.photo_file import PhotoFile
 from trailframe.services.core.configuration_service import Node
 from trailframe.services.photos.photo_service import PhotoService
 from trailframe.services.service import Service
-
-_INVALID_FILENAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
 
 class ThumbnailService(Service):
@@ -67,6 +66,7 @@ class ThumbnailService(Service):
         thumbnail.parent.mkdir(parents=True, exist_ok=True)
 
         with Image.open(PhotoService.resolve(photo)) as image:
+            image = ImageOps.exif_transpose(image)
             image.thumbnail((size, size))
             image.save(thumbnail, format="WEBP", quality=85)
 
@@ -81,27 +81,23 @@ class ThumbnailService(Service):
         return all(cls.get_thumbnail_path(photo, size).exists() for size in cls._sizes)
 
     @classmethod
+    def delete(cls, photo: Photo) -> None:
+        """Remove every thumbnail generated for the photo."""
+        for size in cls._sizes:
+            cls.get_thumbnail_path(photo, size).unlink(missing_ok=True)
+
+    @classmethod
     def get_thumbnail_path(cls, photo: Photo, size: int | None = None) -> Path:
         target = size if size is not None else (cls._sizes[-1] if cls._sizes else 200)
 
-        return cls._path_for(photo.filename, photo.file_size, target)
+        return cls._path_for(photo, target)
 
     @classmethod
-    def _path_for(cls, filename: str | None, file_size: int | None, size: int) -> Path:
-        name = cls._safe_name(filename or "photo")
-        prefix = name[:2]
+    def _path_for(cls, photo: Photo, size: int) -> Path:
+        # Keyed by the original path, so thumbnails survive reprocessing of the
+        # alternatives but invalidate when the main target changes.
+        digest = hashlib.sha1(photo.path.encode("utf-8")).hexdigest()
+        main: PhotoFile = photo.main()
+        target = main.target_size if main.target_size is not None else "original"
 
-        if file_size is not None:
-            return cls._folder / prefix / f"{name}_{file_size}_{size}.webp"
-
-        return cls._folder / prefix / f"{name}_{size}.webp"
-
-    @classmethod
-    def _safe_name(cls, name: str) -> str:
-        safe = _INVALID_FILENAME_CHARS.sub("_", name).lstrip(".").strip()
-
-        if not safe:
-            cls._log(f"{name} -> photo")
-            return "photo"
-
-        return safe
+        return cls._folder / digest[:2] / f"{digest}_{target}_{size}.webp"

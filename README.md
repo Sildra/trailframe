@@ -11,7 +11,7 @@ A self-hosted photo gallery for people who move: photos and GPS activities (Garm
 
 ## Photo library
 
-- Automatic ingestion of a photo folder, with EXIF capture (camera, date, GPS) on import.
+- Automatic ingestion of a photo folder, with EXIF capture (camera, date, GPS) on import; originals are archived and processed alternatives are derived from them.
 - Multi-size thumbnails generated and cached per photo; sizes are configurable.
 - **Favorites** — mark photos you love and find them instantly; favorite-only views everywhere.
 - **Automatic groups** — related photos are clustered so bursts and series stay together.
@@ -37,6 +37,8 @@ A self-hosted photo gallery for people who move: photos and GPS activities (Garm
 ![Slideshow photo view](docs/img/slideshow_activity_2.jpg)
 
 ## Enrichment pipelines
+
+Uploaded photos are archived untouched in `originals/`, then preprocessed into one or more `processed/` alternatives (WebP). The pipelines below analyse the main processed file; EXIF is always read from the original.
 
 Photos are processed by pluggable scanners:
 
@@ -77,7 +79,7 @@ All Python dependencies are pulled in automatically; the web UI is bundled insid
 
 ## Running
 
-Run the `trailframe` command from the folder where all data (database, photos, originals, thumbnails, caches, trash) should live:
+Run the `trailframe` command from the folder where all data (database, originals, processed, thumbnails, caches, trash) should live:
 
 ```bash
 trailframe --config path/to/config.yaml

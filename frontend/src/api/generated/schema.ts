@@ -1491,6 +1491,20 @@ export interface components {
             }[];
             /** Phash */
             phash?: string | null;
+            /**
+             * Alternatives
+             * @default []
+             */
+            alternatives: {
+                [key: string]: unknown;
+            }[];
+            /**
+             * Processing
+             * @default []
+             */
+            processing: {
+                [key: string]: unknown;
+            }[];
             map?: components["schemas"]["PhotoMap"] | null;
             /**
              * Groups
@@ -2326,7 +2340,9 @@ export interface operations {
     };
     get_image_api_photos__photo_id__image_get: {
         parameters: {
-            query?: never;
+            query?: {
+                size?: number | null;
+            };
             header?: never;
             path: {
                 photo_id: number;

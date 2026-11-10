@@ -68,7 +68,12 @@ def exif_value(photo: Photo, field: str) -> Any:
 
 
 def image_size(photo: Photo) -> tuple[int | None, int | None]:
-    """The pixel size of the photo, from the EXIF dimensions."""
+    """The pixel size of the main file, falling back to the EXIF dimensions."""
+    main = photo.main()
+
+    if main.width and main.height:
+        return main.width, main.height
+
     exif = photo.exif or {}
     width = as_int(exif.get("ExifImageWidth") or exif.get("ImageWidth"))
     height = as_int(exif.get("ExifImageHeight") or exif.get("ImageLength") or exif.get("ImageHeight"))

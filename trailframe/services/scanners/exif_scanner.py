@@ -24,7 +24,7 @@ class ExifScanner(Scanner):
         return not photo.exif
 
     async def executePhoto(self, item: Item) -> bool:
-        image = item.image
+        image = item.original
 
         if image is None:
             return False

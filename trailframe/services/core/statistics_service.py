@@ -20,7 +20,8 @@ class StatisticsService(Service):
     def _configure(cls, config: Node) -> None:
         general_node = config.get_node("general", "General parameters")
         cls._folders = {
-            "Photos": Path(general_node.get_path_value("photos_folder")),
+            "Originals": Path(general_node.get_path_value("originals_folder")),
+            "Processed": Path(general_node.get_path_value("processed_folder")),
             "Thumbnails": Path(general_node.get_path_value("thumbnails_folder")),
             "Maps": Path(general_node.get_path_value("maps_folder")),
             "Activities": Path(general_node.get_path_value("activities_folder")),

@@ -26,17 +26,21 @@ def _add_photos(app, photos):
     return app.db(_insert())
 
 
-def _photos_folder(tmp_path):
-    return tmp_path / "data" / "photos"
+def _processed_folder(tmp_path):
+    return tmp_path / "data" / "processed"
 
 
 def _originals_folder(tmp_path):
     return tmp_path / "data" / "originals"
 
 
-def _make_image(path, size=(320, 240), color=(200, 60, 60)):
+def _trash_folder(tmp_path):
+    return tmp_path / "data" / "trash"
+
+
+def _make_image(path, size=(320, 240), color=(200, 60, 60), format="JPEG"):
     path.parent.mkdir(parents=True, exist_ok=True)
-    Image.new("RGB", size, color).save(path, format="JPEG")
+    Image.new("RGB", size, color).save(path, format=format)
     return path
 
 
@@ -88,7 +92,7 @@ class TestCustomSlideshowFilters:
 class TestPhotoFileEndpoints:
     @allure.title("Serves the original image file and 404s for a missing one")
     def test_get_image(self, app, tmp_path):
-        source = _make_image(_photos_folder(tmp_path) / "img.jpg")
+        source = _make_image(_originals_folder(tmp_path) / "img.jpg")
         photo_id = _add_photos(app, [Photo(path="img.jpg", filename="img.jpg", file_size=source.stat().st_size)])[0]
 
         response = app.get(f"/api/photos/{photo_id}/image")
@@ -97,9 +101,37 @@ class TestPhotoFileEndpoints:
 
         assert app.get("/api/photos/999/image").status_code == 404
 
+    @allure.title("Serves a requested processed alternative by target size")
+    def test_get_image_alternative(self, app, tmp_path):
+        alternative = _processed_folder(tmp_path) / "img_1080.webp"
+        _make_image(alternative, format="WEBP")
+        photo_id = _add_photos(
+            app,
+            [
+                Photo(
+                    path="img.jpg",
+                    filename="img.jpg",
+                    alternatives=[
+                        {
+                            "target_size": 1080,
+                            "path": "img_1080.webp",
+                            "filename": "img_1080.webp",
+                            "width": 320,
+                            "height": 240,
+                            "main": True,
+                        }
+                    ],
+                )
+            ],
+        )[0]
+
+        response = app.get(f"/api/photos/{photo_id}/image", params={"size": 1080})
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("image/webp")
+
     @allure.title("Generates and serves a webp thumbnail, 404s for a missing photo")
     def test_get_thumbnail(self, app, tmp_path):
-        source = _make_image(_photos_folder(tmp_path) / "thumb.jpg")
+        source = _make_image(_originals_folder(tmp_path) / "thumb.jpg")
         photo_id = _add_photos(app, [Photo(path="thumb.jpg", filename="thumb.jpg", file_size=source.stat().st_size)])[0]
 
         response = app.get(f"/api/photos/{photo_id}/thumbnail", params={"size": 160})
@@ -113,33 +145,49 @@ class TestPhotoFileEndpoints:
         photo_id = _add_photos(app, [Photo(path="wf.jpg", filename="wf.jpg")])[0]
         assert app.get(f"/api/photos/{photo_id}/wireframe").status_code == 404
 
-    @allure.title("Deletes a photo: moves the file and removes the row")
+    @allure.title("Deletes a photo: trashes the original, drops the alternatives and removes the row")
     def test_delete_photo(self, app, tmp_path):
-        source = _make_image(_photos_folder(tmp_path) / "del.jpg")
-        photo_id = _add_photos(app, [Photo(path="del.jpg", filename="del.jpg", file_size=source.stat().st_size)])[0]
+        source = _make_image(_originals_folder(tmp_path) / "del.jpg")
+        alternative = _processed_folder(tmp_path) / "del_1080.webp"
+        _make_image(alternative, format="WEBP")
+        photo_id = _add_photos(
+            app,
+            [
+                Photo(
+                    path="del.jpg",
+                    filename="del.jpg",
+                    file_size=source.stat().st_size,
+                    alternatives=[{"target_size": 1080, "path": "del_1080.webp", "main": True}],
+                )
+            ],
+        )[0]
 
         response = app.delete(f"/api/photos/{photo_id}")
         assert response.status_code == 200
         assert response.json() == {"deleted": True}
         assert not source.exists()
+        assert not alternative.exists()
+        assert (_trash_folder(tmp_path) / "del.jpg").is_file()
 
         assert app.get("/api/photos/count").json() == 0
 
-    @allure.title("Uploads a photo into the originals folder and copies it to the library")
+    @allure.title("Uploads a photo, stores the original and returns its alternatives")
     def test_upload_photo(self, app, tmp_path):
         buffer = BytesIO()
         Image.new("RGB", (20, 20)).save(buffer, format="PNG")
 
         response = app.post("/api/photos/upload", files={"file": ("up.png", buffer.getvalue(), "image/png")})
         assert response.status_code == 200
-        assert response.json()["filename"] == "up.png"
+        body = response.json()
+        assert body["filename"] == "up.png"
+        assert body["path"] == "up.png"
+        assert body["alternatives"]
 
         original = _originals_folder(tmp_path) / "up.png"
-        copy = _photos_folder(tmp_path) / "up.png"
+        alternative = _processed_folder(tmp_path) / body["alternatives"][0]["path"]
 
         assert original.is_file()
-        assert copy.is_file()
-        assert response.json()["path"] == str(copy)
+        assert alternative.is_file()
 
 
 class TestPhotoPhashSimilar:
@@ -271,8 +319,8 @@ class TestPhotoDuplicates:
 
     @allure.title("Deleting a duplicate drops it from the clusters")
     def test_duplicates_delete_removes_photo(self, app, tmp_path):
-        a = _make_image(_photos_folder(tmp_path) / "a.jpg")
-        b = _make_image(_photos_folder(tmp_path) / "b.jpg")
+        a = _make_image(_originals_folder(tmp_path) / "a.jpg")
+        b = _make_image(_originals_folder(tmp_path) / "b.jpg")
         _add_photos(
             app,
             [

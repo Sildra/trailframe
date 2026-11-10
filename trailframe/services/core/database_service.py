@@ -97,6 +97,18 @@ class DatabaseService(Service):
         async with cls._engine.begin() as connection:
             await connection.run_sync(SQLModel.metadata.create_all)
             await connection.run_sync(cls._add_missing_columns)
+
+        async with cls._engine.connect() as connection:
+            needs_rebuild = await connection.run_sync(cls._needs_rebuild)
+
+        if needs_rebuild:
+            # VACUUM cannot run inside a transaction, so the safety backup is
+            # taken on its own autocommit connection before the table rebuild.
+            async with cls._engine.connect() as connection:
+                connection = await connection.execution_options(isolation_level="AUTOCOMMIT")
+                await connection.run_sync(cls._backup)
+
+        async with cls._engine.begin() as connection:
             await connection.run_sync(cls._repair_primary_keys)
             await connection.run_sync(cls._sync_indexes)
 
@@ -282,11 +294,28 @@ class DatabaseService(Service):
         return backup
 
     @classmethod
+    def _needs_rebuild(cls, connection) -> bool:
+        """Whether any table is stored without the primary key its model declares."""
+        inspector = inspect(connection)
+        tables = set(inspector.get_table_names())
+
+        for table in SQLModel.metadata.sorted_tables:
+            if table.name not in tables:
+                continue
+
+            primary_key = [column.name for column in table.primary_key.columns]
+
+            if not primary_key or set(primary_key) == set(cls._database_primary_keys(inspector, table.name)):
+                continue
+
+            return True
+
+        return False
+
+    @classmethod
     def _rebuild_table(cls, connection, table, primary_key: list[str]) -> None:
         source = table.name
         target = f"{source}__rebuild"
-
-        cls._backup(connection)
 
         inspector = inspect(connection)
         available = {info["name"] for info in inspector.get_columns(source)}
