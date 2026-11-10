@@ -34,10 +34,23 @@ class StatisticsService(Service):
 
     @classmethod
     def record_run(cls, stats: list[dict]) -> None:
+        aggregated: dict[str, dict] = {}
+
+        for stat in stats:
+            entry = aggregated.setdefault(stat["scanner"], {"count": 0, "total_ms": 0.0})
+            entry["count"] += stat["count"]
+            entry["total_ms"] += stat["total_ms"]
+
         def _record(session):
             async def _run(s):
-                for stat in stats:
-                    s.add(ScannerStat(scanner=stat["scanner"], count=stat["count"], total_ms=stat["total_ms"]))
+                for scanner, totals in aggregated.items():
+                    row = (await s.execute(select(ScannerStat).where(ScannerStat.scanner == scanner))).scalars().first()
+
+                    if row is None:
+                        s.add(ScannerStat(scanner=scanner, count=totals["count"], total_ms=totals["total_ms"]))
+                    else:
+                        row.count += totals["count"]
+                        row.total_ms += totals["total_ms"]
 
                 await s.commit()
 

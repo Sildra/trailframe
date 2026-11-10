@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import allure
+from sqlalchemy import select
 
 from trailframe.models.scanner_stat import ScannerStat
 from trailframe.services.core.database_service import DatabaseService
@@ -24,6 +25,18 @@ class TestRecordAndSummary:
         # File: 5 items over 500 ms -> 10 items/s
         assert by_name["File"].items == 5
         assert by_name["File"].value == 10.0
+
+    @allure.title("Keeps one aggregated row per scanner instead of appending every run")
+    async def test_record_run_keeps_a_single_row(self, db_session):
+        for _ in range(5):
+            StatisticsService.record_run([{"scanner": "EXIF", "count": 2, "total_ms": 100.0}])
+
+        async def _rows(session):
+            return (await session.execute(select(ScannerStat))).scalars().all()
+
+        rows = await DatabaseService.execute(_rows)
+
+        assert [(row.scanner, row.count, row.total_ms) for row in rows] == [("EXIF", 10, 500.0)]
 
     @allure.title("Yields a zero throughput when no time was recorded")
     async def test_summary_zero_time_yields_zero_value(self, db_session):
