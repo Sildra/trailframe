@@ -288,7 +288,10 @@ export default function PhotoMetadata({ photoId, favorite = false, onToggleFavor
                                     }
                                 >
                                     <span>{obj.label}</span>
-                                    <span style={{ opacity: 0.6 }}>{Math.round((obj.confidence ?? 0) * 100)}%</span>
+                                    <span style={{ opacity: 0.6 }}>
+                                        p: {Math.round((obj.confidence ?? 0) * 100)}% . s:{" "}
+                                        {Math.round((obj.surface ?? 0) * 1000) / 10}%
+                                    </span>
                                 </Box>
                             ))}
                         </Box>
