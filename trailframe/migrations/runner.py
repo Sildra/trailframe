@@ -1,47 +1,51 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
-from packaging.version import Version
+from packaging.version import InvalidVersion, Version
 from sqlmodel import select
 
-from trailframe.models.migration import MigrationAudit, MigrationPlanState
+from trailframe.models.migration import MigrationEvent
 from trailframe.version import app_version
 
 from .plans import MIGRATION_PLANS
 
 
+def _version(value: str) -> Version | None:
+    try:
+        return Version(value)
+    except InvalidVersion:
+        return None
+
+
 async def run_migration_plans(session) -> None:
     current = app_version()
-    try:
-        current_v = Version(current)
-    except Exception:
-        current_v = Version("0.0.0")
+    current_v = _version(current) or Version("0.0.0")
 
     for plan in MIGRATION_PLANS:
-        try:
-            min_v = Version(plan.min_version)
-            max_v = Version(plan.max_version)
-        except Exception:
+        min_v = _version(plan.min_version)
+        max_v = _version(plan.max_version)
+
+        if min_v is None or max_v is None:
             continue
 
         if current_v < min_v or current_v > max_v:
             continue
 
-        result = await session.execute(select(MigrationPlanState).where(MigrationPlanState.plan_name == plan.name))
-        if result.first() is not None:
+        applied = await session.execute(
+            select(MigrationEvent).where(MigrationEvent.plan_name == plan.name, MigrationEvent.kind == "plan")
+        )
+        if applied.first() is not None:
             continue
 
         await plan.run(session)
 
-        now = datetime.now(timezone.utc).isoformat()
-        session.add(MigrationPlanState(plan_name=plan.name, applied_at=now, applied_version=current))
         session.add(
-            MigrationAudit(
+            MigrationEvent(
                 plan_name=plan.name,
                 kind="plan",
                 applied_version=current,
-                applied_at=now,
+                applied_at=datetime.now(UTC).isoformat(),
                 description=getattr(plan, "description", None),
             )
         )

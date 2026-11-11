@@ -25,7 +25,7 @@ from trailframe.migrations.runner import run_migration_plans
 from trailframe.models.activity import Activity, GarminActivity  # noqa: F401  (registers models with SQLModel metadata)
 from trailframe.models.app_data import AppDataRecord  # noqa: F401  (registers models with SQLModel metadata)
 from trailframe.models.group import PhotoGroup  # noqa: F401  (registers models with SQLModel metadata)
-from trailframe.models.migration import MigrationAudit, MigrationPlanState  # noqa: F401  (registers models with SQLModel metadata)
+from trailframe.models.migration import MigrationEvent  # noqa: F401  (registers models with SQLModel metadata)
 from trailframe.models.photo import Photo  # noqa: F401  (registers models with SQLModel metadata)
 from trailframe.models.scanner_stat import ScannerStat  # noqa: F401  (registers models with SQLModel metadata)
 from trailframe.models.tag import Tag  # noqa: F401  (registers models with SQLModel metadata)
@@ -216,11 +216,11 @@ class DatabaseService(Service):
             )
 
     @classmethod
-    def _log_migration_audit(cls, connection, plan_name: str, kind: str, description: str | None = None) -> None:
+    def _log_migration_event(cls, connection, plan_name: str, kind: str, description: str | None = None) -> None:
         connection.execute(
             text(
                 """
-                INSERT INTO migration_audit (plan_name, kind, applied_version, applied_at, description)
+                INSERT INTO migration_event (plan_name, kind, applied_version, applied_at, description)
                 VALUES (:plan_name, :kind, :applied_version, :applied_at, :description)
                 """
             ),
@@ -257,7 +257,7 @@ class DatabaseService(Service):
 
                 connection.execute(text(f"ALTER TABLE {table.name} ADD COLUMN {ddl}"))
                 cls._log(f"added column {table.name}.{column.name}")
-                cls._log_migration_audit(
+                cls._log_migration_event(
                     connection,
                     plan_name="auto_migrate",
                     kind="implicit_column",
@@ -340,7 +340,7 @@ class DatabaseService(Service):
         connection.exec_driver_sql(f'ALTER TABLE "{target}" RENAME TO "{source}"')
 
         cls._log(f"rebuilt table {source} with primary key ({', '.join(primary_key)})")
-        cls._log_migration_audit(
+        cls._log_migration_event(
             connection,
             plan_name="auto_migrate",
             kind="pk_rebuild",
@@ -407,7 +407,7 @@ class DatabaseService(Service):
                 columns = ", ".join(index.columns.keys())
                 connection.execute(text(f"CREATE {unique}INDEX {name} ON {table.name} ({columns})"))
                 cls._log(f"created index {name} on {table.name}")
-                cls._log_migration_audit(
+                cls._log_migration_event(
                     connection,
                     plan_name="auto_migrate",
                     kind="index_create",
@@ -420,7 +420,7 @@ class DatabaseService(Service):
 
                 connection.execute(text(f"DROP INDEX {name}"))
                 cls._log(f"dropped index {name} on {table.name}")
-                cls._log_migration_audit(
+                cls._log_migration_event(
                     connection,
                     plan_name="auto_migrate",
                     kind="index_drop",
