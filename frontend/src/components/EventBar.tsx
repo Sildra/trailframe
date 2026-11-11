@@ -10,9 +10,12 @@ const STATUS_LABELS: Record<EventStatus, string> = {
 };
 
 export default function EventBar() {
-    const { categories, texts } = useEvents();
-    const recentTexts = texts.slice(-5);
-    const boxCount = categories.length + 1;
+    const { categories } = useEvents();
+    const boxCount = categories.length;
+
+    if (boxCount === 0) {
+        return null;
+    }
 
     return (
         <Box
@@ -81,35 +84,6 @@ export default function EventBar() {
                     </Box>
                 );
             })}
-            <Box
-                sx={{
-                    boxSizing: "border-box",
-                    minWidth: 0,
-                    px: 1.5,
-                    py: 0.5,
-                    borderLeft: 1,
-                    borderColor: "divider",
-                    display: "flex",
-                    flexDirection: "column",
-                    alignItems: "flex-end",
-                    justifyContent: "center",
-                    gap: 0.25,
-                    overflow: "hidden",
-                }}
-            >
-                {recentTexts.map((text) => (
-                    <Typography
-                        key={text.id}
-                        sx={{
-                            fontSize: 12,
-                            whiteSpace: "nowrap",
-                            color: text.level === "error" ? "error.main" : "text.primary",
-                        }}
-                    >
-                        {text.message}
-                    </Typography>
-                ))}
-            </Box>
         </Box>
     );
 }

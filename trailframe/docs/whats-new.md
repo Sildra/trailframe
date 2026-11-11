@@ -59,6 +59,7 @@ The processing core was rebuilt around a shared thread pool.
 - Rules run in the pipeline after object detection and only add tags.
 - Tag overview shows rule counts from the tag tree; rules move with renamed/moved tags and are removed with deleted tags.
 - In-app Help menu with Tutorial and What's new (markdown slides), arrow-key navigation, and automatic What's new on version change.
+- Status messages (uploads, activity imports, server shutdown) now appear as stacked, dismissible toasts instead of the footer message box.
 - API docs at `/api/docs` and app version at `/api/about/version`.
 - Default tags now seed on first start when the `tags` table is empty (no config flag).
 - Rule expressions spell out their units (`80%`, `f/2.8`, `1200px`); detection metrics are written in percent, and existing rules are migrated automatically.

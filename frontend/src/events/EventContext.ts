@@ -11,7 +11,7 @@ export interface CategoryEvent {
     message?: string;
 }
 
-export interface TextEvent {
+export interface ToastEvent {
     id: number;
     message: string;
     level: "info" | "error";
@@ -20,7 +20,6 @@ export interface TextEvent {
 export interface EventContextValue {
     categories: CategoryEvent[];
     setCategory: (category: string, event: Partial<CategoryEvent>) => void;
-    texts: TextEvent[];
     pushText: (message: string, level?: "info" | "error") => void;
 }
 

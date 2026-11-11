@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { EventContext } from "./EventContext";
-import type { CategoryEvent, EventStatus, TextEvent } from "./EventContext";
+import type { CategoryEvent, EventStatus, ToastEvent } from "./EventContext";
+import EventToasts from "../components/EventToasts";
+
+const MAX_TOASTS = 4;
 
 function categoryStatus(message: string): EventStatus {
     return message === "Idle" ? "idle" : "active";
@@ -23,7 +26,7 @@ export function EventProvider({ children }: { children: ReactNode }) {
     const [categories, setCategories] = useState<CategoryEvent[]>([
         { category: "Upload", current: 0, failure: 0, total: 0, status: "idle" },
     ]);
-    const [texts, setTexts] = useState<TextEvent[]>([]);
+    const [toasts, setToasts] = useState<ToastEvent[]>([]);
 
     const setCategory = useCallback(
         (category: string, event: Partial<CategoryEvent>) => {
@@ -50,24 +53,18 @@ export function EventProvider({ children }: { children: ReactNode }) {
         setCategories((previous) => previous.filter((item) => item.category !== category));
     }, []);
 
-    const pushText = useCallback(
-        (message: string, level: "info" | "error" = "info") => {
-            setTexts((previous) => {
-                const next = {
-                    id: (previous.at(-1)?.id ?? 0) + 1,
-                    message,
-                    level,
-                };
+    const pushText = useCallback((message: string, level: "info" | "error" = "info") => {
+        setToasts((previous) => {
+            const toast: ToastEvent = { id: (previous.at(-1)?.id ?? 0) + 1, message, level };
+            const next = [...previous, toast];
 
-                if (previous.length === 0) {
-                    return [next];
-                }
+            return next.length > MAX_TOASTS ? next.slice(-MAX_TOASTS) : next;
+        });
+    }, []);
 
-                return [...previous.slice(0, -1), next];
-            });
-        },
-        [],
-    );
+    const removeToast = useCallback((id: number) => {
+        setToasts((previous) => previous.filter((toast) => toast.id !== id));
+    }, []);
 
     useEffect(() => {
         const source = new EventSource("./api/events");
@@ -102,8 +99,9 @@ export function EventProvider({ children }: { children: ReactNode }) {
     }, [setCategory, pushText, removeCategory]);
 
     return (
-        <EventContext.Provider value={{ categories, setCategory, texts, pushText }}>
+        <EventContext.Provider value={{ categories, setCategory, pushText }}>
             {children}
+            <EventToasts toasts={toasts} onRemove={removeToast} />
         </EventContext.Provider>
     );
 }
