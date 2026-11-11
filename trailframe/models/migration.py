@@ -4,7 +4,7 @@ from sqlmodel import Field, SQLModel
 
 
 class MigrationEvent(SQLModel, table=True):
-    __tablename__ = "migration_event"
+    __tablename__ = "migration_events"
 
     id: int | None = Field(default=None, primary_key=True)
     plan_name: str

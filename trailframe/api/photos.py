@@ -376,7 +376,7 @@ async def get_photo(photo_id: int) -> PhotoDetail:
                 select(Photo.id).where(
                     Photo.id != photo_id,
                     Photo.phash.isnot(None),
-                    text("hamming(photo.phash, :phash) < :threshold").bindparams(
+                    text("hamming(photos.phash, :phash) < :threshold").bindparams(
                         phash=photo.phash, threshold=threshold
                     ),
                 )

@@ -5,7 +5,7 @@ from trailframe.services.core.database_service import DatabaseService
 from trailframe.services.core.thread_pool_service import ThreadPoolService
 
 LEGACY_PHOTO_TABLE = """
-CREATE TABLE "photo" (
+CREATE TABLE "photos" (
     "id", "path", "filename", "file_size", "date", "source", "is_favorite", "latitude",
     "longitude", "location_source", "country", "location", "wireframe", "exif", "tags",
     "scores", "scanners", "objects", phash BLOB
@@ -16,9 +16,9 @@ CREATE TABLE "photo" (
 def _write_legacy_database(path) -> None:
     connection = sqlite3.connect(path)
     connection.execute(LEGACY_PHOTO_TABLE)
-    connection.execute("CREATE UNIQUE INDEX ix_photo_path ON photo (path)")
+    connection.execute("CREATE UNIQUE INDEX ix_photos_path ON photos (path)")
     connection.executemany(
-        "INSERT INTO photo (id, path, filename, date, is_favorite) VALUES (?, ?, ?, ?, 0)",
+        "INSERT INTO photos (id, path, filename, date, is_favorite) VALUES (?, ?, ?, ?, 0)",
         [(1, "one.jpg", "one.jpg", "2026-01-01 10:00:00"), (None, "two.jpg", "two.jpg", "2026-01-02 10:00:00")],
     )
     connection.commit()
@@ -57,8 +57,8 @@ class TestDatabaseService:
         await _start_database_service(database)
 
         try:
-            primary_key = _read(database, "PRAGMA table_info(photo)")
-            rows = _read(database, "SELECT id, path FROM photo ORDER BY path")
+            primary_key = _read(database, "PRAGMA table_info(photos)")
+            rows = _read(database, "SELECT id, path FROM photos ORDER BY path")
         finally:
             await _stop_database_service()
 
@@ -74,7 +74,7 @@ class TestDatabaseService:
         await _start_database_service(database)
 
         try:
-            _read(database, "SELECT id, path FROM photo")
+            _read(database, "SELECT id, path FROM photos")
         finally:
             await _stop_database_service()
 
@@ -88,11 +88,11 @@ class TestDatabaseService:
         await _start_database_service(database)
 
         try:
-            indexes = _read(database, "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'photo'")
+            indexes = _read(database, "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'photos'")
         finally:
             await _stop_database_service()
 
-        assert ("ix_photo_path",) in indexes
+        assert ("ix_photos_path",) in indexes
 
     async def test_keeps_tables_already_matching_the_model(self, tmp_path):
         database = tmp_path / "gallery.db"
@@ -104,5 +104,5 @@ class TestDatabaseService:
         finally:
             await _stop_database_service()
 
-        assert ("photo",) in tables
+        assert ("photos",) in tables
         assert not (tmp_path / "gallery.db.bak").exists()

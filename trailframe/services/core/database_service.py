@@ -220,7 +220,7 @@ class DatabaseService(Service):
         connection.execute(
             text(
                 """
-                INSERT INTO migration_event (plan_name, kind, applied_version, applied_at, description)
+                INSERT INTO migration_events (plan_name, kind, applied_version, applied_at, description)
                 VALUES (:plan_name, :kind, :applied_version, :applied_at, :description)
                 """
             ),

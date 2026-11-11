@@ -4,6 +4,8 @@ from sqlmodel import Field, SQLModel
 
 
 class PhotoGroup(SQLModel, table=True):
+    __tablename__ = "photo_groups"
+
     id: int | None = Field(default=None, primary_key=True)
     name: str = Field(index=True)
     start_date: date | None = None

@@ -48,6 +48,8 @@ def coerce_trace(trace: list | None) -> list[list]:
 
 
 class Activity(SQLModel, table=True):
+    __tablename__ = "activities"
+
     id: int | None = Field(default=None, primary_key=True)
 
     activity_id: str | None = Field(default=None, index=True, unique=True)
