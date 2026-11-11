@@ -38,7 +38,7 @@ A self-hosted photo gallery for people who move: photos and GPS activities (Garm
 
 ## Enrichment pipelines
 
-Uploaded photos are archived untouched in `originals/`, then preprocessed into one or more `processed/` alternatives (WebP). The pipelines below analyse the main processed file; EXIF is always read from the original.
+Uploaded photos are archived untouched in `photos/`, then preprocessed into one or more `processed/` alternatives (WebP). The pipelines below analyse the main processed file; EXIF is always read from the original.
 
 Photos are processed by pluggable scanners:
 
@@ -79,7 +79,7 @@ All Python dependencies are pulled in automatically; the web UI is bundled insid
 
 ## Running
 
-Run the `trailframe` command from the folder where all data (database, originals, processed, thumbnails, caches, trash) should live:
+Run the `trailframe` command from the folder where all data (database, photos, processed, thumbnails, caches, trash) should live:
 
 ```bash
 trailframe --config path/to/config.yaml

@@ -11,7 +11,7 @@ ALTERNATIVE = "alternative"
 class PhotoFile:
     """A file belonging to a photo: the original archive file or a processed alternative.
 
-    Original files live in the originals folder and are addressed by `Photo.path`;
+    Original files live in the photos folder and are addressed by `Photo.path`;
     alternatives live in the processed folder and are stored as plain entries in
     `Photo.alternatives`.
     """

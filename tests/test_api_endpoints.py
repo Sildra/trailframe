@@ -30,8 +30,8 @@ def _processed_folder(tmp_path):
     return tmp_path / "data" / "processed"
 
 
-def _originals_folder(tmp_path):
-    return tmp_path / "data" / "originals"
+def _photos_folder(tmp_path):
+    return tmp_path / "data" / "photos"
 
 
 def _trash_folder(tmp_path):
@@ -92,7 +92,7 @@ class TestCustomSlideshowFilters:
 class TestPhotoFileEndpoints:
     @allure.title("Serves the original image file and 404s for a missing one")
     def test_get_image(self, app, tmp_path):
-        source = _make_image(_originals_folder(tmp_path) / "img.jpg")
+        source = _make_image(_photos_folder(tmp_path) / "img.jpg")
         photo_id = _add_photos(app, [Photo(path="img.jpg", filename="img.jpg", file_size=source.stat().st_size)])[0]
 
         response = app.get(f"/api/photos/{photo_id}/image")
@@ -131,7 +131,7 @@ class TestPhotoFileEndpoints:
 
     @allure.title("Generates and serves a webp thumbnail, 404s for a missing photo")
     def test_get_thumbnail(self, app, tmp_path):
-        source = _make_image(_originals_folder(tmp_path) / "thumb.jpg")
+        source = _make_image(_photos_folder(tmp_path) / "thumb.jpg")
         photo_id = _add_photos(app, [Photo(path="thumb.jpg", filename="thumb.jpg", file_size=source.stat().st_size)])[0]
 
         response = app.get(f"/api/photos/{photo_id}/thumbnail", params={"size": 160})
@@ -147,7 +147,7 @@ class TestPhotoFileEndpoints:
 
     @allure.title("Deletes a photo: trashes the original, drops the alternatives and removes the row")
     def test_delete_photo(self, app, tmp_path):
-        source = _make_image(_originals_folder(tmp_path) / "del.jpg")
+        source = _make_image(_photos_folder(tmp_path) / "del.jpg")
         alternative = _processed_folder(tmp_path) / "del_1080.webp"
         _make_image(alternative, format="WEBP")
         photo_id = _add_photos(
@@ -183,7 +183,7 @@ class TestPhotoFileEndpoints:
         assert body["path"] == "up.png"
         assert body["alternatives"]
 
-        original = _originals_folder(tmp_path) / "up.png"
+        original = _photos_folder(tmp_path) / "up.png"
         alternative = _processed_folder(tmp_path) / body["alternatives"][0]["path"]
 
         assert original.is_file()
@@ -319,8 +319,8 @@ class TestPhotoDuplicates:
 
     @allure.title("Deleting a duplicate drops it from the clusters")
     def test_duplicates_delete_removes_photo(self, app, tmp_path):
-        a = _make_image(_originals_folder(tmp_path) / "a.jpg")
-        b = _make_image(_originals_folder(tmp_path) / "b.jpg")
+        a = _make_image(_photos_folder(tmp_path) / "a.jpg")
+        b = _make_image(_photos_folder(tmp_path) / "b.jpg")
         _add_photos(
             app,
             [

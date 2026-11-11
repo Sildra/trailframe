@@ -164,7 +164,7 @@ class TestStatisticsApi:
         assert "database_size" in payload
         assert isinstance(payload["filesystem"], list)
         assert {entry["name"] for entry in payload["filesystem"]} >= {
-            "Originals",
+            "Photos",
             "Processed",
             "Thumbnails",
             "Maps",

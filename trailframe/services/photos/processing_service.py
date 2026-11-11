@@ -24,7 +24,7 @@ _FORMAT_ALIASES = {"jpg": "jpeg", "tif": "tiff"}
 class ProcessingService(Service):
     """Original storage and preprocessing.
 
-    Uploaded files are stored in `originals_folder` and kept as the archive. Each
+    Uploaded files are stored in `photos_folder` and kept as the archive. Each
     original is decoded once and re-encoded into the configured alternatives in
     the processed folder (WebP by default), then handed to the pipeline. The
     alternatives carry only pixels: EXIF stays a property of the original, and
@@ -37,7 +37,7 @@ class ProcessingService(Service):
     _requires = ("ThreadPoolService", "FolderService", "PipelineService")
     _interval = 10
 
-    _originals_folder: Path | None = None
+    _photos_folder: Path | None = None
     _trash_folder: Path | None = None
     _alternatives: ClassVar[list[int]] = []
     _main: int | None = None
@@ -52,16 +52,16 @@ class ProcessingService(Service):
     @classmethod
     def _configure(cls, config: Node) -> None:
         general_node = config.get_node("general", "General parameters")
-        cls._originals_folder = Path(
-            general_node.get_path_value("originals_folder", "Folder where uploaded originals are stored", "originals")
+        cls._photos_folder = Path(
+            general_node.get_path_value("photos_folder", "Folder where uploaded photos are stored", "photos")
         )
-        cls._originals_folder.mkdir(parents=True, exist_ok=True)
+        cls._photos_folder.mkdir(parents=True, exist_ok=True)
         cls._trash_folder = Path(
             general_node.get_path_value("trash_folder", "Folder where deleted photos are moved", "trash")
         )
         cls._trash_folder.mkdir(parents=True, exist_ok=True)
         cls._failsafe = general_node.get_path_value(
-            "failsafe", "Start without scanning or watching the originals folder", False
+            "failsafe", "Start without scanning or watching the photos folder", False
         )
 
         processing_node = config.get_node("processing", "Photo preprocessing")
@@ -78,11 +78,11 @@ class ProcessingService(Service):
 
     @classmethod
     async def _start(cls) -> None:
-        if cls._originals_folder is None:
+        if cls._photos_folder is None:
             raise RuntimeError("ProcessingService is not configured")
 
         if cls._failsafe:
-            cls._log("failsafe: skipping originals scan and watch")
+            cls._log("failsafe: skipping photos scan and watch")
             return
 
         cls._running = True
@@ -99,32 +99,32 @@ class ProcessingService(Service):
     # --- original storage -------------------------------------------------
 
     @classmethod
-    def get_originals_folder(cls) -> Path:
-        if cls._originals_folder is None:
+    def get_photos_folder(cls) -> Path:
+        if cls._photos_folder is None:
             raise RuntimeError("ProcessingService is not configured")
 
-        return cls._originals_folder
+        return cls._photos_folder
 
     @classmethod
     def resolve(cls, stored: str | Path) -> Path:
-        """Absolute location of an original stored relative to the originals folder."""
+        """Absolute location of an original stored relative to the photos folder."""
         path = Path(stored)
 
-        if path.is_absolute() or cls._originals_folder is None:
+        if path.is_absolute() or cls._photos_folder is None:
             return path
 
-        return cls._originals_folder / path
+        return cls._photos_folder / path
 
     @classmethod
     def canonical(cls, path: str | Path) -> str:
-        """Storage form of an original: posix, relative to the originals folder."""
+        """Storage form of an original: posix, relative to the photos folder."""
         p = Path(path)
 
-        if cls._originals_folder is None:
+        if cls._photos_folder is None:
             return p.as_posix()
 
         try:
-            return p.resolve().relative_to(cls._originals_folder.resolve()).as_posix()
+            return p.resolve().relative_to(cls._photos_folder.resolve()).as_posix()
         except ValueError:
             return p.as_posix()
 
@@ -145,12 +145,12 @@ class ProcessingService(Service):
 
     @classmethod
     async def upload(cls, filename: str, content) -> Photo:
-        """Store an upload in the originals folder, then preprocess it."""
-        if cls._originals_folder is None:
+        """Store an upload in the photos folder, then preprocess it."""
+        if cls._photos_folder is None:
             raise RuntimeError("ProcessingService is not configured")
 
         async with cls._get_lock():
-            destination = cls._unique_path(cls._originals_folder, Path(filename or "photo").name)
+            destination = cls._unique_path(cls._photos_folder, Path(filename or "photo").name)
             temporary = destination.with_name(destination.name + ".part")
 
             with temporary.open("wb") as output:
@@ -287,12 +287,12 @@ class ProcessingService(Service):
 
     @classmethod
     async def scan(cls) -> None:
-        if cls._originals_folder is None or not cls._originals_folder.is_dir():
+        if cls._photos_folder is None or not cls._photos_folder.is_dir():
             return
 
         processed = 0
 
-        for path in sorted(cls._originals_folder.iterdir()):
+        for path in sorted(cls._photos_folder.iterdir()):
             if not FolderService._is_image(path):
                 continue
 

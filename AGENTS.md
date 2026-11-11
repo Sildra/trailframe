@@ -29,9 +29,9 @@ Trailframe — photo gallery app: Python/FastAPI backend + React/TS/Vite fronten
 
 - **Run**: `python -m trailframe.main` from repo root
   - `main.py` serves `frontend/dist` from CWD if present, else packaged copy
-  - Flags: `--config` (default `config.yaml`), `--folder` (sets `originals`/`processed`/`trash` and other `*_folder` subdirs), `--database`, `--port` (8000), `--failsafe` (skip `FolderService`/`ProcessingService` start, no scan/watch), `--openapi FILE`
+  - Flags: `--config` (default `config.yaml`), `--folder` (sets `photos`/`processed`/`trash` and other `*_folder` subdirs), `--database`, `--port` (8000), `--failsafe` (skip `FolderService`/`ProcessingService` start, no scan/watch), `--openapi FILE`
 
-- **Artifacts** (CWD, all gitignored): `config.yaml`, `gallery.db`, `originals/`, `processed/`, `thumbnails/`, `trash/`, `maps/`, `activities/`, `models/`, `tiles/`
+- **Artifacts** (CWD, all gitignored): `config.yaml`, `gallery.db`, `photos/`, `processed/`, `thumbnails/`, `trash/`, `maps/`, `activities/`, `models/`, `tiles/`
 
 - **Style**: ruff from root `pyproject.toml`
 
@@ -58,11 +58,11 @@ Trailframe — photo gallery app: Python/FastAPI backend + React/TS/Vite fronten
 
 ### Photos & Pipelines
 
-- **Photo files** (`models/photo.py`, `models/photo_file.py`): the chain is `originals/` → preprocessing → `processed/` → pipelines. One `Photo` row describes both: `path`/`filename`/`file_size` are the **original** archive file (relative to `originals/`, `path` unique); `alternatives` is a JSON list of processed files (`{target_size, path, filename, file_size, width, height, main}`, path relative to `processed/`); `processing` is a separate JSON list of provenance (`{step, source, target_size, format, quality, tool, tool_version, at}`). Accessors return a `PhotoFile` value object: `photo.original`, `photo.main()` (the entry flagged `main`, else the original) and `photo.alternative(target)`. Alternatives carry pixels only; EXIF stays on the original and orientation is baked in. No backfill: legacy rows have no alternatives and `main()` falls back to the original.
+- **Photo files** (`models/photo.py`, `models/photo_file.py`): the chain is `photos/` → preprocessing → `processed/` → pipelines. One `Photo` row describes both: `path`/`filename`/`file_size` are the **original** archive file (relative to `photos/`, `path` unique); `alternatives` is a JSON list of processed files (`{target_size, path, filename, file_size, width, height, main}`, path relative to `processed/`); `processing` is a separate JSON list of provenance (`{step, source, target_size, format, quality, tool, tool_version, at}`). Accessors return a `PhotoFile` value object: `photo.original`, `photo.main()` (the entry flagged `main`, else the original) and `photo.alternative(target)`. Alternatives carry pixels only; EXIF stays on the original and orientation is baked in. No backfill: legacy rows have no alternatives and `main()` falls back to the original.
 
 - **PhotoService** (`photos/photo_service.py`): resolves and deletes photo files. `resolve(photo, file=None)` uses the provider for originals (default `ProcessingService`, `SOURCE = "File"`, plus `RemoteProvider` `SOURCE = "Remote"` for in-memory photos) and `FolderService` for alternatives; it defaults to `photo.main()`. `delete(photo)` removes every alternative and moves the original to the trash. Extensible to network/NAS backends.
 
-- **ProcessingService** (`photos/processing_service.py`): owns originals and preprocessing. `POST /api/photos/upload` writes the original into `general.originals_folder` (unique `name_1.ext`, `.part` temp file) and keeps it as the archive; it encodes each `processing.alternatives` target size (longest edge, default `[1080]`) into `general.processed_folder` (WebP, `processing.main`/`format`/`quality`), records provenance, then hands the `Photo` to the pipeline. On startup and every 10 s a watcher imports leftover originals, skipping those already in the DB. `_requires = ("ThreadPoolService", "FolderService", "PipelineService")`; honors `general.failsafe`.
+- **ProcessingService** (`photos/processing_service.py`): owns originals and preprocessing. `POST /api/photos/upload` writes the original into `general.photos_folder` (unique `name_1.ext`, `.part` temp file) and keeps it as the archive; it encodes each `processing.alternatives` target size (longest edge, default `[1080]`) into `general.processed_folder` (WebP, `processing.main`/`format`/`quality`), records provenance, then hands the `Photo` to the pipeline. On startup and every 10 s a watcher imports leftover originals from the photos folder, skipping those already in the DB. `_requires = ("ThreadPoolService", "FolderService", "PipelineService")`; honors `general.failsafe`.
 
 - **FolderService** (`photos/folder_service.py`): the processed store only — resolves relative alternative paths and deletes processed files/alternatives. It never scans or watches; everything it contains is derived and regenerable.
 

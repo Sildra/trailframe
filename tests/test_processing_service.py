@@ -26,17 +26,17 @@ def _image() -> bytes:
 
 
 def _folders(tmp_path) -> tuple[Path, Path]:
-    return tmp_path / "data" / "processed", tmp_path / "data" / "originals"
+    return tmp_path / "data" / "processed", tmp_path / "data" / "photos"
 
 
 class TestProcessingService:
     @allure.title("Stores an upload as an original and generates the configured alternative")
     def test_upload_stores_original_and_alternative(self, app, tmp_path):
-        processed, originals = _folders(tmp_path)
+        processed, photos = _folders(tmp_path)
 
         photo = app.db(ProcessingService.upload("shot.png", Upload(_image())))
 
-        assert (originals / "shot.png").is_file()
+        assert (photos / "shot.png").is_file()
         assert photo.path == "shot.png"
         assert photo.filename == "shot.png"
         assert len(photo.alternatives) == 1
@@ -51,25 +51,25 @@ class TestProcessingService:
 
     @allure.title("Keeps earlier originals and gives a repeated upload a unique name")
     def test_upload_keeps_existing_originals(self, app, tmp_path):
-        processed, originals = _folders(tmp_path)
+        processed, photos = _folders(tmp_path)
 
         first = app.db(ProcessingService.upload("shot.png", Upload(_image())))
         second = app.db(ProcessingService.upload("shot.png", Upload(_image())))
 
         assert first.path == "shot.png"
         assert second.path == "shot_1.png"
-        assert len(list(originals.glob("shot*.png"))) == 2
+        assert len(list(photos.glob("shot*.png"))) == 2
         assert len(list(processed.glob("shot*.webp"))) == 2
 
-    @allure.title("Imports an original left behind in the originals folder")
+    @allure.title("Imports an original left behind in the photos folder")
     def test_scan_processes_leftover_originals(self, app, tmp_path):
-        processed, originals = _folders(tmp_path)
-        originals.mkdir(parents=True, exist_ok=True)
-        (originals / "left.png").write_bytes(_image())
+        processed, photos = _folders(tmp_path)
+        photos.mkdir(parents=True, exist_ok=True)
+        (photos / "left.png").write_bytes(_image())
 
         app.db(ProcessingService.scan())
 
-        assert (originals / "left.png").is_file()
+        assert (photos / "left.png").is_file()
         assert len(list(processed.glob("left*.webp"))) == 1
 
     @allure.title("Does not import an original that was already processed")

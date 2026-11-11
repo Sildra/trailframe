@@ -83,7 +83,7 @@ def app(tmp_path) -> AppHarness:
     from trailframe.services.photos.thumbnail_service import ThumbnailService
 
     FolderService._folder = None
-    ProcessingService._originals_folder = None
+    ProcessingService._photos_folder = None
     ProcessingService._trash_folder = None
     ProcessingService._task = None
     ProcessingService._running = False

@@ -49,7 +49,7 @@ def parse_arguments() -> argparse.Namespace:
         "--folder",
         type=parse_path_arg,
         default=None,
-        help="Base folder where originals, processed photos and thumbnails are stored",
+        help="Base folder where photos, processed files and thumbnails are stored",
     )
     parser.add_argument("--database", type=parse_path_arg, default=None, help="SQLite database")
     parser.add_argument("--port", type=int, default=None, help="API port")
@@ -70,7 +70,7 @@ def create_app(args: argparse.Namespace) -> FastAPI:
     database_node = general_node.get_node("database")
     if args.folder:
         general_node.get_node("processed_folder").set_value(str(args.folder / "processed"))
-        general_node.get_node("originals_folder").set_value(str(args.folder / "originals"))
+        general_node.get_node("photos_folder").set_value(str(args.folder / "photos"))
         general_node.get_node("trash_folder").set_value(str(args.folder / "trash"))
         general_node.get_node("thumbnails_folder").set_value(str(args.folder / "thumbnails"))
         general_node.get_node("activities_folder").set_value(str(args.folder / "activities"))

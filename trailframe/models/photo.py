@@ -14,7 +14,7 @@ NAIVE_DATETIME = DateTime
 class Photo(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
 
-    # The original archive file, relative to the originals folder.
+    # The original archive file, relative to the photos folder.
     path: str = Field(index=True, unique=True)
     filename: str | None = Field(index=True)
     file_size: int | None = Field(index=True)

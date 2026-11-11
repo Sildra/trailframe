@@ -10,7 +10,7 @@ Use the arrows at the bottom to move between slides, or the left and right arrow
 
 The Gallery is the main view of your library.
 
-- Uploaded photos are archived in the originals folder and preprocessed automatically for display and analysis.
+- Uploaded photos are archived in the photos folder and preprocessed automatically for display and analysis.
 - Filter by date range, group, location, tags, and favorites.
 - Open a photo to see its metadata: camera, lens, exposure, location, and the activities it belongs to.
 - Mark photos as favorites to find them again quickly.
