@@ -116,7 +116,9 @@ def plan_detection(
     """Decide the detection record and the heavy scanners to disable.
 
     Detection runs again only for heavy scanners that were not present the last
-    time it ran, so a scanner the user re-enabled is never disabled again.
+    time it ran, so a scanner the user re-enabled is never disabled again. The
+    record also carries the default for the JavaScript modules, which are
+    optional functionality rather than a scanner.
     """
     known = set(_names(previous.get("heavy"))) if previous else set()
     fresh = [name for name in heavy if name not in known]
@@ -131,6 +133,7 @@ def plan_detection(
         "low_memory": low_memory,
         "heavy": sorted(known | set(heavy)),
         "auto_disabled": sorted(auto_disabled),
+        "javascript_default": not low_memory,
         "detected_at": datetime.now(UTC).isoformat(timespec="seconds"),
     }
 
@@ -138,8 +141,9 @@ def plan_detection(
 
 
 class HardwareService(Service):
-    """Detect the free memory and disable heavy scanners on small machines.
+    """Detect the free memory and disable heavy features on small machines.
 
+    Heavy scanners are turned off and the JavaScript modules default to off.
     Detection runs on startup and is recorded in the generic `app_data` table:
     a heavy scanner added by a later release is not in the record yet, so it is
     evaluated on the next start even though the user's earlier choices are kept.
@@ -165,17 +169,29 @@ class HardwareService(Service):
         for name in disabled:
             config.get_node(f"scanners.{name}.enabled").set_value(False)
 
-        if disabled:
+        javascript = config.get_node(
+            "general.javascript_modules", "Load JavaScript modules (the rule expression engine)"
+        )
+        # An explicit choice from the configuration always wins; otherwise the
+        # default follows the detected memory.
+        explicit_javascript = javascript.has_value
+        javascript.set_default_value(record["javascript_default"])
+        disabled_features = [*disabled]
+
+        if record["low_memory"] and not explicit_javascript:
+            disabled_features.append("JavaScript modules")
+
+        if disabled_features:
             cls._log(
                 f"detected {free_ram_gb} GB of free RAM (heavy features need {MIN_FREE_RAM_GB} GB): "
-                f"disabled {', '.join(disabled)} "
+                f"disabled {', '.join(disabled_features)} "
                 "(see the 'Hardware & performance' help page)",
                 logging.WARNING,
             )
         elif record["low_memory"]:
             cls._log(
                 f"detected {free_ram_gb} GB of free RAM (heavy features need {MIN_FREE_RAM_GB} GB); "
-                "heavy scanners were already handled on a previous start"
+                "heavy features were already handled on a previous start"
             )
 
     @classmethod

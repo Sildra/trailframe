@@ -4,7 +4,14 @@ import sqlite3
 
 import allure
 
-from trailframe.services.core.hardware_service import MIN_FREE_RAM_GB, detect_free_memory_gb, plan_detection
+from trailframe.services.core import hardware_service
+from trailframe.services.core.configuration_service import Node
+from trailframe.services.core.hardware_service import (
+    MIN_FREE_RAM_GB,
+    HardwareService,
+    detect_free_memory_gb,
+    plan_detection,
+)
 from trailframe.services.scanners import get_scanner_definitions
 
 
@@ -60,6 +67,56 @@ class TestHardwareDetection:
         heavy = {definition["name"] for definition in get_scanner_definitions() if definition["heavy"]}
 
         assert heavy == {"Object"}
+
+    @allure.title("Defaults JavaScript modules off when free memory is low")
+    def test_low_memory_defaults_javascript_off(self):
+        record, _ = plan_detection(MIN_FREE_RAM_GB - 0.5, ["Object"], None)
+
+        assert record["javascript_default"] is False
+
+    @allure.title("Defaults JavaScript modules on when free memory is sufficient")
+    def test_enough_memory_defaults_javascript_on(self):
+        record, _ = plan_detection(MIN_FREE_RAM_GB + 1, ["Object"], None)
+
+        assert record["javascript_default"] is True
+
+    @allure.title("Defaults JavaScript modules on when the memory size is unknown")
+    def test_unknown_memory_defaults_javascript_on(self):
+        record, _ = plan_detection(None, ["Object"], None)
+
+        assert record["javascript_default"] is True
+
+
+class TestJavascriptModulesDefault:
+    def _configure(self, monkeypatch, free_ram_gb: float | None, explicit: bool | None = None) -> Node:
+        monkeypatch.setattr(hardware_service, "detect_free_memory_gb", lambda: free_ram_gb)
+        monkeypatch.setattr(hardware_service, "read_value", lambda path, key: None)
+        config = Node("root")
+
+        if explicit is not None:
+            config.get_node("general.javascript_modules").set_value(explicit)
+
+        HardwareService._configure(config)
+
+        return config
+
+    @allure.title("Turns JavaScript modules off by default below the memory threshold")
+    def test_low_memory_sets_false_default(self, monkeypatch):
+        config = self._configure(monkeypatch, MIN_FREE_RAM_GB - 0.5)
+
+        assert config.get_node("general.javascript_modules").value is False
+
+    @allure.title("Keeps JavaScript modules on by default when memory is sufficient")
+    def test_enough_memory_sets_true_default(self, monkeypatch):
+        config = self._configure(monkeypatch, MIN_FREE_RAM_GB + 1)
+
+        assert config.get_node("general.javascript_modules").value is True
+
+    @allure.title("Keeps an explicit JavaScript choice on low memory")
+    def test_explicit_choice_wins(self, monkeypatch):
+        config = self._configure(monkeypatch, MIN_FREE_RAM_GB - 0.5, explicit=True)
+
+        assert config.get_node("general.javascript_modules").value is True
 
 
 class TestAppData:

@@ -16,11 +16,13 @@ from typing import Any, ClassVar
 
 from py_mini_racer import MiniRacer
 
+from trailframe.services.core.configuration_service import Node
 from trailframe.services.rules.schema import schema
-from trailframe.services.service import Service
+from trailframe.services.service import Service, ServiceState
 
 BUNDLE_NAME = "expression.js"
 DEV_BUNDLE = Path("frontend/dist-expression") / BUNDLE_NAME
+JAVASCRIPT_CONFIG = "javascript_modules"
 
 
 class ExpressionEngineError(RuntimeError):
@@ -34,21 +36,30 @@ class ExpressionEngineService(Service):
 
     _engine: ClassVar[MiniRacer | None] = None
     _lock: ClassVar[threading.RLock] = threading.RLock()
+    _general: ClassVar[Node | None] = None
+    _enabled: ClassVar[bool] = True
 
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
 
     @classmethod
+    def _configure(cls, config: Node) -> None:
+        cls._general = config.get_node("general", "General parameters")
+
+        # The initial pass runs before HardwareService decides the low-memory
+        # default, so `_start` applies the flag once every service is configured.
+        if cls._state is ServiceState.STARTED:
+            cls._apply()
+
+    @classmethod
     async def _start(cls) -> None:
-        cls._ensure_engine()
+        cls._apply()
 
     @classmethod
     async def _stop(cls) -> None:
-        with cls._lock:
-            if cls._engine is not None:
-                cls._engine.close()
-                cls._engine = None
+        cls._release()
+        cls._general = None
 
     # ------------------------------------------------------------------
     # Conversion
@@ -88,6 +99,29 @@ class ExpressionEngineService(Service):
     # ------------------------------------------------------------------
 
     @classmethod
+    def _apply(cls) -> None:
+        """Read the flag and load or release the engine to match it."""
+        if cls._general is None:
+            return
+
+        cls._enabled = bool(
+            cls._general.get_path_value(JAVASCRIPT_CONFIG, "Load JavaScript modules (the rule expression engine)", True)
+        )
+
+        if cls._enabled:
+            cls._ensure_engine()
+        else:
+            cls._release()
+            cls._log("JavaScript modules are disabled; expression parse/print is unavailable")
+
+    @classmethod
+    def _release(cls) -> None:
+        with cls._lock:
+            if cls._engine is not None:
+                cls._engine.close()
+                cls._engine = None
+
+    @classmethod
     def _bundle_path(cls) -> Path:
         """Prefer the source-tree build, then the bundle shipped in the wheel."""
         dev = DEV_BUNDLE
@@ -99,6 +133,9 @@ class ExpressionEngineService(Service):
 
     @classmethod
     def _ensure_engine(cls) -> MiniRacer:
+        if not cls._enabled:
+            raise ExpressionEngineError("JavaScript modules are disabled; enable them under Configuration > General")
+
         if cls._engine is not None:
             return cls._engine
 

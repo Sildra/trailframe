@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from trailframe.services.rules.ast import Definition
-from trailframe.services.rules.expression_engine_service import ExpressionEngineService
+from trailframe.services.rules.expression_engine_service import ExpressionEngineError, ExpressionEngineService
 from trailframe.services.rules.rule_service import RuleService, RuleValidationError
 
 router = APIRouter(prefix="/api/rules", tags=["rules"])
@@ -97,13 +97,19 @@ async def get_values() -> dict[str, list[str]]:
 @router.post("/expression/parse", response_model=ExpressionParseResponse)
 async def parse_expression(payload: ExpressionParseRequest) -> dict[str, Any]:
     """Convert expression text into a rule definition using the editor's parser."""
-    return ExpressionEngineService.parse(payload.expression)
+    try:
+        return ExpressionEngineService.parse(payload.expression)
+    except ExpressionEngineError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
 
 
 @router.post("/expression/print", response_model=ExpressionPrintResponse)
 async def print_expression(payload: ExpressionPrintRequest) -> dict[str, str]:
     """Render a rule definition back to canonical expression text."""
-    return {"expression": ExpressionEngineService.print(payload.definition.model_dump())}
+    try:
+        return {"expression": ExpressionEngineService.print(payload.definition.model_dump())}
+    except ExpressionEngineError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
 
 
 @router.get("", response_model=list[RuleResponse])

@@ -2,6 +2,10 @@ from __future__ import annotations
 
 import allure
 
+from trailframe.services.core.configuration_service import Node
+from trailframe.services.rules.expression_engine_service import ExpressionEngineService
+from trailframe.services.service import ServiceState
+
 
 class TestExpressionEngine:
     @allure.title("Converts expression text into the same definition the editor builds")
@@ -39,3 +43,46 @@ class TestExpressionEngine:
 
         assert response.status_code == 200
         assert response.json()["expression"] == 'objects has "dog" with confidence >= 80% and width >= 1200px'
+
+    @allure.title("Rejects expression conversion when JavaScript modules are disabled")
+    def test_disabled_returns_service_unavailable(self, app, monkeypatch):
+        from trailframe.services.rules.expression_engine_service import ExpressionEngineService
+
+        monkeypatch.setattr(ExpressionEngineService, "_enabled", False)
+
+        response = app.post("/api/rules/expression/parse", json={"expression": "width >= 1200px"})
+
+        assert response.status_code == 503
+        assert "JavaScript modules are disabled" in response.json()["detail"]
+
+
+class TestJavascriptModulesConfig:
+    @allure.title("Loads and releases the engine as the configuration flag changes")
+    def test_toggles_engine_live(self, monkeypatch):
+        config = Node("root")
+        flag = config.get_node("general.javascript_modules")
+        flag.set_value(True)
+        monkeypatch.setattr(ExpressionEngineService, "_state", ServiceState.STARTED)
+
+        try:
+            ExpressionEngineService.configure(config)
+            assert ExpressionEngineService._enabled is True
+            assert ExpressionEngineService._engine is not None
+
+            flag.set_value(False)
+            ExpressionEngineService.configure(config)
+            assert ExpressionEngineService._enabled is False
+            assert ExpressionEngineService._engine is None
+        finally:
+            ExpressionEngineService._release()
+
+    @allure.title("Does not load the engine on the initial configure pass")
+    def test_initial_configure_defers_to_start(self, monkeypatch):
+        config = Node("root")
+        config.get_node("general.javascript_modules").set_value(False)
+
+        monkeypatch.setattr(ExpressionEngineService, "_state", ServiceState.NOT_STARTED)
+        ExpressionEngineService._release()
+        ExpressionEngineService._configure(config)
+
+        assert ExpressionEngineService._engine is None

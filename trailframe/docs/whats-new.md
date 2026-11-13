@@ -68,3 +68,4 @@ The processing core was rebuilt around a shared thread pool.
 - Alternatives are generated for the configured target sizes on import (WebP by default), with processing provenance recorded on the photo.
 - Thumbnails are keyed by the original path and main target, so they survive reprocessing.
 - Deleting a photo discards its processed files and thumbnails and moves the original to the trash.
+- The JavaScript expression engine is a configuration toggle (`javascript_modules`) and defaults to off on machines with less than 1 GB of free memory.
