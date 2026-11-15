@@ -3,12 +3,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import shutil
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import ClassVar
 
 from PIL import Image, ImageOps
-from PIL import __version__ as pillow_version
 from sqlalchemy import select
 
 from trailframe.models.photo import Photo
@@ -16,9 +14,27 @@ from trailframe.services.core.configuration_service import Node
 from trailframe.services.core.database_service import DatabaseService
 from trailframe.services.core.thread_pool_service import ThreadPoolService
 from trailframe.services.photos.folder_service import FolderService
+from trailframe.services.photos.processing.tilt import (
+    TiltDecision,
+    TiltSettings,
+    correct,
+    decide,
+    detect_tilt,
+    get_detector,
+)
 from trailframe.services.service import Service
 
 _FORMAT_ALIASES = {"jpg": "jpeg", "tif": "tiff"}
+
+_REASON_TEXT = {
+    "no_estimate": "no estimate",
+    "below_min_angle": "below minimum angle",
+    "above_max_angle": "above maximum angle",
+    "low_confidence": "low confidence",
+    "auto_apply_disabled": "auto-apply disabled",
+    "disabled": "disabled",
+    "failed": "failed",
+}
 
 
 class ProcessingService(Service):
@@ -43,6 +59,7 @@ class ProcessingService(Service):
     _main: int | None = None
     _format: ClassVar[str] = "webp"
     _quality = 90
+    _tilt: ClassVar[TiltSettings] = TiltSettings()
     _failsafe = False
     _task: asyncio.Task | None = None
     _running = False
@@ -75,6 +92,12 @@ class ProcessingService(Service):
         ).lower()
         cls._format = _FORMAT_ALIASES.get(configured_format, configured_format)
         cls._quality = int(processing_node.get_path_value("quality", "Encoder quality for alternatives", 90))
+
+        tilt_node = processing_node.get_node("tilt", "Automatic horizon straightening")
+        cls._tilt = TiltSettings.from_node(tilt_node)
+
+        if cls._tilt.enabled and get_detector(cls._tilt.method) is None:
+            cls._log(f"unknown tilt detector '{cls._tilt.method}', horizon correction is disabled", logging.WARNING)
 
     @classmethod
     async def _start(cls) -> None:
@@ -185,7 +208,7 @@ class ProcessingService(Service):
         photo = Photo(path=canonical, filename=original.name, file_size=_file_size(original), source=cls.SOURCE)
 
         try:
-            photo.alternatives, photo.processing = await cls._generate(original, canonical)
+            photo.alternatives, photo.processing = await cls._generate(original)
         except Exception:
             cls._seen.discard(canonical)
             raise
@@ -197,23 +220,23 @@ class ProcessingService(Service):
         return photo
 
     @classmethod
-    async def _generate(cls, original: Path, source_path: str) -> tuple[list[dict], list[dict]]:
+    async def _generate(cls, original: Path) -> tuple[list[dict], list[dict]]:
         if not cls._alternatives:
             return [], []
 
         return await ThreadPoolService.run(
-            cls._encode, original, source_path, list(cls._alternatives), cls._main, cls._format, cls._quality
+            cls._encode, original, list(cls._alternatives), cls._main, cls._format, cls._quality, cls._tilt
         )
 
     @classmethod
     def _encode(
         cls,
         original: Path,
-        source_path: str,
         targets: list[int],
         main_target: int | None,
         output_format: str,
         quality: int,
+        tilt: TiltSettings,
     ) -> tuple[list[dict], list[dict]]:
         """Encode the configured alternatives. Runs on the shared thread pool."""
         entries: list[dict] = []
@@ -221,11 +244,18 @@ class ProcessingService(Service):
         folder = FolderService.get_folder()
         fmt = _FORMAT_ALIASES.get(output_format, output_format)
         suffix = ".jpg" if fmt == "jpeg" else f".{fmt}"
-        at = datetime.now(UTC).isoformat()
 
         with Image.open(original) as handle:
             base = ImageOps.exif_transpose(handle)
             base.load()
+
+            decision = cls._tilt_decision(base, tilt)
+
+            record = cls._tilt_record(decision)
+
+            if record is not None:
+                steps.append(record)
+
             longest = max(base.size)
 
             for target in targets:
@@ -233,6 +263,9 @@ class ProcessingService(Service):
 
                 if target < longest:
                     image.thumbnail((target, target), Image.Resampling.LANCZOS)
+
+                if decision.applied and decision.estimate is not None:
+                    image, _ = correct(image, decision.estimate.angle, tilt)
 
                 if image.mode not in ("RGB", "RGBA"):
                     if image.mode in ("P", "PA") and "transparency" in image.info:
@@ -263,17 +296,62 @@ class ProcessingService(Service):
                 steps.append(
                     {
                         "step": "downscale" if target < longest else "transcode",
-                        "source": source_path,
-                        "target_size": target,
-                        "format": fmt,
-                        "quality": quality,
-                        "tool": "Pillow",
-                        "tool_version": pillow_version,
-                        "at": at,
+                        "summary": f"{width} × {height}",
+                        "details": {
+                            "Target size": f"{target} px",
+                            "Format": fmt.upper(),
+                            "Quality": str(quality),
+                        },
+                        "meta": {},
                     }
                 )
 
         return entries, steps
+
+    @classmethod
+    def _tilt_decision(cls, image: Image.Image, tilt: TiltSettings) -> TiltDecision:
+        if not tilt.enabled:
+            return TiltDecision(None, False, "disabled")
+
+        try:
+            estimate = detect_tilt(image, tilt)
+        except Exception as exception:  # noqa: BLE001
+            cls._log(f"tilt detection failed: {exception}", logging.WARNING)
+            return TiltDecision(None, False, "failed")
+
+        return decide(estimate, tilt)
+
+    @classmethod
+    def _tilt_record(cls, decision: TiltDecision) -> dict | None:
+        estimate = decision.estimate
+
+        if estimate is None:
+            return None
+
+        details: dict[str, str] = {
+            "Detection method": estimate.method,
+            "Confidence": f"{estimate.confidence:.0%}",
+            "Applied": "Yes" if decision.applied else "No",
+        }
+        meta: dict = {}
+        reference = estimate.reference_point
+
+        if not decision.applied:
+            details["Reason"] = _reason_text(decision.reason)
+
+        if reference is not None:
+            details["Reference point"] = f"{reference[0]:.1%}, {reference[1]:.1%}"
+            meta["reference_point"] = {"x": round(reference[0], 4), "y": round(reference[1], 4)}
+
+        if estimate.line is not None:
+            meta["line"] = {
+                "x1": round(estimate.line[0], 4),
+                "y1": round(estimate.line[1], 4),
+                "x2": round(estimate.line[2], 4),
+                "y2": round(estimate.line[3], 4),
+            }
+
+        return {"step": "tilt", "summary": _format_angle(estimate.angle), "details": details, "meta": meta}
 
     @classmethod
     async def _find(cls, canonical: str) -> Photo | None:
@@ -343,6 +421,19 @@ class ProcessingService(Service):
                 return candidate
 
             index += 1
+
+
+def _reason_text(reason: str) -> str:
+    return _REASON_TEXT.get(reason, reason.replace("_", " "))
+
+
+def _format_angle(angle: float) -> str:
+    rounded = round(float(angle), 2)
+
+    if rounded == 0:
+        rounded = 0.0
+
+    return f"{rounded:+.2f}°"
 
 
 def _file_size(path: Path) -> int | None:

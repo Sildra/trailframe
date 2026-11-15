@@ -68,4 +68,5 @@ The processing core was rebuilt around a shared thread pool.
 - Alternatives are generated for the configured target sizes on import (WebP by default), with processing provenance recorded on the photo.
 - Thumbnails are keyed by the original path and main target, so they survive reprocessing.
 - Deleting a photo discards its processed files and thumbnails and moves the original to the trash.
+- Automatic horizon straightening detects the dominant near-horizontal lines on a downscaled copy and corrects the processed alternatives only when the estimate is confident; the processing recipe is a two-stage tree (step, headline value, details) recording the angle, confidence, reference point, and crop. Hovering the Tilt step draws the detected horizon in red and the corrected target in green on the photo.
 - The JavaScript expression engine is a configuration toggle (`javascript_modules`) and defaults to off on machines with less than 1 GB of free memory.

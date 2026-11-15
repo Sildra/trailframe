@@ -40,8 +40,8 @@ class Photo(SQLModel, table=True):
     # file data: {target_size, path, filename, file_size, width, height, main}.
     alternatives: list[dict] = Field(default_factory=list, sa_column=Column(JSON))
 
-    # What preprocessing was applied, independently of the files it produced:
-    # {step, source, target_size, format, quality, tool, tool_version, at}.
+    # What preprocessing was applied, independently of the files it produced.
+    # Two-stage provenance: {step, summary, details, meta}.
     processing: list[dict] = Field(default_factory=list, sa_column=Column(JSON))
 
     @property

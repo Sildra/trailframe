@@ -24,6 +24,7 @@ import ThumbnailGallery from "../components/ThumbnailGallery";
 import UploadButton from "../components/UploadButton";
 import { duplicateKey, groupKey, locationIssueKey } from "../lib/groups";
 import type { HoveredObject } from "../lib/objectBoxes";
+import type { TiltOverlay } from "../lib/processing";
 import type { TagNode } from "../lib/tags";
 
 type PhotoGroupSummary = components["schemas"]["PhotoGroupSummary"];
@@ -45,6 +46,7 @@ export default function GalleryPage() {
     const [leftCollapsed, setLeftCollapsed] = useState(false);
     const [rightCollapsed, setRightCollapsed] = useState(false);
     const [hoveredObject, setHoveredObject] = useState<HoveredObject | null>(null);
+    const [hoveredTilt, setHoveredTilt] = useState<{ photoId: number; overlay: TiltOverlay } | null>(null);
     const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
     const [favoriteIds, setFavoriteIds] = useState<Set<number>>(new Set());
     const [tagTree, setTagTree] = useState<TagNode[]>([]);
@@ -298,6 +300,7 @@ export default function GalleryPage() {
         setSelectedPhotoId(nextId);
         setConfirmDeleteOpen(false);
         setHoveredObject(null);
+        setHoveredTilt(null);
 
         setGroups((previous) =>
             previous?.map((group) => ({
@@ -378,6 +381,7 @@ export default function GalleryPage() {
                 return orderedPhotoIds[(index - 1 + orderedPhotoIds.length) % orderedPhotoIds.length];
             });
             setHoveredObject(null);
+            setHoveredTilt(null);
         }
 
         window.addEventListener("keydown", onKeyDown);
@@ -560,7 +564,11 @@ export default function GalleryPage() {
                 )}
             </Box>
             <Box sx={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                <ImageViewer photoId={selectedPhotoId} hoveredObject={hoveredObject} />
+                <ImageViewer
+                    photoId={selectedPhotoId}
+                    hoveredObject={hoveredObject}
+                    hoveredTilt={hoveredTilt?.photoId === selectedPhotoId ? hoveredTilt.overlay : null}
+                />
             </Box>
             <Box
                 sx={{
@@ -607,6 +615,13 @@ export default function GalleryPage() {
                                 favorite={favoriteIds.has(selectedPhotoId)}
                                 onToggleFavorite={() => toggleFavorite(selectedPhotoId)}
                                 onHoverObject={setHoveredObject}
+                                onHoverTilt={(overlay) =>
+                                    setHoveredTilt(
+                                        overlay && selectedPhotoId !== null
+                                            ? { photoId: selectedPhotoId, overlay }
+                                            : null,
+                                    )
+                                }
                                 onSelectPhoto={setSelectedPhotoId}
                             />
                         )}

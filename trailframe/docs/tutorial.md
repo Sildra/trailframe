@@ -11,6 +11,8 @@ Use the arrows at the bottom to move between slides, or the left and right arrow
 The Gallery is the main view of your library.
 
 - Uploaded photos are archived in the photos folder and preprocessed automatically for display and analysis.
+- A tilted horizon is straightened in the processed copies when the estimate is confident enough; the archived original is never modified.
+- The photo panel lists each processing step with its details. Hover the Tilt step to see the detected horizon in red and the corrected target in green.
 - Filter by date range, group, location, tags, and favorites.
 - Open a photo to see its metadata: camera, lens, exposure, location, and the activities it belongs to.
 - Mark photos as favorites to find them again quickly.

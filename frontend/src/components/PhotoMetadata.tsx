@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import {
     Accordion,
     AccordionDetails,
@@ -18,7 +18,10 @@ import { api } from "../api/client";
 import type { components } from "../api/generated/schema";
 import { formatDateTime } from "../lib/format";
 import type { HoveredObject, ObjectReference } from "../lib/objectBoxes";
+import type { TiltOverlay } from "../lib/processing";
+import MetadataList from "./MetadataList";
 import PhotoLocationMap from "./PhotoLocationMap";
+import ProcessingTree from "./ProcessingTree";
 import TagPicker from "./TagPicker";
 import ThumbnailGallery from "./ThumbnailGallery";
 
@@ -41,6 +44,7 @@ interface PhotoMetadataProps {
     favorite?: boolean;
     onToggleFavorite?: () => void;
     onHoverObject?: (object: HoveredObject | null) => void;
+    onHoverTilt?: (tilt: TiltOverlay | null) => void;
     onSelectPhoto?: (photoId: number) => void;
 }
 
@@ -60,31 +64,7 @@ function formatValue(value: unknown): string {
     return typeof value === "object" ? JSON.stringify(value) : String(value);
 }
 
-function MetadataList({ entries, mono }: { entries: Array<[string, string]>; mono?: boolean }) {
-    return (
-        <Box
-            sx={{
-                display: "grid",
-                gridTemplateColumns: "auto 1fr",
-                gap: "4px 12px",
-                fontSize: 13,
-            }}
-        >
-            {entries.map(([key, value]) => (
-                <Fragment key={key}>
-                    <Box component="dt" sx={{ color: "text.secondary" }}>
-                        {key}
-                    </Box>
-                    <Box component="dd" sx={{ margin: 0, wordBreak: "break-word", fontFamily: mono ? "monospace" : undefined }}>
-                        {value}
-                    </Box>
-                </Fragment>
-            ))}
-        </Box>
-    );
-}
-
-export default function PhotoMetadata({ photoId, favorite = false, onToggleFavorite, onHoverObject, onSelectPhoto }: PhotoMetadataProps) {
+export default function PhotoMetadata({ photoId, favorite = false, onToggleFavorite, onHoverObject, onHoverTilt, onSelectPhoto }: PhotoMetadataProps) {
     const [photo, setPhoto] = useState<Photo | null>(null);
     const [savedTags, setSavedTags] = useState<string[]>([]);
     const [tags, setTags] = useState<string[]>([]);
@@ -224,6 +204,16 @@ export default function PhotoMetadata({ photoId, favorite = false, onToggleFavor
                             )}
                             mono
                         />
+                    </AccordionDetails>
+                </Accordion>
+            )}
+            {(photo.processing ?? []).length > 0 && (
+                <Accordion disableGutters>
+                    <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={{ fontWeight: 600, fontSize: 14 }}>
+                        Processing
+                    </AccordionSummary>
+                    <AccordionDetails>
+                        <ProcessingTree entries={photo.processing} onHoverTilt={onHoverTilt} />
                     </AccordionDetails>
                 </Accordion>
             )}

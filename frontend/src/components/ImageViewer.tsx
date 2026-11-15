@@ -2,10 +2,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Box, Typography } from "@mui/material";
 
 import { objectRect, type HoveredObject } from "../lib/objectBoxes";
+import type { TiltOverlay } from "../lib/processing";
 
 interface ImageViewerProps {
     photoId: number | null;
     hoveredObject?: HoveredObject | null;
+    hoveredTilt?: TiltOverlay | null;
 }
 
 function computeDims(img: HTMLImageElement) {
@@ -22,7 +24,7 @@ function computeDims(img: HTMLImageElement) {
     return { cw, ch, nw, nh, scale, ox, oy };
 }
 
-export default function ImageViewer({ photoId, hoveredObject }: ImageViewerProps) {
+export default function ImageViewer({ photoId, hoveredObject, hoveredTilt }: ImageViewerProps) {
     const imgRef = useRef<HTMLImageElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
     const [dims, setDims] = useState<ReturnType<typeof computeDims> | null>(null);
@@ -88,6 +90,58 @@ export default function ImageViewer({ photoId, hoveredObject }: ImageViewerProps
                                         stroke="red"
                                         strokeWidth={2}
                                     />
+                                </svg>
+                            );
+                        })()}
+                    {hoveredTilt &&
+                        dims &&
+                        (() => {
+                            const { line, reference } = hoveredTilt;
+                            const toX = (x: number) => dims.ox + x * dims.nw * dims.scale;
+                            const toY = (y: number) => dims.oy + y * dims.nh * dims.scale;
+                            const x1 = toX(line.x1);
+                            const y1 = toY(line.y1);
+                            const x2 = toX(line.x2);
+                            const y2 = toY(line.y2);
+                            const rx = toX(reference.x);
+                            const ry = toY(reference.y);
+                            const half = Math.hypot(x2 - x1, y2 - y1) / 2;
+
+                            return (
+                                <svg
+                                    style={{
+                                        position: "absolute",
+                                        top: 0,
+                                        left: 0,
+                                        width: "100%",
+                                        height: "100%",
+                                        pointerEvents: "none",
+                                    }}
+                                >
+                                    <defs>
+                                        <clipPath id="tilt-clip">
+                                            <rect
+                                                x={dims.ox}
+                                                y={dims.oy}
+                                                width={dims.nw * dims.scale}
+                                                height={dims.nh * dims.scale}
+                                            />
+                                        </clipPath>
+                                    </defs>
+                                    <g clipPath="url(#tilt-clip)">
+                                        <line x1={x1} y1={y1} x2={x2} y2={y2} stroke="red" strokeWidth={2} />
+                                        <line
+                                            x1={rx - half}
+                                            y1={ry}
+                                            x2={rx + half}
+                                            y2={ry}
+                                            stroke="#00c853"
+                                            strokeWidth={2}
+                                            strokeDasharray="6 4"
+                                        />
+                                        <circle cx={rx} cy={ry} r={5} fill="none" stroke="white" strokeWidth={2} />
+                                        <circle cx={rx} cy={ry} r={2.5} fill="#ffb300" />
+                                    </g>
                                 </svg>
                             );
                         })()}
