@@ -9,10 +9,12 @@ interface ThumbnailItemProps {
     favorite?: boolean;
     /** Preferred thumbnail height (px); the backend picks the closest generated size. */
     size?: number;
+    /** Bumped when the photo's files change, so the thumbnail is fetched again. */
+    version?: number;
     onSelect: () => void;
 }
 
-export default function ThumbnailItem({ photoId, selected = false, favorite = false, size = 160, onSelect }: ThumbnailItemProps) {
+export default function ThumbnailItem({ photoId, selected = false, favorite = false, size = 160, version = 0, onSelect }: ThumbnailItemProps) {
     const rootRef = useRef<HTMLDivElement | null>(null);
     const [visible, setVisible] = useState(false);
     const [src, setSrc] = useState<string | null>(null);
@@ -47,7 +49,7 @@ export default function ThumbnailItem({ photoId, selected = false, favorite = fa
         let objectUrl: string | null = null;
 
         api.GET("/api/photos/{photo_id}/thumbnail", {
-            params: { path: { photo_id: photoId }, query: { size } },
+            params: { path: { photo_id: photoId }, query: { size, v: String(version) } },
             parseAs: "blob",
         })
             .then(({ data, error }) => {
@@ -66,7 +68,7 @@ export default function ThumbnailItem({ photoId, selected = false, favorite = fa
                 URL.revokeObjectURL(objectUrl);
             }
         };
-    }, [visible, photoId, size]);
+    }, [visible, photoId, size, version]);
 
     return (
         <Box

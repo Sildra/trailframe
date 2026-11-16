@@ -14,7 +14,8 @@ from trailframe.services.core.database_service import DatabaseService
 from trailframe.services.map.location_service import LocationService
 from trailframe.services.photos.duplicates_service import DuplicatesService
 from trailframe.services.photos.photo_service import PhotoService
-from trailframe.services.photos.processing_service import ProcessingService
+from trailframe.services.photos.processing.tilt import TiltOverride
+from trailframe.services.photos.processing_service import ProcessingService, ReprocessError
 from trailframe.services.photos.tag_service import TagService
 from trailframe.services.photos.thumbnail_service import ThumbnailService
 
@@ -38,6 +39,21 @@ class PhotoTagsUpdate(BaseModel):
 class PhotoTagsResponse(BaseModel):
     id: int
     tags: list[str]
+
+
+class ReprocessTilt(BaseModel):
+    mode: str = "auto"
+    angle: float | None = None
+    crop_mode: str | None = None
+
+
+class ReprocessRequest(BaseModel):
+    """Per-photo overrides; omitted fields keep the current/configured values."""
+
+    alternatives: list[int] | None = None
+    main: int | None = None
+    tilt: ReprocessTilt | None = None
+    rescan: bool = True
 
 
 def _group_date_bounds(start_date: date, end_date: date) -> tuple[datetime, datetime]:
@@ -423,6 +439,36 @@ async def get_photo(photo_id: int) -> PhotoDetail:
     return detail
 
 
+@router.post("/{photo_id}/reprocess", response_model=PhotoDetail)
+async def reprocess_photo(photo_id: int, payload: ReprocessRequest) -> PhotoDetail:
+    """Regenerate the alternatives of a photo from its original."""
+    tilt = None
+
+    if payload.tilt is not None:
+        mode = payload.tilt.mode.lower()
+
+        if mode not in {"auto", "off", "manual"}:
+            raise HTTPException(400, f"Unknown tilt mode '{payload.tilt.mode}'")
+
+        if mode == "manual" and payload.tilt.angle is None:
+            raise HTTPException(400, "A manual angle is required")
+
+        tilt = TiltOverride(
+            enabled=mode != "off",
+            angle=payload.tilt.angle if mode == "manual" else None,
+            crop_mode=payload.tilt.crop_mode,
+        )
+
+    try:
+        await ProcessingService.reprocess(
+            photo_id, alternatives=payload.alternatives, main_target=payload.main, tilt=tilt, rescan=payload.rescan
+        )
+    except ReprocessError as error:
+        raise HTTPException(error.status_code, str(error)) from error
+
+    return await get_photo(photo_id)
+
+
 @router.get("/{photo_id}/image")
 async def get_image(photo_id: int, size: int | None = Query(None)):
     async def _get(session):
@@ -450,7 +496,9 @@ async def get_image(photo_id: int, size: int | None = Query(None)):
 
 
 @router.get("/{photo_id}/thumbnail")
-async def get_thumbnail(photo_id: int, size: int | None = Query(None)):
+async def get_thumbnail(photo_id: int, size: int | None = Query(None), v: str | None = Query(None)):
+    """Serve a thumbnail. `v` is an optional cache-busting value and is ignored."""
+
     async def _get(session):
         photo = (await session.execute(select(Photo).where(Photo.id == photo_id))).scalar_one_or_none()
 

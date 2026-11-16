@@ -300,6 +300,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/photos/{photo_id}/reprocess": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reprocess Photo
+         * @description Regenerate the alternatives of a photo from its original.
+         */
+        post: operations["reprocess_photo_api_photos__photo_id__reprocess_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/photos/{photo_id}/image": {
         parameters: {
             query?: never;
@@ -324,7 +344,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get Thumbnail */
+        /**
+         * Get Thumbnail
+         * @description Serve a thumbnail. `v` is an optional cache-busting value and is ignored.
+         */
         get: operations["get_thumbnail_api_photos__photo_id__thumbnail_get"];
         put?: never;
         post?: never;
@@ -1604,6 +1627,34 @@ export interface components {
             /** Scanners */
             scanners: string[];
         };
+        /**
+         * ReprocessRequest
+         * @description Per-photo overrides; omitted fields keep the current/configured values.
+         */
+        ReprocessRequest: {
+            /** Alternatives */
+            alternatives?: number[] | null;
+            /** Main */
+            main?: number | null;
+            tilt?: components["schemas"]["ReprocessTilt"] | null;
+            /**
+             * Rescan
+             * @default true
+             */
+            rescan: boolean;
+        };
+        /** ReprocessTilt */
+        ReprocessTilt: {
+            /**
+             * Mode
+             * @default auto
+             */
+            mode: string;
+            /** Angle */
+            angle?: number | null;
+            /** Crop Mode */
+            crop_mode?: string | null;
+        };
         /** RuleApplyResponse */
         RuleApplyResponse: {
             /** Photos */
@@ -2338,6 +2389,41 @@ export interface operations {
             };
         };
     };
+    reprocess_photo_api_photos__photo_id__reprocess_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                photo_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReprocessRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PhotoDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_image_api_photos__photo_id__image_get: {
         parameters: {
             query?: {
@@ -2375,6 +2461,7 @@ export interface operations {
         parameters: {
             query?: {
                 size?: number | null;
+                v?: string | null;
             };
             header?: never;
             path: {

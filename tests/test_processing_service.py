@@ -7,9 +7,13 @@ from pathlib import Path
 import allure
 import pytest
 from PIL import Image, ImageDraw
+from sqlalchemy import select
 
-from trailframe.services.photos.processing.tilt import TiltSettings
-from trailframe.services.photos.processing_service import ProcessingService
+from trailframe.models.photo import Photo
+from trailframe.services.core.database_service import DatabaseService
+from trailframe.services.photos.processing.tilt import TiltOverride, TiltSettings
+from trailframe.services.photos.processing_service import ProcessingService, ReprocessError
+from trailframe.services.photos.thumbnail_service import ThumbnailService
 
 
 class Upload:
@@ -45,6 +49,55 @@ def _folders(tmp_path) -> tuple[Path, Path]:
     return tmp_path / "data" / "processed", tmp_path / "data" / "photos"
 
 
+def _wide_image(size: tuple[int, int] = (1200, 800)) -> bytes:
+    buffer = BytesIO()
+    Image.new("RGB", size, (30, 90, 150)).save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+def _seed_photo(app, tmp_path, *, filename: str | None = None, source: str = "File") -> Photo:
+    """Store an original plus its alternatives directly, without the pipeline.
+
+    The default name is unique per test: a pipeline thread from an earlier app
+    can outlive its shutdown (stop joins with a timeout) and write its own
+    photos into the next app's database.
+    """
+    _, photos = _folders(tmp_path)
+    photos.mkdir(parents=True, exist_ok=True)
+    filename = filename or f"seed-{tmp_path.name}.png"
+    original = photos / filename
+    original.write_bytes(_wide_image())
+
+    photo = Photo(path=filename, filename=filename, file_size=original.stat().st_size, source=source)
+    photo.alternatives, photo.processing = ProcessingService._encode(
+        original, [1080], 1080, ProcessingService._format, ProcessingService._quality, ProcessingService._tilt
+    )
+
+    async def _save() -> int:
+        async def _write(session) -> int:
+            session.add(photo)
+            await session.commit()
+
+            return photo.id
+
+        return await DatabaseService.execute(_write)
+
+    photo.id = app.db(_save())
+
+    return photo
+
+
+async def _load_photo(photo_id: int) -> Photo | None:
+    async def _get(session) -> Photo | None:
+        return (await session.execute(select(Photo).where(Photo.id == photo_id))).scalar_one_or_none()
+
+    return await DatabaseService.execute(_get)
+
+
+async def _generate_thumbnails(photo: Photo) -> list[Path]:
+    return ThumbnailService.generate_all(photo)
+
+
 class TestProcessingService:
     @allure.title("Stores an upload as an original and generates the configured alternative")
     def test_upload_stores_original_and_alternative(self, app, tmp_path):
@@ -66,11 +119,7 @@ class TestProcessingService:
 
         output = next(step for step in photo.processing if step["step"] in {"downscale", "transcode"})
         assert output["summary"] == f"{entry['width']} × {entry['height']}"
-        assert output["details"] == {
-            "Target size": "1080 px",
-            "Format": "WEBP",
-            "Quality": "90",
-        }
+        assert output["details"] == {"Target size": "1080 px", "Format": "WEBP", "Quality": "90"}
         assert output["meta"] == {}
 
     @allure.title("Straightens a tilted horizon, records it and keeps the original untouched")
@@ -151,10 +200,186 @@ class TestProcessingService:
 
     @allure.title("Falls back to the original when a photo has no alternatives")
     def test_legacy_photo_main_is_original(self):
-        from trailframe.models.photo import Photo
-
         photo = Photo(path="legacy.jpg", filename="legacy.jpg")
 
         assert photo.main().is_original is True
         assert photo.main().path == "legacy.jpg"
         assert photo.alternative(1080) is None
+
+    @allure.title("Reprocessing swaps the alternatives and removes the previous files")
+    def test_reprocess_regenerates_alternatives(self, app, tmp_path):
+        processed, photos = _folders(tmp_path)
+        photo = _seed_photo(app, tmp_path)
+        previous = {entry["path"] for entry in photo.alternatives}
+
+        app.db(ProcessingService.reprocess(photo.id, alternatives=[320, 640], main_target=320, rescan=False))
+
+        entry = app.db(_load_photo(photo.id))
+        targets = {item["target_size"]: item for item in entry.alternatives}
+
+        assert set(targets) == {320, 640}
+        assert targets[320]["main"] is True
+        assert targets[640]["main"] is False
+        assert targets[640]["width"] == 640
+        assert entry.main().target_size == 320
+        assert all(not (processed / path).exists() for path in previous)
+        assert all((processed / item["path"]).is_file() for item in entry.alternatives)
+        assert (photos / photo.path).is_file()
+
+    @allure.title("Reprocessing without a rescan keeps the pixel-derived analysis")
+    def test_reprocess_without_rescan_keeps_analysis(self, app, tmp_path):
+        photo = _seed_photo(app, tmp_path)
+
+        async def _mark() -> None:
+            async def _write(session) -> None:
+                stored = (await session.execute(select(Photo).where(Photo.id == photo.id))).scalar_one()
+                stored.scanners = ["EXIF", "Object", "PerceptualHash"]
+                stored.objects = {"detections": [{"label": "car"}]}
+                stored.phash = b"12345678"
+                await session.commit()
+
+            await DatabaseService.execute(_write)
+
+        app.db(_mark)
+        app.db(ProcessingService.reprocess(photo.id, rescan=False))
+
+        entry = app.db(_load_photo(photo.id))
+
+        assert entry.scanners == ["EXIF", "Object", "PerceptualHash"]
+        assert entry.objects == {"detections": [{"label": "car"}]}
+        assert entry.phash == b"12345678"
+
+    @allure.title("Rescanning clears the pixel-derived analysis and its scanner markers")
+    def test_reset_analysis(self):
+        photo = Photo(
+            id=1,
+            path="shot.jpg",
+            scanners=["EXIF", "Object", "PerceptualHash", "Rules"],
+            objects={"detections": [{"label": "car"}]},
+            phash=b"12345678",
+        )
+
+        ProcessingService._reset_analysis(photo)
+
+        assert photo.scanners == ["EXIF", "Rules"]
+        assert photo.objects == {}
+        assert photo.phash is None
+
+    @allure.title("A manual angle overrides detection and is recorded as such")
+    def test_reprocess_manual_tilt(self, app, tmp_path):
+        photo = _seed_photo(app, tmp_path)
+
+        app.db(
+            ProcessingService.reprocess(
+                photo.id, alternatives=[1080], main_target=1080, tilt=TiltOverride(angle=5.0), rescan=False
+            )
+        )
+
+        entry = app.db(_load_photo(photo.id))
+        tilt = next(step for step in entry.processing if step["step"] == "tilt")
+
+        assert tilt["details"]["Detection method"] == "manual"
+        assert tilt["details"]["Applied"] == "Yes"
+        assert tilt["summary"] == "+5.00°"
+        assert tilt["meta"]["crop_mode"] == "maximum_valid_rectangle"
+        assert "line" not in tilt["meta"]
+
+    @allure.title("A manual angle can be applied without detection")
+    def test_reprocess_tilt_off(self, app, tmp_path):
+        photo = _seed_photo(app, tmp_path)
+
+        app.db(
+            ProcessingService.reprocess(
+                photo.id, alternatives=[1080], main_target=1080, tilt=TiltOverride(enabled=False), rescan=False
+            )
+        )
+
+        entry = app.db(_load_photo(photo.id))
+
+        assert all(step["step"] != "tilt" for step in entry.processing)
+        assert entry.alternatives[0]["width"] == 1080
+
+    @allure.title("Reprocessing replaces the thumbnails of the main target")
+    def test_reprocess_invalidates_thumbnails(self, app, tmp_path):
+        photo = _seed_photo(app, tmp_path)
+        generated = app.db(_generate_thumbnails(photo))
+
+        assert all(path.is_file() for path in generated)
+
+        app.db(ProcessingService.reprocess(photo.id, alternatives=[1080], main_target=1080, rescan=False))
+
+        assert all(not path.exists() for path in generated)
+
+    @allure.title("A photo cannot be reprocessed twice at the same time")
+    def test_reprocess_rejects_concurrent_requests(self, app, tmp_path):
+        photo = _seed_photo(app, tmp_path)
+        ProcessingService._reprocessing.add(photo.id)
+
+        try:
+            with pytest.raises(ReprocessError) as error:
+                app.db(ProcessingService.reprocess(photo.id, rescan=False))
+        finally:
+            ProcessingService._reprocessing.discard(photo.id)
+
+        assert error.value.status_code == 409
+
+    @allure.title("Reprocessing rejects options that cannot be honoured")
+    def test_reprocess_validates_options(self, app, tmp_path):
+        photo = _seed_photo(app, tmp_path)
+        remote = _seed_photo(app, tmp_path, filename="remote.png", source="Remote")
+
+        with pytest.raises(ReprocessError) as unknown_main:
+            app.db(ProcessingService.reprocess(photo.id, alternatives=[320], main_target=640, rescan=False))
+
+        with pytest.raises(ReprocessError) as bad_size:
+            app.db(ProcessingService.reprocess(photo.id, alternatives=[16], rescan=False))
+
+        with pytest.raises(ReprocessError) as bad_angle:
+            app.db(ProcessingService.reprocess(photo.id, tilt=TiltOverride(angle=90.0), rescan=False))
+
+        with pytest.raises(ReprocessError) as no_original:
+            app.db(ProcessingService.reprocess(remote.id, rescan=False))
+
+        with pytest.raises(ReprocessError) as missing:
+            app.db(ProcessingService.reprocess(999_999, rescan=False))
+
+        assert unknown_main.value.status_code == 400
+        assert bad_size.value.status_code == 400
+        assert bad_angle.value.status_code == 400
+        assert no_original.value.status_code == 422
+        assert missing.value.status_code == 404
+
+
+class TestReprocessAPI:
+    @allure.title("Reprocessing a photo returns its updated detail")
+    def test_reprocess_endpoint(self, app, tmp_path):
+        photo = _seed_photo(app, tmp_path)
+
+        response = app.post(
+            f"/api/photos/{photo.id}/reprocess", json={"alternatives": [640, 320], "main": 320, "rescan": False}
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert {entry["target_size"] for entry in body["alternatives"]} == {320, 640}
+        assert next(entry for entry in body["alternatives"] if entry["main"])["target_size"] == 320
+
+    @allure.title("The reprocess endpoint rejects unknown photos and malformed options")
+    def test_reprocess_endpoint_errors(self, app, tmp_path):
+        photo = _seed_photo(app, tmp_path)
+
+        missing = app.post("/api/photos/999999/reprocess", json={})
+        bad_main = app.post(
+            f"/api/photos/{photo.id}/reprocess", json={"alternatives": [320], "main": 640, "rescan": False}
+        )
+        manual_without_angle = app.post(
+            f"/api/photos/{photo.id}/reprocess", json={"tilt": {"mode": "manual"}, "rescan": False}
+        )
+        unknown_mode = app.post(
+            f"/api/photos/{photo.id}/reprocess", json={"tilt": {"mode": "sideways"}, "rescan": False}
+        )
+
+        assert missing.status_code == 404
+        assert bad_main.status_code == 400
+        assert manual_without_angle.status_code == 400
+        assert unknown_mode.status_code == 400

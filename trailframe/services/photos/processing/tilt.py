@@ -26,6 +26,7 @@ CROP_MODE_MAXIMUM_RECTANGLE = "maximum_valid_rectangle"
 CROP_MODE_NONE = "none"
 
 DEFAULT_METHOD = "hough"
+MANUAL_METHOD = "manual"
 
 
 def _as_bool(value: object) -> bool:
@@ -149,6 +150,19 @@ class TiltDecision:
     estimate: TiltEstimate | None
     applied: bool
     reason: str
+
+
+@dataclass(frozen=True)
+class TiltOverride:
+    """Per-photo override of the configured tilt step.
+
+    ``enabled=False`` disables correction for one run, ``angle`` forces a manual
+    rotation and skips detection, and ``crop_mode`` overrides the configured crop.
+    """
+
+    enabled: bool | None = None
+    angle: float | None = None
+    crop_mode: str | None = None
 
 
 class TiltDetector(Protocol):

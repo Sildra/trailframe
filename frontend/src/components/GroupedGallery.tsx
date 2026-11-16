@@ -35,6 +35,7 @@ interface GroupedGalleryProps {
     keyFn: (group: PhotoGroupSummary) => string;
     selectedPhotoId: number | null;
     favorites?: Set<number>;
+    thumbVersion?: number;
     showAddGroup: boolean;
     deletable: boolean;
     emptyMessage: string;
@@ -49,6 +50,7 @@ export default function GroupedGallery({
     keyFn,
     selectedPhotoId,
     favorites,
+    thumbVersion,
     showAddGroup,
     deletable,
     emptyMessage,
@@ -185,6 +187,7 @@ export default function GroupedGallery({
                         photoIds={group.photo_ids ?? []}
                         selectedPhotoId={selectedPhotoId}
                         favorites={favorites}
+                        version={thumbVersion}
                         onSelect={onSelect}
                     />
                 </AccordionDetails>

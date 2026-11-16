@@ -6,10 +6,11 @@ interface ThumbnailGalleryProps {
     selectedPhotoId: number | null;
     favorites?: Set<number>;
     thumbSize?: number;
+    version?: number;
     onSelect: (photoId: number) => void;
 }
 
-export default function ThumbnailGallery({ photoIds, selectedPhotoId, favorites, thumbSize, onSelect }: ThumbnailGalleryProps) {
+export default function ThumbnailGallery({ photoIds, selectedPhotoId, favorites, thumbSize, version, onSelect }: ThumbnailGalleryProps) {
     return (
         <Box
             sx={{
@@ -25,6 +26,7 @@ export default function ThumbnailGallery({ photoIds, selectedPhotoId, favorites,
                     selected={photoId === selectedPhotoId}
                     favorite={favorites?.has(photoId) ?? false}
                     size={thumbSize}
+                    version={version}
                     onSelect={() => onSelect(photoId)}
                 />
             ))}

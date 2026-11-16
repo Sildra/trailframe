@@ -6,6 +6,8 @@ import type { TiltOverlay } from "../lib/processing";
 
 interface ImageViewerProps {
     photoId: number | null;
+    /** Bumped when the photo's files change, so the image is fetched again. */
+    version?: number;
     hoveredObject?: HoveredObject | null;
     hoveredTilt?: TiltOverlay | null;
 }
@@ -24,7 +26,7 @@ function computeDims(img: HTMLImageElement) {
     return { cw, ch, nw, nh, scale, ox, oy };
 }
 
-export default function ImageViewer({ photoId, hoveredObject, hoveredTilt }: ImageViewerProps) {
+export default function ImageViewer({ photoId, version = 0, hoveredObject, hoveredTilt }: ImageViewerProps) {
     const imgRef = useRef<HTMLImageElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
     const [dims, setDims] = useState<ReturnType<typeof computeDims> | null>(null);
@@ -43,7 +45,7 @@ export default function ImageViewer({ photoId, hoveredObject, hoveredTilt }: Ima
         }
 
         return () => observer.disconnect();
-    }, [recalc, photoId]);
+    }, [recalc, photoId, version]);
 
     return (
         <Box ref={containerRef} sx={{ width: "100%", height: "100%", position: "relative" }}>
@@ -54,9 +56,9 @@ export default function ImageViewer({ photoId, hoveredObject, hoveredTilt }: Ima
             ) : (
                 <>
                     <img
-                        key={photoId}
+                        key={`${photoId}-${version}`}
                         ref={imgRef}
-                        src={`./api/photos/${photoId}/image`}
+                        src={`./api/photos/${photoId}/image?v=${version}`}
                         alt={`Photo ${photoId}`}
                         onLoad={recalc}
                         style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%", objectFit: "contain" }}

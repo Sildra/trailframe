@@ -14,6 +14,7 @@ import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import StarIcon from "@mui/icons-material/Star";
 import StarBorderIcon from "@mui/icons-material/StarBorder";
 import EditIcon from "@mui/icons-material/Edit";
+import TuneIcon from "@mui/icons-material/Tune";
 import { api } from "../api/client";
 import type { components } from "../api/generated/schema";
 import { formatDateTime } from "../lib/format";
@@ -22,6 +23,7 @@ import type { TiltOverlay } from "../lib/processing";
 import MetadataList from "./MetadataList";
 import PhotoLocationMap from "./PhotoLocationMap";
 import ProcessingTree from "./ProcessingTree";
+import ReprocessDialog from "./ReprocessDialog";
 import TagPicker from "./TagPicker";
 import ThumbnailGallery from "./ThumbnailGallery";
 
@@ -46,6 +48,7 @@ interface PhotoMetadataProps {
     onHoverObject?: (object: HoveredObject | null) => void;
     onHoverTilt?: (tilt: TiltOverlay | null) => void;
     onSelectPhoto?: (photoId: number) => void;
+    onPhotoUpdated?: (photo: Photo) => void;
 }
 
 function formatDate(date: string | null | undefined): string {
@@ -64,11 +67,12 @@ function formatValue(value: unknown): string {
     return typeof value === "object" ? JSON.stringify(value) : String(value);
 }
 
-export default function PhotoMetadata({ photoId, favorite = false, onToggleFavorite, onHoverObject, onHoverTilt, onSelectPhoto }: PhotoMetadataProps) {
+export default function PhotoMetadata({ photoId, favorite = false, onToggleFavorite, onHoverObject, onHoverTilt, onSelectPhoto, onPhotoUpdated }: PhotoMetadataProps) {
     const [photo, setPhoto] = useState<Photo | null>(null);
     const [savedTags, setSavedTags] = useState<string[]>([]);
     const [tags, setTags] = useState<string[]>([]);
     const [pickerOpen, setPickerOpen] = useState(false);
+    const [reprocessOpen, setReprocessOpen] = useState(false);
     const [savingTags, setSavingTags] = useState(false);
 
     useEffect(() => {
@@ -207,16 +211,25 @@ export default function PhotoMetadata({ photoId, favorite = false, onToggleFavor
                     </AccordionDetails>
                 </Accordion>
             )}
-            {(photo.processing ?? []).length > 0 && (
-                <Accordion disableGutters>
-                    <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={{ fontWeight: 600, fontSize: 14 }}>
-                        Processing
-                    </AccordionSummary>
-                    <AccordionDetails>
-                        <ProcessingTree entries={photo.processing} onHoverTilt={onHoverTilt} />
-                    </AccordionDetails>
-                </Accordion>
-            )}
+            <Accordion disableGutters>
+                <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={{ fontWeight: 600, fontSize: 14 }}>
+                    Processing
+                </AccordionSummary>
+                <AccordionDetails>
+                    <Box sx={{ display: "flex", justifyContent: "flex-end", mb: 1 }}>
+                        <Button
+                            size="small"
+                            startIcon={<TuneIcon />}
+                            disabled={photo.source === "Remote"}
+                            title={photo.source === "Remote" ? "Remote photos have no original to reprocess" : undefined}
+                            onClick={() => setReprocessOpen(true)}
+                        >
+                            Adjust processing
+                        </Button>
+                    </Box>
+                    <ProcessingTree entries={photo.processing} onHoverTilt={onHoverTilt} />
+                </AccordionDetails>
+            </Accordion>
             <Accordion disableGutters>
                 <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={{ fontWeight: 600, fontSize: 14 }}>
                     Tags
@@ -327,6 +340,17 @@ export default function PhotoMetadata({ photoId, favorite = false, onToggleFavor
                     setTags(paths);
                 }}
             />
+            {reprocessOpen && photo.id === photoId && (
+                <ReprocessDialog
+                    photo={photo}
+                    onClose={() => setReprocessOpen(false)}
+                    onUpdated={(updated) => {
+                        setPhoto(updated);
+                        setReprocessOpen(false);
+                        onPhotoUpdated?.(updated);
+                    }}
+                />
+            )}
         </Box>
     );
 }

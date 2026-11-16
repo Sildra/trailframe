@@ -5,7 +5,6 @@
 # Core-features
 
 * Add features to processing service
-  * Tilt enhancement
   * Others
 * Add IA-class scanners (need a pipeline that process by IA instead of by Photo)
   * Scenic
@@ -16,12 +15,7 @@
 
 # Frontend
 
-* Add Tool to edit and correct the processing algorithms applied to photo
-  * Open from the photo metadata Processing accordion
-  * Outputs: alternative sizes and main target
-  * Horizon: automatic, off or manual angle, with crop mode
-  * Re-run analysis (objects, perceptual hash, thumbnails)
-  * `POST /api/photos/{id}/reprocess`
+* None
 
 # Not planned but possible
 

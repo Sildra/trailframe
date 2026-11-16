@@ -93,11 +93,22 @@ class ThumbnailService(Service):
         return cls._path_for(photo, target)
 
     @classmethod
+    def delete_target(cls, photo: Photo, target: int | None) -> None:
+        """Remove the thumbnails generated for one main target."""
+        for size in cls._sizes:
+            cls._path(photo, target, size).unlink(missing_ok=True)
+
+    @classmethod
     def _path_for(cls, photo: Photo, size: int) -> Path:
+        main: PhotoFile = photo.main()
+
+        return cls._path(photo, main.target_size, size)
+
+    @classmethod
+    def _path(cls, photo: Photo, target: int | None, size: int) -> Path:
         # Keyed by the original path, so thumbnails survive reprocessing of the
         # alternatives but invalidate when the main target changes.
         digest = hashlib.sha1(photo.path.encode("utf-8")).hexdigest()
-        main: PhotoFile = photo.main()
-        target = main.target_size if main.target_size is not None else "original"
+        key = target if target is not None else "original"
 
-        return cls._folder / digest[:2] / f"{digest}_{target}_{size}.webp"
+        return cls._folder / digest[:2] / f"{digest}_{key}_{size}.webp"

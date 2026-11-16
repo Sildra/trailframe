@@ -52,6 +52,7 @@ export default function GalleryPage() {
     const [tagTree, setTagTree] = useState<TagNode[]>([]);
     const [tagSelection, setTagSelection] = useState<string[]>([]);
     const [tagPhotos, setTagPhotos] = useState<{ key: string; ids: number[] }>({ key: "", ids: [] });
+    const [imageVersion, setImageVersion] = useState(0);
 
     useEffect(() => {
         let cancelled = false;
@@ -418,6 +419,7 @@ export default function GalleryPage() {
                         keyFn={duplicateKey}
                         selectedPhotoId={selectedPhotoId}
                         favorites={favoriteIds}
+                        thumbVersion={imageVersion}
                         showAddGroup={false}
                         deletable={false}
                         emptyMessage="No duplicates found."
@@ -434,6 +436,7 @@ export default function GalleryPage() {
                         keyFn={locationIssueKey}
                         selectedPhotoId={selectedPhotoId}
                         favorites={favoriteIds}
+                        thumbVersion={imageVersion}
                         showAddGroup={false}
                         deletable={false}
                         emptyMessage="No location issues found."
@@ -463,6 +466,7 @@ export default function GalleryPage() {
                                     photoIds={tagPhotoIds}
                                     selectedPhotoId={selectedPhotoId}
                                     favorites={favoriteIds}
+                                    version={imageVersion}
                                     onSelect={setSelectedPhotoId}
                                 />
                             </Box>
@@ -477,6 +481,7 @@ export default function GalleryPage() {
                         keyFn={groupKey}
                         selectedPhotoId={selectedPhotoId}
                         favorites={favoriteIds}
+                        thumbVersion={imageVersion}
                         showAddGroup
                         deletable
                         emptyMessage="No groups yet."
@@ -486,7 +491,7 @@ export default function GalleryPage() {
                     />
                 );
         }
-    }, [menu, groups, duplicates, duplicatesCollapsed, locationIssues, collapsed, locationIssuesCollapsed, selectedPhotoId, favoriteIds, toggleCollapsed, toggleDuplicates, toggleLocationIssues, tagTree, tagSelection, tagPhotoIds, toggleTag]);
+    }, [menu, groups, duplicates, duplicatesCollapsed, locationIssues, collapsed, locationIssuesCollapsed, selectedPhotoId, favoriteIds, imageVersion, toggleCollapsed, toggleDuplicates, toggleLocationIssues, tagTree, tagSelection, tagPhotoIds, toggleTag]);
 
     return (
         <Box sx={{ flex: 1, minHeight: 0, display: "flex" }}>
@@ -566,6 +571,7 @@ export default function GalleryPage() {
             <Box sx={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
                 <ImageViewer
                     photoId={selectedPhotoId}
+                    version={imageVersion}
                     hoveredObject={hoveredObject}
                     hoveredTilt={hoveredTilt?.photoId === selectedPhotoId ? hoveredTilt.overlay : null}
                 />
@@ -623,6 +629,7 @@ export default function GalleryPage() {
                                     )
                                 }
                                 onSelectPhoto={setSelectedPhotoId}
+                                onPhotoUpdated={() => setImageVersion((current) => current + 1)}
                             />
                         )}
                     </Box>
