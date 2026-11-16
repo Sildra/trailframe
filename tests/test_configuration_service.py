@@ -3,7 +3,7 @@ from __future__ import annotations
 import allure
 import pytest
 
-from trailframe.services.core.configuration_service import ConfigurationService, Node
+from trailframe.services.core.configuration_service import ConfigurationError, ConfigurationService, Node
 from trailframe.services.pipelines.pipeline_service import PipelineService
 
 
@@ -168,7 +168,23 @@ class TestConfigurationService:
         config_file = tmp_path / "config.yaml"
         config_file.write_text("- a\n- b\n", encoding="utf-8")
         ConfigurationService.configure(config_file)
-        with pytest.raises(TypeError):
+        with pytest.raises(ConfigurationError):
+            ConfigurationService.load()
+
+    @allure.title("Rejects a binary config file")
+    def test_load_rejects_binary_file(self, tmp_path):
+        config_file = tmp_path / "gallery.db"
+        config_file.write_bytes(b"SQLite format 3\x00\x10\x00\x02\x02" + bytes(range(256)))
+        ConfigurationService.configure(config_file)
+        with pytest.raises(ConfigurationError, match="gallery.db"):
+            ConfigurationService.load()
+
+    @allure.title("Rejects malformed YAML")
+    def test_load_rejects_malformed_yaml(self, tmp_path):
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("general: [unclosed\n", encoding="utf-8")
+        ConfigurationService.configure(config_file)
+        with pytest.raises(ConfigurationError):
             ConfigurationService.load()
 
     @allure.title("Reconfiguring resets the configuration root")

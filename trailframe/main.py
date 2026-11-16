@@ -22,7 +22,7 @@ from trailframe.api.rules import router as rules_router
 from trailframe.api.statistics import router as statistics_router
 from trailframe.api.tags import router as tags_router
 from trailframe.api.tiles import router as tiles_router
-from trailframe.services.core.configuration_service import ConfigurationService
+from trailframe.services.core.configuration_service import ConfigurationError, ConfigurationService
 from trailframe.services.service_registry import ServiceRegistry
 from trailframe.version import app_version
 
@@ -126,7 +126,14 @@ def create_app(args: argparse.Namespace) -> FastAPI:
 
 def main() -> None:
     args = parse_arguments()
-    app = create_app(args)
+
+    from trailframe.log import get_logger
+
+    try:
+        app = create_app(args)
+    except ConfigurationError as error:
+        get_logger().error("%s", error)
+        raise SystemExit(1) from None
 
     if args.openapi:
         import json
@@ -161,8 +168,6 @@ def main() -> None:
     config.load_app()
     server = uvicorn.Server(config)
     events._server = server
-
-    from trailframe.log import get_logger
 
     get_logger().info("Gallery:   http://localhost:%s", config.port)
     get_logger().info("Swagger:   http://localhost:%s/docs", config.port)

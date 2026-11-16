@@ -8,6 +8,10 @@ import yaml
 _UNDEFINED = object()
 
 
+class ConfigurationError(Exception):
+    """Raised when the configuration file cannot be read or parsed."""
+
+
 class Node:
     def __init__(
         self, name: str, description: str | None = None, value: Any = _UNDEFINED, default_value: Any = _UNDEFINED
@@ -221,11 +225,14 @@ class ConfigurationService:
         if not cls._file.exists():
             return
 
-        with cls._file.open("r", encoding="utf-8") as file:
-            data = yaml.safe_load(file) or {}
+        try:
+            with cls._file.open("r", encoding="utf-8") as file:
+                data = yaml.safe_load(file) or {}
+        except (OSError, UnicodeDecodeError, yaml.YAMLError) as error:
+            raise ConfigurationError(f"Cannot read configuration file '{cls._file}': {error}") from error
 
         if not isinstance(data, dict):
-            raise TypeError("Configuration root must be a mapping")
+            raise ConfigurationError(f"Configuration file '{cls._file}' must contain a mapping at the root")
 
         for name, value in data.items():
             cls._root.children[name] = Node.from_dict(name, value)
