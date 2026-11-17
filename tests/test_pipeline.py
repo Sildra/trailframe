@@ -26,6 +26,15 @@ class TestPipelineService:
         assert "CreationPipeline" in names
         assert "BasicPipeline" in names
 
+        creation = PipelineService.get_pipeline("CreationPipeline")
+        assert [scanner.name for scanner in creation._scanners] == [
+            "File",
+            "EXIF",
+            "Processing",
+            "Thumbnail",
+            "Database",
+        ]
+
     @allure.title("Routes force flags to the creation pipeline")
     def test_force_flag_marker_acceptance(self):
         assert PipelineService._pipelines[0].accepts(ForceFlag(["File"])) is True
@@ -39,6 +48,7 @@ class TestScannerRegistry:
         assert names == {
             "File",
             "EXIF",
+            "Processing",
             "Thumbnail",
             "Activity",
             "Location",
@@ -56,9 +66,10 @@ class TestScannerRegistry:
         assert isinstance(scanner, ObjectScanner)
         assert create_scanner("Nope") is None
 
-    @allure.title("Flags file and database scanners as non-remote")
+    @allure.title("Flags file, processing and database scanners as non-remote")
     def test_file_and_database_are_not_remote(self):
         assert get_scanner_definition("File").can_be_remote is False
+        assert get_scanner_definition("Processing").can_be_remote is False
         assert get_scanner_definition("Database").can_be_remote is False
 
     @allure.title("Flags image-processing scanners as remote-capable")

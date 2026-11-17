@@ -33,6 +33,10 @@ class PipelineService(Service):
         },
     }
 
+    # Scanners that decode `item.image`; `Processing` is injected before the first
+    # one so they analyse the processed alternative instead of the original.
+    PIXEL_CONSUMERS: ClassVar[set[str]] = {"Thumbnail", "Object", "PerceptualHash"}
+
     @classmethod
     def add_pipelines_payload(cls, payload: dict[str, Any]) -> None:
         """Assemble the editable pipelines section of a configuration payload for the frontend."""
@@ -122,10 +126,11 @@ class PipelineService(Service):
     @classmethod
     def _build_pipeline(cls, entry: dict, index: int) -> Pipeline:
         scanners: list[Scanner] = []
-        internal = {"File", "Database"}
+        internal = {"File", "Processing", "Database"}
         scanner_names = [name for name in entry["scanners"] if name not in internal]
+        local_first = index == 0 and not entry.get("remote")
 
-        if index == 0 and not entry.get("remote") and (file_scanner := create_scanner("File")):
+        if local_first and (file_scanner := create_scanner("File")):
             scanners.append(file_scanner)
 
         if entry.get("remote"):
@@ -134,6 +139,16 @@ class PipelineService(Service):
             for name in scanner_names:
                 if scanner := create_scanner(name):
                     scanners.append(scanner)
+
+            if local_first and (processing := create_scanner("Processing")):
+                position = len(scanners)
+
+                for offset, scanner in enumerate(scanners):
+                    if scanner.name in cls.PIXEL_CONSUMERS:
+                        position = offset
+                        break
+
+                scanners.insert(position, processing)
 
         if database := create_scanner("Database"):
             scanners.append(database)

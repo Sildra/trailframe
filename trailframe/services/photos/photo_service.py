@@ -41,7 +41,7 @@ class PhotoService(Service):
     """Routes photo file operations to the storage that owns each file.
 
     Originals belong to the provider matching `Photo.source`; processed
-    alternatives always live in the folder owned by `FolderService`.
+    alternatives always live in the folder owned by `ProcessingService`.
     """
 
     _requires = ("DatabaseService",)
@@ -49,7 +49,7 @@ class PhotoService(Service):
 
     @classmethod
     def _configure(cls, config: Node) -> None:
-        cls.register(ProcessingService)
+        cls.register(FolderService)
         cls.register(RemoteProvider)
 
     @classmethod
@@ -58,7 +58,7 @@ class PhotoService(Service):
 
     @classmethod
     def provider(cls, photo: Photo) -> type[PhotoProvider]:
-        return cls._providers.get(photo.source or "", ProcessingService)
+        return cls._providers.get(photo.source or "", FolderService)
 
     @classmethod
     def resolve(cls, photo: Photo, file: PhotoFile | None = None) -> Path:
@@ -69,11 +69,11 @@ class PhotoService(Service):
             provider = cls.provider(photo)
             return provider.resolve(file.path)
 
-        return FolderService.resolve(file.path)
+        return ProcessingService.resolve(file.path)
 
     @classmethod
     def delete(cls, photo: Photo) -> None:
         """Discard processed files and move the original to the trash."""
-        FolderService.delete_alternatives(photo)
+        ProcessingService.delete_alternatives(photo)
         provider = cls.provider(photo)
         provider.delete(provider.resolve(photo.path))

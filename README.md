@@ -38,7 +38,7 @@ A self-hosted photo gallery for people who move: photos and GPS activities (Garm
 
 ## Enrichment pipelines
 
-Uploaded photos are archived untouched in `photos/`, then preprocessed into one or more `processed/` alternatives (WebP). The pipelines below analyse the main processed file; EXIF is always read from the original.
+Uploaded photos are archived untouched in `photos/` and pushed through the creation pipeline, where the Processing scanner writes one or more `processed/` alternatives (WebP). The remaining pipelines analyse the main processed file; EXIF is always read from the original.
 
 Photos are processed by pluggable scanners:
 
@@ -46,6 +46,7 @@ Photos are processed by pluggable scanners:
 | --- | --- |
 | File | Registers the file (name, size) |
 | EXIF | Extracts camera metadata, dates, and GPS position |
+| Processing | Encodes the processed alternatives used for display and analysis |
 | Thumbnail | Generates all configured thumbnail sizes |
 | Activity | Links photos to imported activities |
 | Brisque | Scores image quality |

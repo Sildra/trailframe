@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from datetime import datetime
 from io import BytesIO
 
@@ -171,7 +172,7 @@ class TestPhotoFileEndpoints:
 
         assert app.get("/api/photos/count").json() == 0
 
-    @allure.title("Uploads a photo, stores the original and returns its alternatives")
+    @allure.title("Uploads a photo through the folder service and processes it in the pipeline")
     def test_upload_photo(self, app, tmp_path):
         buffer = BytesIO()
         Image.new("RGB", (20, 20)).save(buffer, format="PNG")
@@ -181,12 +182,17 @@ class TestPhotoFileEndpoints:
         body = response.json()
         assert body["filename"] == "up.png"
         assert body["path"] == "up.png"
-        assert body["alternatives"]
+        assert body["alternatives"] == []
 
         original = _photos_folder(tmp_path) / "up.png"
-        alternative = _processed_folder(tmp_path) / body["alternatives"][0]["path"]
-
         assert original.is_file()
+
+        alternative = _processed_folder(tmp_path) / "up_1080.webp"
+        deadline = time.monotonic() + 15
+
+        while not alternative.is_file() and time.monotonic() < deadline:
+            time.sleep(0.05)
+
         assert alternative.is_file()
 
 

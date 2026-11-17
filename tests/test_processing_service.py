@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import time
 from io import BytesIO
 from pathlib import Path
 
@@ -11,6 +12,7 @@ from sqlalchemy import select
 
 from trailframe.models.photo import Photo
 from trailframe.services.core.database_service import DatabaseService
+from trailframe.services.photos.folder_service import FolderService
 from trailframe.services.photos.processing.tilt import TiltOverride, TiltSettings
 from trailframe.services.photos.processing_service import ProcessingService, ReprocessError
 from trailframe.services.photos.thumbnail_service import ThumbnailService
@@ -94,20 +96,79 @@ async def _load_photo(photo_id: int) -> Photo | None:
     return await DatabaseService.execute(_get)
 
 
+async def _find_photo(path: str) -> Photo | None:
+    async def _get(session) -> Photo | None:
+        return (await session.execute(select(Photo).where(Photo.path == path))).scalar_one_or_none()
+
+    return await DatabaseService.execute(_get)
+
+
+def _wait_for(predicate, timeout: float = 15.0, interval: float = 0.05):
+    """Poll a condition while the pipeline thread processes the queued photos."""
+    deadline = time.monotonic() + timeout
+
+    while time.monotonic() < deadline:
+        result = predicate()
+
+        if result:
+            return result
+
+        time.sleep(interval)
+
+    raise AssertionError("timed out waiting for the pipeline")
+
+
+def _stored_photo(tmp_path, filename: str, content: bytes) -> Photo:
+    """Write an original into the photos folder and return its unsaved Photo row."""
+    _, photos = _folders(tmp_path)
+    photos.mkdir(parents=True, exist_ok=True)
+    original = photos / filename
+    original.write_bytes(content)
+
+    return Photo(path=filename, filename=filename, file_size=original.stat().st_size, source="File")
+
+
 async def _generate_thumbnails(photo: Photo) -> list[Path]:
     return ThumbnailService.generate_all(photo)
 
 
+class TestProcessedStorage:
+    @allure.title("Deletes every processed file of a photo, tolerating missing ones")
+    def test_delete_alternatives(self, tmp_path):
+        folder_old = ProcessingService._folder
+        ProcessingService._folder = tmp_path / "processed"
+        ProcessingService._folder.mkdir(parents=True)
+        try:
+            existing = ProcessingService._folder / "a_1080.webp"
+            existing.write_bytes(b"x")
+            photo = Photo(
+                path="a.jpg",
+                alternatives=[
+                    {"target_size": 1080, "path": "a_1080.webp", "main": True},
+                    {"target_size": 400, "path": "a_400.webp"},
+                ],
+            )
+
+            ProcessingService.delete_alternatives(photo)
+
+            assert not existing.exists()
+        finally:
+            ProcessingService._folder = folder_old
+
+    @allure.title("Delete is a no-op when the processed file is missing")
+    def test_delete_missing_file(self, tmp_path):
+        ProcessingService.delete_file(tmp_path / "gone.webp")
+
+
 class TestProcessingService:
-    @allure.title("Stores an upload as an original and generates the configured alternative")
-    def test_upload_stores_original_and_alternative(self, app, tmp_path):
-        processed, photos = _folders(tmp_path)
+    @allure.title("Generates the configured alternative for an original")
+    def test_preprocess_generates_alternative(self, app, tmp_path):
+        processed, _ = _folders(tmp_path)
+        photo = _stored_photo(tmp_path, "shot.png", _image())
 
-        photo = app.db(ProcessingService.upload("shot.png", Upload(_image())))
+        changed = app.db(ProcessingService.preprocess(photo))
 
-        assert (photos / "shot.png").is_file()
-        assert photo.path == "shot.png"
-        assert photo.filename == "shot.png"
+        assert changed is True
         assert len(photo.alternatives) == 1
 
         entry = photo.alternatives[0]
@@ -123,10 +184,11 @@ class TestProcessingService:
         assert output["meta"] == {}
 
     @allure.title("Straightens a tilted horizon, records it and keeps the original untouched")
-    def test_upload_corrects_tilt(self, app, tmp_path):
+    def test_preprocess_corrects_tilt(self, app, tmp_path):
         processed, photos = _folders(tmp_path)
+        photo = _stored_photo(tmp_path, "tilted.png", _tilted_image())
 
-        photo = app.db(ProcessingService.upload("tilted.png", Upload(_tilted_image())))
+        app.db(ProcessingService.preprocess(photo))
         entry = photo.alternatives[0]
 
         assert entry["width"] < 900
@@ -157,26 +219,66 @@ class TestProcessingService:
     def test_tilt_disabled(self, app, tmp_path):
         previous = ProcessingService._tilt
         ProcessingService._tilt = TiltSettings(enabled=False)
+        photo = _stored_photo(tmp_path, "flat.png", _tilted_image())
 
         try:
-            photo = app.db(ProcessingService.upload("flat.png", Upload(_tilted_image())))
+            app.db(ProcessingService.preprocess(photo))
         finally:
             ProcessingService._tilt = previous
 
         assert photo.alternatives[0]["width"] == 900
         assert all(step["step"] != "tilt" for step in photo.processing)
 
+    @allure.title("Preprocessing leaves remote photos and existing alternatives alone")
+    def test_preprocess_is_a_noop_when_not_applicable(self, app, tmp_path):
+        alternatives = [{"target_size": 1080, "path": "a_1080.webp", "main": True}]
+
+        assert app.db(ProcessingService.preprocess(Photo(path="a.jpg", source="Remote"))) is False
+        assert app.db(ProcessingService.preprocess(Photo(path="a.jpg", alternatives=alternatives))) is False
+
+    @allure.title("The processing scanner gates remote photos and existing alternatives")
+    def test_processing_scanner_gating(self):
+        from trailframe.services.scanners.processing_scanner import ProcessingScanner
+
+        scanner = ProcessingScanner()
+
+        assert scanner.accept_(Photo(path="a.jpg", source="File")) is True
+        assert scanner.accept_(Photo(path="a.jpg", source="Remote")) is False
+        assert scanner.accept_(Photo(path="a.jpg", alternatives=[{"path": "a_1080.webp"}])) is False
+
+    @allure.title("An upload is stored by the folder service and processed by the pipeline")
+    def test_upload_flows_through_pipeline(self, app, tmp_path):
+        processed, photos = _folders(tmp_path)
+
+        path = app.db(FolderService.upload("shot.png", Upload(_image())))
+
+        assert path == photos / "shot.png"
+        assert (photos / "shot.png").is_file()
+
+        def _processed_photo():
+            photo = app.db(_find_photo("shot.png"))
+            return photo if photo is not None and photo.alternatives else None
+
+        photo = _wait_for(_processed_photo)
+        entry = photo.alternatives[0]
+
+        assert entry["target_size"] == 1080
+        assert entry["main"] is True
+        assert (processed / entry["path"]).is_file()
+        assert photo.main().path == entry["path"]
+
     @allure.title("Keeps earlier originals and gives a repeated upload a unique name")
     def test_upload_keeps_existing_originals(self, app, tmp_path):
         processed, photos = _folders(tmp_path)
 
-        first = app.db(ProcessingService.upload("shot.png", Upload(_image())))
-        second = app.db(ProcessingService.upload("shot.png", Upload(_image())))
+        first = app.db(FolderService.upload("shot.png", Upload(_image())))
+        second = app.db(FolderService.upload("shot.png", Upload(_image())))
 
-        assert first.path == "shot.png"
-        assert second.path == "shot_1.png"
+        assert first.name == "shot.png"
+        assert second.name == "shot_1.png"
         assert len(list(photos.glob("shot*.png"))) == 2
-        assert len(list(processed.glob("shot*.webp"))) == 2
+
+        _wait_for(lambda: len(list(processed.glob("shot*.webp"))) == 2)
 
     @allure.title("Imports an original left behind in the photos folder")
     def test_scan_processes_leftover_originals(self, app, tmp_path):
@@ -184,19 +286,35 @@ class TestProcessingService:
         photos.mkdir(parents=True, exist_ok=True)
         (photos / "left.png").write_bytes(_image())
 
-        app.db(ProcessingService.scan())
+        app.db(FolderService.scan())
 
-        assert (photos / "left.png").is_file()
-        assert len(list(processed.glob("left*.webp"))) == 1
+        _wait_for(lambda: len(list(processed.glob("left*.webp"))) == 1)
+        assert _wait_for(lambda: app.db(_find_photo("left.png"))) is not None
 
     @allure.title("Does not import an original that was already processed")
     def test_scan_skips_already_processed_originals(self, app, tmp_path):
         processed, _ = _folders(tmp_path)
 
-        app.db(ProcessingService.upload("shot.png", Upload(_image())))
-        app.db(ProcessingService.scan())
+        app.db(FolderService.upload("shot.png", Upload(_image())))
+        _wait_for(lambda: len(list(processed.glob("shot*.webp"))) == 1)
+
+        app.db(FolderService.scan())
+        time.sleep(0.3)
 
         assert len(list(processed.glob("shot*.webp"))) == 1
+
+        async def _count() -> int:
+            from sqlalchemy import func
+
+            async def _query(session) -> int:
+                result = await session.execute(
+                    select(func.count()).select_from(Photo).where(Photo.path == "shot.png")
+                )
+                return result.scalar_one()
+
+            return await DatabaseService.execute(_query)
+
+        assert app.db(_count()) == 1
 
     @allure.title("Falls back to the original when a photo has no alternatives")
     def test_legacy_photo_main_is_original(self):

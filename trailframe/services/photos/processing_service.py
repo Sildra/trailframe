@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-import asyncio
 import logging
 import math
-import shutil
 from dataclasses import replace
 from pathlib import Path
 from typing import ClassVar
@@ -65,49 +63,32 @@ _REASON_TEXT = {
 
 
 class ProcessingService(Service):
-    """Original storage and preprocessing.
+    """Photo preprocessing: decoded originals are re-encoded into alternatives.
 
-    Uploaded files are stored in `photos_folder` and kept as the archive. Each
-    original is decoded once and re-encoded into the configured alternatives in
-    the processed folder (WebP by default), then handed to the pipeline. The
-    alternatives carry only pixels: EXIF stays a property of the original, and
-    orientation is baked into the output.
+    The originals live in `photos_folder` and are owned by `FolderService`; this
+    service reads them and writes the configured alternatives into the processed
+    folder (WebP by default). The alternatives carry only pixels: EXIF stays a
+    property of the original, and orientation is baked into the output.
     """
-
-    SOURCE: ClassVar[str] = "File"
 
     _reconfig_safe = False
     _requires = ("ThreadPoolService", "FolderService", "PipelineService")
-    _interval = 10
 
-    _photos_folder: Path | None = None
-    _trash_folder: Path | None = None
+    _folder: Path | None = None
     _alternatives: ClassVar[list[int]] = []
     _main: int | None = None
     _format: ClassVar[str] = "webp"
     _quality = 90
     _tilt: ClassVar[TiltSettings] = TiltSettings()
-    _failsafe = False
-    _task: asyncio.Task | None = None
-    _running = False
-    _lock: ClassVar[asyncio.Lock | None] = None
-    _seen: ClassVar[set[str]] = set()
     _reprocessing: ClassVar[set[int]] = set()
 
     @classmethod
     def _configure(cls, config: Node) -> None:
         general_node = config.get_node("general", "General parameters")
-        cls._photos_folder = Path(
-            general_node.get_path_value("photos_folder", "Folder where uploaded photos are stored", "photos")
+        cls._folder = Path(
+            general_node.get_path_value("processed_folder", "Folder where processed photos are stored", "processed")
         )
-        cls._photos_folder.mkdir(parents=True, exist_ok=True)
-        cls._trash_folder = Path(
-            general_node.get_path_value("trash_folder", "Folder where deleted photos are moved", "trash")
-        )
-        cls._trash_folder.mkdir(parents=True, exist_ok=True)
-        cls._failsafe = general_node.get_path_value(
-            "failsafe", "Start without scanning or watching the photos folder", False
-        )
+        cls._folder.mkdir(parents=True, exist_ok=True)
 
         processing_node = config.get_node("processing", "Photo preprocessing")
         alternatives = processing_node.get_path_value(
@@ -127,125 +108,84 @@ class ProcessingService(Service):
         if cls._tilt.enabled and get_detector(cls._tilt.method) is None:
             cls._log(f"unknown tilt detector '{cls._tilt.method}', horizon correction is disabled", logging.WARNING)
 
+    # --- processed storage -------------------------------------------------
+
     @classmethod
-    async def _start(cls) -> None:
-        if cls._photos_folder is None:
+    def get_folder(cls) -> Path:
+        """The processed folder, where alternatives are written."""
+        if cls._folder is None:
             raise RuntimeError("ProcessingService is not configured")
 
-        if cls._failsafe:
-            cls._log("failsafe: skipping photos scan and watch")
-            return
-
-        cls._running = True
-        cls._task = asyncio.create_task(cls._watch())
-
-    @classmethod
-    async def _stop(cls) -> None:
-        cls._running = False
-
-        if cls._task:
-            cls._task.cancel()
-            cls._task = None
-
-    # --- original storage -------------------------------------------------
-
-    @classmethod
-    def get_photos_folder(cls) -> Path:
-        if cls._photos_folder is None:
-            raise RuntimeError("ProcessingService is not configured")
-
-        return cls._photos_folder
+        return cls._folder
 
     @classmethod
     def resolve(cls, stored: str | Path) -> Path:
-        """Absolute location of an original stored relative to the photos folder."""
+        """Absolute location of an alternative stored relative to the processed folder."""
         path = Path(stored)
 
-        if path.is_absolute() or cls._photos_folder is None:
+        if path.is_absolute() or cls._folder is None:
             return path
 
-        return cls._photos_folder / path
+        return cls._folder / path
 
     @classmethod
-    def canonical(cls, path: str | Path) -> str:
-        """Storage form of an original: posix, relative to the photos folder."""
-        p = Path(path)
-
-        if cls._photos_folder is None:
-            return p.as_posix()
-
+    def delete_file(cls, path: Path) -> None:
         try:
-            return p.resolve().relative_to(cls._photos_folder.resolve()).as_posix()
-        except ValueError:
-            return p.as_posix()
+            path.unlink(missing_ok=True)
+        except OSError as exception:
+            cls._log(f"failed to delete {path}: {exception}", logging.WARNING)
 
     @classmethod
-    def delete(cls, path: Path) -> None:
-        """Move an original to the trash folder."""
-        if not path.is_file() or cls._trash_folder is None:
-            return
+    def _unique_path(cls, folder: Path, filename: str) -> Path:
+        name = Path(filename).name or "photo"
+        candidate = folder / name
 
-        destination = cls._trash_folder / path.name
+        if not candidate.exists():
+            return candidate
 
-        if destination.exists():
-            destination = cls._trash_folder / f"{path.stem}_{path.stat().st_size}{path.suffix}"
+        stem = candidate.stem
+        suffix = candidate.suffix
+        index = 1
 
-        shutil.move(str(path), str(destination))
+        while True:
+            candidate = folder / f"{stem}_{index}{suffix}"
 
-    # --- upload and processing -------------------------------------------
+            if not candidate.exists():
+                return candidate
 
-    @classmethod
-    async def upload(cls, filename: str, content) -> Photo:
-        """Store an upload in the photos folder, then preprocess it."""
-        if cls._photos_folder is None:
-            raise RuntimeError("ProcessingService is not configured")
-
-        async with cls._get_lock():
-            destination = cls._unique_path(cls._photos_folder, Path(filename or "photo").name)
-            temporary = destination.with_name(destination.name + ".part")
-
-            with temporary.open("wb") as output:
-                while chunk := await content.read(1024 * 1024):
-                    output.write(chunk)
-
-            temporary.replace(destination)
-
-        photo = await cls.process(destination)
-
-        if photo is None:
-            photo = await cls._find(cls.canonical(destination))
-
-        if photo is None:
-            raise RuntimeError(f"Failed to process original {destination}")
-
-        return photo
+            index += 1
 
     @classmethod
-    async def process(cls, original: Path) -> Photo | None:
-        """Preprocess one original and queue it for scanning.
+    def delete_alternatives(cls, photo: Photo) -> None:
+        """Remove every processed file of a photo; the original is untouched."""
+        for entry in photo.alternatives or []:
+            stored = entry.get("path") if isinstance(entry, dict) else None
 
-        Returns None when the original is already known, so a leftover original is
-        not imported twice.
+            if stored:
+                cls.delete_file(cls.resolve(stored))
+
+    # --- preprocessing ----------------------------------------------------
+
+    @classmethod
+    async def preprocess(cls, photo: Photo) -> bool:
+        """Generate the alternatives of an original photo.
+
+        Called by the `Processing` pipeline scanner after the metadata scanners
+        and before the pixel consumers. Existing alternatives are left alone, so
+        the scanner is a cheap no-op on re-scans.
         """
-        canonical = cls.canonical(original)
-        cls._seen.add(canonical)
+        if photo.source == "Remote" or photo.alternatives or not cls._alternatives:
+            return False
 
-        if await cls._find(canonical) is not None:
-            return None
+        original = FolderService.resolve(photo.path)
 
-        photo = Photo(path=canonical, filename=original.name, file_size=_file_size(original), source=cls.SOURCE)
+        if not original.is_file():
+            cls._log(f"original not found for {photo.path}", logging.WARNING)
+            return False
 
-        try:
-            photo.alternatives, photo.processing = await cls._generate(original)
-        except Exception:
-            cls._seen.discard(canonical)
-            raise
+        photo.alternatives, photo.processing = await cls._generate(original)
 
-        from trailframe.services.pipelines.pipeline_service import PipelineService
-
-        await PipelineService.next(photo)
-
-        return photo
+        return True
 
     @classmethod
     async def reprocess(
@@ -290,7 +230,7 @@ class ProcessingService(Service):
         if photo.source == "Remote":
             raise ReprocessError("Remote photos have no original to reprocess", 422)
 
-        original = cls.resolve(photo.path)
+        original = FolderService.resolve(photo.path)
 
         if not original.is_file():
             raise ReprocessError("The original file is not available", 422)
@@ -322,7 +262,7 @@ class ProcessingService(Service):
             await DatabaseService.execute(_save)
         except Exception:
             for entry in entries:
-                FolderService.delete_file(FolderService.resolve(entry["path"]))
+                cls.delete_file(cls.resolve(entry["path"]))
 
             raise
 
@@ -332,7 +272,7 @@ class ProcessingService(Service):
             stored_path = entry.get("path") if isinstance(entry, dict) else None
 
             if stored_path and stored_path not in new_paths:
-                FolderService.delete_file(FolderService.resolve(stored_path))
+                cls.delete_file(cls.resolve(stored_path))
 
         from trailframe.services.photos.thumbnail_service import ThumbnailService
 
@@ -452,7 +392,7 @@ class ProcessingService(Service):
         """
         entries: list[dict] = []
         steps: list[dict] = []
-        folder = FolderService.get_folder()
+        folder = cls.get_folder()
         fmt = _FORMAT_ALIASES.get(output_format, output_format)
         suffix = ".jpg" if fmt == "jpeg" else f".{fmt}"
         settings = tilt
@@ -584,75 +524,6 @@ class ProcessingService(Service):
 
         return {"step": "tilt", "summary": _format_angle(estimate.angle), "details": details, "meta": meta}
 
-    @classmethod
-    async def _find(cls, canonical: str) -> Photo | None:
-        async def _lookup(session) -> Photo | None:
-            result = await session.execute(select(Photo).where(Photo.path == canonical))
-            return result.scalar_one_or_none()
-
-        return await DatabaseService.execute(_lookup)
-
-    # --- scanning ---------------------------------------------------------
-
-    @classmethod
-    async def scan(cls) -> None:
-        if cls._photos_folder is None or not cls._photos_folder.is_dir():
-            return
-
-        processed = 0
-
-        for path in sorted(cls._photos_folder.iterdir()):
-            if not FolderService._is_image(path):
-                continue
-
-            canonical = cls.canonical(path)
-
-            if canonical in cls._seen:
-                continue
-
-            try:
-                if await cls.process(path) is not None:
-                    processed += 1
-            except Exception as exception:  # noqa: BLE001
-                cls._seen.discard(canonical)
-                cls._log(f"failed to process {path.name}: {exception}", logging.ERROR)
-
-        if processed:
-            cls._log(f"Processed {processed} original(s)")
-
-    @classmethod
-    async def _watch(cls) -> None:
-        while cls._running:
-            await cls.scan()
-            await asyncio.sleep(cls._interval)
-
-    @classmethod
-    def _get_lock(cls) -> asyncio.Lock:
-        if cls._lock is None:
-            cls._lock = asyncio.Lock()
-
-        return cls._lock
-
-    @classmethod
-    def _unique_path(cls, folder: Path, filename: str) -> Path:
-        name = Path(filename).name or "photo"
-        candidate = folder / name
-
-        if not candidate.exists():
-            return candidate
-
-        stem = candidate.stem
-        suffix = candidate.suffix
-        index = 1
-
-        while True:
-            candidate = folder / f"{stem}_{index}{suffix}"
-
-            if not candidate.exists():
-                return candidate
-
-            index += 1
-
 
 def _reason_text(reason: str) -> str:
     return _REASON_TEXT.get(reason, reason.replace("_", " "))
@@ -665,10 +536,3 @@ def _format_angle(angle: float) -> str:
         rounded = 0.0
 
     return f"{rounded:+.2f}°"
-
-
-def _file_size(path: Path) -> int | None:
-    try:
-        return path.stat().st_size
-    except OSError:
-        return None

@@ -13,6 +13,7 @@ from trailframe.models.photo import Photo, PhotoDetail, RelatedPhotoGroup
 from trailframe.services.core.database_service import DatabaseService
 from trailframe.services.map.location_service import LocationService
 from trailframe.services.photos.duplicates_service import DuplicatesService
+from trailframe.services.photos.folder_service import FolderService
 from trailframe.services.photos.photo_service import PhotoService
 from trailframe.services.photos.processing.tilt import TiltOverride
 from trailframe.services.photos.processing_service import ProcessingService, ReprocessError
@@ -540,6 +541,6 @@ async def get_wireframe(photo_id: int):
 
 @router.post("/upload")
 async def upload_photo(file: UploadFile = File(...)):
-    photo = await ProcessingService.upload(file.filename or "photo", file)
+    path = await FolderService.upload(file.filename or "photo", file)
 
-    return {"filename": photo.filename, "path": photo.path, "alternatives": photo.alternatives}
+    return {"filename": path.name, "path": FolderService.canonical(path), "alternatives": []}

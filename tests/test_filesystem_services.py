@@ -95,27 +95,48 @@ class TestThumbnailPaths:
 
 
 class TestFolderService:
-    @allure.title("Resolves an absolute path as-is, ignoring the processed folder")
+    @allure.title("Resolves an absolute path as-is, ignoring the photos folder")
     def test_resolve_absolute_path_ignores_folder(self, tmp_path):
         absolute = tmp_path / "a.jpg"
         absolute.write_bytes(b"x")
         assert FolderService.resolve(absolute) == absolute
 
-    @allure.title("Resolves a relative path against the processed folder")
-    def test_resolve_relative_to_processed_folder(self, tmp_path):
+    @allure.title("Resolves a relative path against the photos folder")
+    def test_resolve_relative_to_photos_folder(self, tmp_path):
         folder_old = FolderService._folder
-        FolderService._folder = tmp_path / "processed"
+        FolderService._folder = tmp_path / "photos"
         try:
-            assert FolderService.resolve("sub/x.jpg") == tmp_path / "processed" / "sub" / "x.jpg"
+            assert FolderService.resolve("sub/x.jpg") == tmp_path / "photos" / "sub" / "x.jpg"
         finally:
             FolderService._folder = folder_old
 
-    @allure.title("Returns a relative path unchanged when no processed folder is configured")
+    @allure.title("Returns a relative path unchanged when no photos folder is configured")
     def test_resolve_relative_when_no_folder(self):
         folder_old = FolderService._folder
         FolderService._folder = None
         try:
             assert FolderService.resolve("in_cwd.jpg") == Path("in_cwd.jpg")
+        finally:
+            FolderService._folder = folder_old
+
+    @allure.title("Stores a canonical posix path relative to the photos folder")
+    def test_canonical_relative_path(self, tmp_path):
+        folder_old = FolderService._folder
+        FolderService._folder = tmp_path / "photos"
+        FolderService._folder.mkdir()
+        try:
+            assert FolderService.canonical(tmp_path / "photos" / "sub" / "x.jpg") == "sub/x.jpg"
+        finally:
+            FolderService._folder = folder_old
+
+    @allure.title("Canonicalizes a legacy path that repeats the photos folder name")
+    def test_canonical_legacy_path(self, tmp_path):
+        folder_old = FolderService._folder
+        FolderService._folder = tmp_path / "photos"
+        FolderService._folder.mkdir()
+        (FolderService._folder / "x.jpg").write_bytes(b"x")
+        try:
+            assert FolderService.canonical("legacy/photos/x.jpg") == "x.jpg"
         finally:
             FolderService._folder = folder_old
 
@@ -133,31 +154,32 @@ class TestFolderService:
         tmp_path.mkdir(parents=True, exist_ok=True)
         assert FolderService._is_image(tmp_path) is False
 
-    @allure.title("Deletes every processed file of a photo, tolerating missing ones")
-    def test_delete_alternatives(self, tmp_path):
+    @allure.title("Builds a unique upload destination without overwriting")
+    def test_unique_path(self, tmp_path):
+        (tmp_path / "shot.png").write_bytes(b"x")
+
+        assert FolderService._unique_path(tmp_path, "shot.png") == tmp_path / "shot_1.png"
+        assert FolderService._unique_path(tmp_path, "new.png") == tmp_path / "new.png"
+
+    @allure.title("Moves an original to the trash folder")
+    def test_delete_moves_to_trash(self, tmp_path):
         folder_old = FolderService._folder
-        FolderService._folder = tmp_path / "processed"
-        FolderService._folder.mkdir(parents=True)
+        trash_old = FolderService._trash_folder
+        FolderService._folder = tmp_path / "photos"
+        FolderService._folder.mkdir()
+        FolderService._trash_folder = tmp_path / "trash"
+        FolderService._trash_folder.mkdir()
         try:
-            existing = FolderService._folder / "a_1080.webp"
-            existing.write_bytes(b"x")
-            photo = Photo(
-                path="a.jpg",
-                alternatives=[
-                    {"target_size": 1080, "path": "a_1080.webp", "main": True},
-                    {"target_size": 400, "path": "a_400.webp"},
-                ],
-            )
+            original = FolderService._folder / "a.jpg"
+            original.write_bytes(b"x")
 
-            FolderService.delete_alternatives(photo)
+            FolderService.delete(original)
 
-            assert not existing.exists()
+            assert not original.exists()
+            assert (FolderService._trash_folder / "a.jpg").is_file()
         finally:
             FolderService._folder = folder_old
-
-    @allure.title("Delete is a no-op when the processed file is missing")
-    def test_delete_missing_file(self, tmp_path):
-        FolderService.delete_file(tmp_path / "gone.webp")
+            FolderService._trash_folder = trash_old
 
 
 class TestLocationProjection:

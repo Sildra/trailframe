@@ -46,6 +46,7 @@ class TestPipelineConfig:
         assert [scanner.name for scanner in PipelineService._pipelines[0]._scanners] == [
             "File",
             "EXIF",
+            "Processing",
             "Thumbnail",
             "Database",
         ]
@@ -108,16 +109,21 @@ class TestPipelineConfig:
         pipelines = PipelineService._pipelines
         assert len(pipelines) == 1
         assert pipelines[0]._name == "Basic"
-        assert [scanner.name for scanner in pipelines[0]._scanners] == ["File", "Object", "Database"]
+        assert [scanner.name for scanner in pipelines[0]._scanners] == ["File", "Processing", "Object", "Database"]
 
-    @allure.title("Injects the File scanner into the first pipeline")
+    @allure.title("Injects the File and Processing scanners into the first pipeline")
     def test_file_injected_first(self):
         config = Node("root")
         config.get_node("pipelines").set_value([{"Local": {"remote": "", "scanners": ["EXIF"]}}])
 
         PipelineService._configure(config)
 
-        assert [scanner.name for scanner in PipelineService._pipelines[0]._scanners] == ["File", "EXIF", "Database"]
+        assert [scanner.name for scanner in PipelineService._pipelines[0]._scanners] == [
+            "File",
+            "EXIF",
+            "Processing",
+            "Database",
+        ]
 
     @allure.title("Does not inject the File scanner into later pipelines")
     def test_file_only_first(self):
@@ -128,7 +134,12 @@ class TestPipelineConfig:
 
         PipelineService._configure(config)
 
-        assert [scanner.name for scanner in PipelineService._pipelines[0]._scanners] == ["File", "EXIF", "Database"]
+        assert [scanner.name for scanner in PipelineService._pipelines[0]._scanners] == [
+            "File",
+            "EXIF",
+            "Processing",
+            "Database",
+        ]
         assert [scanner.name for scanner in PipelineService._pipelines[1]._scanners] == ["Object", "Database"]
 
     @allure.title("Ignores internal scanners listed in the config")
@@ -138,7 +149,12 @@ class TestPipelineConfig:
 
         PipelineService._configure(config)
 
-        assert [scanner.name for scanner in PipelineService._pipelines[0]._scanners] == ["File", "EXIF", "Database"]
+        assert [scanner.name for scanner in PipelineService._pipelines[0]._scanners] == [
+            "File",
+            "EXIF",
+            "Processing",
+            "Database",
+        ]
 
     @allure.title("Builds a remote pipeline with a RemoteScanner delegating listed scanners")
     def test_remote_pipeline(self, remote_enabled_names):
@@ -187,6 +203,7 @@ class TestScannerDefinitionsApi:
         values = response.json()
         assert values == sorted(values)
         assert "File" not in values
+        assert "Processing" not in values
         assert "Database" not in values
         assert "Remote" not in values
 
@@ -572,7 +589,7 @@ class TestPipelineLiveReconfigure:
             front, back = PipelineService._pipelines
             assert front is not b
             assert back is not a
-            assert [scanner.name for scanner in front._scanners] == ["File", "Object", "Database"]
+            assert [scanner.name for scanner in front._scanners] == ["File", "Processing", "Object", "Database"]
         finally:
             await PipelineService.stop()
 
