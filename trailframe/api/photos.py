@@ -443,7 +443,7 @@ async def get_photo(photo_id: int) -> PhotoDetail:
 @router.post("/{photo_id}/reprocess", response_model=PhotoDetail)
 async def reprocess_photo(photo_id: int, payload: ReprocessRequest) -> PhotoDetail:
     """Regenerate the alternatives of a photo from its original."""
-    tilt = None
+    overrides = None
 
     if payload.tilt is not None:
         mode = payload.tilt.mode.lower()
@@ -454,15 +454,21 @@ async def reprocess_photo(photo_id: int, payload: ReprocessRequest) -> PhotoDeta
         if mode == "manual" and payload.tilt.angle is None:
             raise HTTPException(400, "A manual angle is required")
 
-        tilt = TiltOverride(
-            enabled=mode != "off",
-            angle=payload.tilt.angle if mode == "manual" else None,
-            crop_mode=payload.tilt.crop_mode,
-        )
+        overrides = {
+            "Tilt": TiltOverride(
+                enabled=mode != "off",
+                angle=payload.tilt.angle if mode == "manual" else None,
+                crop_mode=payload.tilt.crop_mode,
+            )
+        }
 
     try:
         await ProcessingService.reprocess(
-            photo_id, alternatives=payload.alternatives, main_target=payload.main, tilt=tilt, rescan=payload.rescan
+            photo_id,
+            alternatives=payload.alternatives,
+            main_target=payload.main,
+            overrides=overrides,
+            rescan=payload.rescan,
         )
     except ReprocessError as error:
         raise HTTPException(error.status_code, str(error)) from error

@@ -10,8 +10,8 @@ Use the arrows at the bottom to move between slides, or the left and right arrow
 
 The Gallery is the main view of your library.
 
-- Uploaded photos are archived in the photos folder, then a processing step in the creation pipeline generates the copies used for display and analysis.
-- A tilted horizon is straightened in the processed copies when the estimate is confident enough; the archived original is never modified.
+- Uploaded photos are archived in the photos folder, then the creation pipeline generates the copies used for display and analysis. The copies go through a chain of processing steps: tilt correction, crop, and rescale.
+- A tilted horizon is straightened in the processed copies when the estimate is confident enough; the crop then trims the empty borders. The archived original is never modified.
 - The photo panel lists each processing step with its details. Hover the Tilt step to see the detected horizon in red and the corrected target in green.
 - **Adjust processing** in the photo panel re-encodes the copies from the original: pick the output sizes and the main one, choose an automatic, off or manual horizon, and optionally re-run the analysis.
 - Filter by date range, group, location, tags, and favorites.

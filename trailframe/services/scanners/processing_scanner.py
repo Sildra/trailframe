@@ -18,7 +18,7 @@ class ProcessingScanner(Scanner):
         super().__init__("Processing")
 
     def accept_(self, photo: Photo) -> bool:
-        return photo.source != "Remote" and not photo.alternatives
+        return ProcessingService.needs_processing(photo)
 
     async def executePhoto(self, item: Item) -> bool:
         try:

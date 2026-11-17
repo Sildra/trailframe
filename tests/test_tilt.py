@@ -12,15 +12,18 @@ from trailframe.services.photos.processing.tilt import (
     CROP_MODE_NONE,
     HoughTiltDetector,
     TiltEstimate,
+    TiltOverride,
     TiltSettings,
     available_detectors,
-    correct,
     decide,
     detect_tilt,
     get_detector,
     largest_inscribed_rectangle,
     register_detector,
 )
+from trailframe.services.processors.crop_processor import CropProcessor
+from trailframe.services.processors.processor import ProcessingContext
+from trailframe.services.processors.tilt_processor import TiltProcessor
 
 
 def _tilted_line(angle: float, size: tuple[int, int] = (900, 600)) -> Image.Image:
@@ -37,6 +40,25 @@ def _tilted_line(angle: float, size: tuple[int, int] = (900, 600)) -> Image.Imag
 
 def _estimate(angle: float, confidence: float) -> TiltEstimate:
     return TiltEstimate(angle=angle, confidence=confidence, method="hough")
+
+
+def _corrected(
+    image: Image.Image, settings: TiltSettings, *, angle: float | None = None
+) -> tuple[Image.Image, dict | None]:
+    """Run the tilt and crop processors on an image, like the driver does."""
+    tilt = TiltProcessor()
+    tilt._settings = settings
+    tilt._enabled = settings.enabled
+    context = ProcessingContext(source_size=image.size, working_size=image.size)
+
+    if angle is not None:
+        context.overrides["Tilt"] = TiltOverride(angle=angle)
+
+    tilt.prepare(image, context)
+    rotated = tilt.execute(image, context).image
+    cropped = CropProcessor().execute(rotated, context)
+
+    return cropped.image, cropped.step
 
 
 class TestTilt:
@@ -67,7 +89,7 @@ class TestTilt:
 
         assert estimate is not None
 
-        corrected, crop = correct(image, estimate.angle, settings)
+        corrected, crop = _corrected(image, settings, angle=estimate.angle)
         after = detect_tilt(corrected, settings)
 
         assert crop is not None
@@ -83,7 +105,7 @@ class TestTilt:
     @allure.title("Crop mode none keeps the expanded canvas")
     def test_crop_mode_none(self):
         image = _tilted_line(2.0)
-        corrected, crop = correct(image, 2.0, TiltSettings(crop_mode=CROP_MODE_NONE))
+        corrected, crop = _corrected(image, TiltSettings(crop_mode=CROP_MODE_NONE), angle=2.0)
 
         assert crop is None
         assert corrected.width > image.width
@@ -104,7 +126,7 @@ class TestTilt:
     @allure.title("The inscribed crop leaves no reflected or filled border")
     def test_inscribed_crop_avoids_borders(self):
         image = Image.new("RGB", (900, 600), (240, 240, 240))
-        corrected, crop = correct(image, 3.0, TiltSettings())
+        corrected, crop = _corrected(image, TiltSettings(), angle=3.0)
 
         assert crop is not None
 

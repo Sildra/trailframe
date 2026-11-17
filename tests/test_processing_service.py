@@ -71,9 +71,7 @@ def _seed_photo(app, tmp_path, *, filename: str | None = None, source: str = "Fi
     original.write_bytes(_wide_image())
 
     photo = Photo(path=filename, filename=filename, file_size=original.stat().st_size, source=source)
-    photo.alternatives, photo.processing = ProcessingService._encode(
-        original, [1080], 1080, ProcessingService._format, ProcessingService._quality, ProcessingService._tilt
-    )
+    photo.alternatives, photo.processing = ProcessingService._encode(original, [1080], 1080)
 
     async def _save() -> int:
         async def _write(session) -> int:
@@ -178,7 +176,7 @@ class TestProcessingService:
         assert photo.main().path == entry["path"]
         assert photo.main().target_size == 1080
 
-        output = next(step for step in photo.processing if step["step"] in {"downscale", "transcode"})
+        output = next(step for step in photo.processing if step["step"] == "rescale")
         assert output["summary"] == f"{entry['width']} × {entry['height']}"
         assert output["details"] == {"Target size": "1080 px", "Format": "WEBP", "Quality": "90"}
         assert output["meta"] == {}
@@ -209,42 +207,103 @@ class TestProcessingService:
         assert 0 <= meta["reference_point"]["y"] <= 1
         assert meta["line"]["x1"] < meta["line"]["x2"]
 
-        transcode = next(step for step in photo.processing if step["step"] == "transcode")
+        transcode = next(step for step in photo.processing if step["step"] == "rescale")
         assert transcode["details"]["Target size"] == "1080 px"
 
         with Image.open(photos / "tilted.png") as original:
             assert original.size == (900, 600)
 
+    @allure.title("Keeps the target longest edge when a tilt crop trims the borders")
+    def test_preprocess_tilt_keeps_target_size(self, app, tmp_path):
+        photo = _stored_photo(tmp_path, "wide-tilted.png", _tilted_image(size=(1600, 1000)))
+
+        app.db(ProcessingService.preprocess(photo))
+        entry = photo.alternatives[0]
+
+        assert max(entry["width"], entry["height"]) == 1080
+
+        rescale = next(step for step in photo.processing if step["step"] == "rescale")
+        assert rescale["summary"] == f"{entry['width']} × {entry['height']}"
+
     @allure.title("Tilt correction can be disabled")
     def test_tilt_disabled(self, app, tmp_path):
-        previous = ProcessingService._tilt
-        ProcessingService._tilt = TiltSettings(enabled=False)
+        tilt = next(processor for processor in ProcessingService._processors if processor.name == "Tilt")
+        previous = tilt._settings
+        tilt._settings = TiltSettings(enabled=False)
+        tilt._enabled = False
         photo = _stored_photo(tmp_path, "flat.png", _tilted_image())
 
         try:
             app.db(ProcessingService.preprocess(photo))
         finally:
-            ProcessingService._tilt = previous
+            tilt._settings = previous
+            tilt._enabled = previous.enabled
 
         assert photo.alternatives[0]["width"] == 900
         assert all(step["step"] != "tilt" for step in photo.processing)
 
-    @allure.title("Preprocessing leaves remote photos and existing alternatives alone")
+    @allure.title("Preprocessing leaves remote photos and fully processed photos alone")
     def test_preprocess_is_a_noop_when_not_applicable(self, app, tmp_path):
         alternatives = [{"target_size": 1080, "path": "a_1080.webp", "main": True}]
+        processing = [
+            {
+                "step": "tilt",
+                "summary": "Not applied",
+                "details": {},
+                "meta": {"applied": False, "crop_mode": "maximum_valid_rectangle"},
+            },
+            {"step": "rescale", "summary": "1080 × 720", "details": {}, "meta": {}},
+        ]
 
         assert app.db(ProcessingService.preprocess(Photo(path="a.jpg", source="Remote"))) is False
-        assert app.db(ProcessingService.preprocess(Photo(path="a.jpg", alternatives=alternatives))) is False
+        assert (
+            app.db(ProcessingService.preprocess(Photo(path="a.jpg", alternatives=alternatives, processing=processing)))
+            is False
+        )
 
-    @allure.title("The processing scanner gates remote photos and existing alternatives")
-    def test_processing_scanner_gating(self):
+    @allure.title("The processing scanner re-queues photos that miss a processor step")
+    def test_processing_scanner_gating(self, app):
         from trailframe.services.scanners.processing_scanner import ProcessingScanner
 
         scanner = ProcessingScanner()
+        complete = [
+            {
+                "step": "tilt",
+                "summary": "Not applied",
+                "details": {},
+                "meta": {"applied": False, "crop_mode": "maximum_valid_rectangle"},
+            },
+            {"step": "rescale", "summary": "1080 × 720", "details": {}, "meta": {}},
+        ]
 
         assert scanner.accept_(Photo(path="a.jpg", source="File")) is True
         assert scanner.accept_(Photo(path="a.jpg", source="Remote")) is False
-        assert scanner.accept_(Photo(path="a.jpg", alternatives=[{"path": "a_1080.webp"}])) is False
+        assert scanner.accept_(Photo(path="a.jpg", alternatives=[{"path": "a_1080.webp"}])) is True
+        assert (
+            scanner.accept_(
+                Photo(path="a.jpg", alternatives=[{"path": "a_1080.webp", "target_size": 1080}], processing=complete)
+            )
+            is False
+        )
+
+    @allure.title("A photo missing one processor step is re-encoded and its old files are removed")
+    def test_preprocess_reruns_missing_processors(self, app, tmp_path):
+        processed, photos = _folders(tmp_path)
+        photo = _stored_photo(tmp_path, "old.png", _tilted_image())
+        original = photos / "old.png"
+        photo.alternatives, photo.processing = ProcessingService._encode(original, [1080], 1080)
+        previous = {entry["path"] for entry in photo.alternatives}
+        photo.processing = [step for step in photo.processing if step["step"] == "rescale"]
+
+        assert ProcessingService.needs_processing(photo) is True
+
+        changed = app.db(ProcessingService.preprocess(photo))
+
+        assert changed is True
+        assert [step["step"] for step in photo.processing] == ["tilt", "crop", "rescale"]
+        assert all((processed / entry["path"]).is_file() for entry in photo.alternatives)
+        assert all(not (processed / path).exists() for path in previous)
+        assert (photos / "old.png").is_file()
 
     @allure.title("An upload is stored by the folder service and processed by the pipeline")
     def test_upload_flows_through_pipeline(self, app, tmp_path):
@@ -307,9 +366,7 @@ class TestProcessingService:
             from sqlalchemy import func
 
             async def _query(session) -> int:
-                result = await session.execute(
-                    select(func.count()).select_from(Photo).where(Photo.path == "shot.png")
-                )
+                result = await session.execute(select(func.count()).select_from(Photo).where(Photo.path == "shot.png"))
                 return result.scalar_one()
 
             return await DatabaseService.execute(_query)
@@ -389,7 +446,11 @@ class TestProcessingService:
 
         app.db(
             ProcessingService.reprocess(
-                photo.id, alternatives=[1080], main_target=1080, tilt=TiltOverride(angle=5.0), rescan=False
+                photo.id,
+                alternatives=[1080],
+                main_target=1080,
+                overrides={"Tilt": TiltOverride(angle=5.0)},
+                rescan=False,
             )
         )
 
@@ -401,20 +462,28 @@ class TestProcessingService:
         assert tilt["summary"] == "+5.00°"
         assert tilt["meta"]["crop_mode"] == "maximum_valid_rectangle"
         assert "line" not in tilt["meta"]
+        assert any(step["step"] == "crop" for step in entry.processing)
 
-    @allure.title("A manual angle can be applied without detection")
+    @allure.title("Tilt correction can be turned off for one reprocess")
     def test_reprocess_tilt_off(self, app, tmp_path):
         photo = _seed_photo(app, tmp_path)
 
         app.db(
             ProcessingService.reprocess(
-                photo.id, alternatives=[1080], main_target=1080, tilt=TiltOverride(enabled=False), rescan=False
+                photo.id,
+                alternatives=[1080],
+                main_target=1080,
+                overrides={"Tilt": TiltOverride(enabled=False)},
+                rescan=False,
             )
         )
 
         entry = app.db(_load_photo(photo.id))
+        tilt = next(step for step in entry.processing if step["step"] == "tilt")
 
-        assert all(step["step"] != "tilt" for step in entry.processing)
+        assert tilt["details"]["Applied"] == "No"
+        assert tilt["details"]["Reason"] == "disabled"
+        assert all(step["step"] != "crop" for step in entry.processing)
         assert entry.alternatives[0]["width"] == 1080
 
     @allure.title("Reprocessing replaces the thumbnails of the main target")
@@ -453,7 +522,7 @@ class TestProcessingService:
             app.db(ProcessingService.reprocess(photo.id, alternatives=[16], rescan=False))
 
         with pytest.raises(ReprocessError) as bad_angle:
-            app.db(ProcessingService.reprocess(photo.id, tilt=TiltOverride(angle=90.0), rescan=False))
+            app.db(ProcessingService.reprocess(photo.id, overrides={"Tilt": TiltOverride(angle=90.0)}, rescan=False))
 
         with pytest.raises(ReprocessError) as no_original:
             app.db(ProcessingService.reprocess(remote.id, rescan=False))
@@ -496,8 +565,13 @@ class TestReprocessAPI:
         unknown_mode = app.post(
             f"/api/photos/{photo.id}/reprocess", json={"tilt": {"mode": "sideways"}, "rescan": False}
         )
+        unknown_crop = app.post(
+            f"/api/photos/{photo.id}/reprocess",
+            json={"tilt": {"mode": "auto", "crop_mode": "sideways"}, "rescan": False},
+        )
 
         assert missing.status_code == 404
         assert bad_main.status_code == 400
         assert manual_without_angle.status_code == 400
         assert unknown_mode.status_code == 400
+        assert unknown_crop.status_code == 400

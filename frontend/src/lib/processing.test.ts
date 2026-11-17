@@ -36,7 +36,7 @@ describe("normalizeProcessing", () => {
 
 describe("stepLabel", () => {
     it("capitalizes the step name", () => {
-        expect(stepLabel("downscale")).toBe("Downscale");
+        expect(stepLabel("rescale")).toBe("Rescale");
         expect(stepLabel("")).toBe("Processing");
     });
 });
@@ -70,7 +70,7 @@ describe("tiltOverlay", () => {
 
     it("only applies to tilt steps", () => {
         const [step] = normalizeProcessing([
-            { step: "downscale", meta: { line: { x1: 0, y1: 0, x2: 1, y2: 0 } } },
+            { step: "rescale", meta: { line: { x1: 0, y1: 0, x2: 1, y2: 0 } } },
         ]);
 
         expect(tiltOverlay(step)).toBeNull();

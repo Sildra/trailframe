@@ -24,6 +24,7 @@ from trailframe.services.core.configuration_service import Node
 
 CROP_MODE_MAXIMUM_RECTANGLE = "maximum_valid_rectangle"
 CROP_MODE_NONE = "none"
+CROP_MODES = frozenset({CROP_MODE_MAXIMUM_RECTANGLE, CROP_MODE_NONE})
 
 DEFAULT_METHOD = "hough"
 MANUAL_METHOD = "manual"
@@ -317,26 +318,6 @@ class HoughTiltDetector:
             support=inlier_weight,
             line=_normalized_line(best[2:], width, height),
         )
-
-
-def correct(image: Image.Image, angle: float, settings: TiltSettings) -> tuple[Image.Image, dict[str, int] | None]:
-    """Rotate an image and optionally crop to the largest inscribed rectangle."""
-    rotation = float(angle)
-
-    if abs(rotation) < 1e-6:
-        return image.copy(), None
-
-    rotated = image.rotate(rotation, resample=Image.Resampling.BICUBIC, expand=True)
-
-    if settings.crop_mode == CROP_MODE_NONE:
-        return rotated, None
-
-    width, height = largest_inscribed_rectangle(image.width, image.height, rotation)
-    left = max(0, (rotated.width - width) // 2)
-    top = max(0, (rotated.height - height) // 2)
-    cropped = rotated.crop((left, top, left + width, top + height))
-
-    return cropped, {"width": cropped.width, "height": cropped.height}
 
 
 def largest_inscribed_rectangle(width: int, height: int, angle: float) -> tuple[int, int]:

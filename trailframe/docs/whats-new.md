@@ -69,5 +69,6 @@ The processing core was rebuilt around a shared thread pool.
 - Thumbnails are keyed by the original path and main target, so they survive reprocessing.
 - Deleting a photo discards its processed files and thumbnails and moves the original to the trash.
 - Automatic horizon straightening detects the dominant near-horizontal lines on a downscaled copy and corrects the processed alternatives only when the estimate is confident; the processing recipe is a two-stage tree (step, headline value, details) recording the angle, confidence, reference point, and crop. Hovering the Tilt step draws the detected horizon in red and the corrected target in green on the photo.
+- Preprocessing is a chain of independent steps — tilt correction, crop, and rescale — each recorded in the processing recipe; a step added by a later release re-encodes existing photos once on the next pass.
 - The JavaScript expression engine is a configuration toggle (`javascript_modules`) and defaults to off on machines with less than 1 GB of free memory.
 - **Adjust processing** on a photo re-encodes its alternatives from the original: choose the output sizes and the main one, set the horizon to automatic, off or a manual angle with a crop mode, and optionally re-run the object and duplicate analysis. The original archive is never modified.

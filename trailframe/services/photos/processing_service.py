@@ -2,9 +2,8 @@ from __future__ import annotations
 
 import logging
 import math
-from dataclasses import replace
 from pathlib import Path
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from PIL import Image, ImageOps
 from sqlalchemy import select
@@ -15,19 +14,7 @@ from trailframe.services.core.database_service import DatabaseService
 from trailframe.services.core.thread_pool_service import ThreadPoolService
 from trailframe.services.photos.duplicates_service import DuplicatesService
 from trailframe.services.photos.folder_service import FolderService
-from trailframe.services.photos.processing.tilt import (
-    CROP_MODE_MAXIMUM_RECTANGLE,
-    CROP_MODE_NONE,
-    MANUAL_METHOD,
-    TiltDecision,
-    TiltEstimate,
-    TiltOverride,
-    TiltSettings,
-    correct,
-    decide,
-    detect_tilt,
-    get_detector,
-)
+from trailframe.services.processors import ProcessingContext, Processor, create_processors
 from trailframe.services.service import Service
 
 _FORMAT_ALIASES = {"jpg": "jpeg", "tif": "tiff"}
@@ -35,12 +22,9 @@ _FORMAT_ALIASES = {"jpg": "jpeg", "tif": "tiff"}
 MIN_TARGET_SIZE = 64
 MAX_TARGET_SIZE = 8192
 MAX_TARGETS = 5
-MAX_MANUAL_ANGLE = 45.0
 
 # Analysis that depends on the pixels (not on the original file or its metadata).
 _RESCAN_SCANNERS = ("Object", "PerceptualHash")
-
-_CROP_MODES = {CROP_MODE_MAXIMUM_RECTANGLE, CROP_MODE_NONE}
 
 
 class ReprocessError(Exception):
@@ -51,19 +35,13 @@ class ReprocessError(Exception):
         self.status_code = status_code
 
 
-_REASON_TEXT = {
-    "no_estimate": "no estimate",
-    "below_min_angle": "below minimum angle",
-    "above_max_angle": "above maximum angle",
-    "low_confidence": "low confidence",
-    "auto_apply_disabled": "auto-apply disabled",
-    "disabled": "disabled",
-    "failed": "failed",
-}
-
-
 class ProcessingService(Service):
     """Photo preprocessing: decoded originals are re-encoded into alternatives.
+
+    The service is a technical driver only: it decodes the original, runs the
+    configured processor chain (tilt → crop → rescale), and writes the encoded
+    files. The individual steps live in `trailframe.services.processors` and
+    record their own provenance in `photo.processing`.
 
     The originals live in `photos_folder` and are owned by `FolderService`; this
     service reads them and writes the configured alternatives into the processed
@@ -79,7 +57,7 @@ class ProcessingService(Service):
     _main: int | None = None
     _format: ClassVar[str] = "webp"
     _quality = 90
-    _tilt: ClassVar[TiltSettings] = TiltSettings()
+    _processors: ClassVar[list[Processor]] = []
     _reprocessing: ClassVar[set[int]] = set()
 
     @classmethod
@@ -102,11 +80,7 @@ class ProcessingService(Service):
         cls._format = _FORMAT_ALIASES.get(configured_format, configured_format)
         cls._quality = int(processing_node.get_path_value("quality", "Encoder quality for alternatives", 90))
 
-        tilt_node = processing_node.get_node("tilt", "Automatic horizon straightening")
-        cls._tilt = TiltSettings.from_node(tilt_node)
-
-        if cls._tilt.enabled and get_detector(cls._tilt.method) is None:
-            cls._log(f"unknown tilt detector '{cls._tilt.method}', horizon correction is disabled", logging.WARNING)
+        cls._processors = create_processors(config)
 
     # --- processed storage -------------------------------------------------
 
@@ -167,14 +141,32 @@ class ProcessingService(Service):
     # --- preprocessing ----------------------------------------------------
 
     @classmethod
+    def needs_processing(cls, photo: Photo) -> bool:
+        """Whether the photo is missing the output of an enabled processor.
+
+        Run state is derived from the recorded `processing` steps, so photos
+        processed by an earlier release (or before a processor existed) are
+        picked up again on the next pipeline pass, like a scanner marker.
+        """
+        if photo.source == "Remote" or not cls._alternatives:
+            return False
+
+        if not photo.alternatives:
+            return True
+
+        steps = [step for step in (photo.processing or []) if isinstance(step, dict)]
+
+        return any(not processor.ran(steps) for processor in cls._processors if processor.accept())
+
+    @classmethod
     async def preprocess(cls, photo: Photo) -> bool:
-        """Generate the alternatives of an original photo.
+        """Generate (or refresh) the alternatives of an original photo.
 
         Called by the `Processing` pipeline scanner after the metadata scanners
-        and before the pixel consumers. Existing alternatives are left alone, so
-        the scanner is a cheap no-op on re-scans.
+        and before the pixel consumers. Photos that already carry the output of
+        every enabled processor are left alone.
         """
-        if photo.source == "Remote" or photo.alternatives or not cls._alternatives:
+        if not cls.needs_processing(photo):
             return False
 
         original = FolderService.resolve(photo.path)
@@ -183,9 +175,57 @@ class ProcessingService(Service):
             cls._log(f"original not found for {photo.path}", logging.WARNING)
             return False
 
-        photo.alternatives, photo.processing = await cls._generate(original)
+        targets, main_target = cls._targets_for(photo)
+        entries, steps = await ThreadPoolService.run(cls._encode, original, targets, main_target)
+        old_alternatives = list(photo.alternatives or [])
+        old_target = photo.main().target_size
+
+        photo.alternatives = entries
+        photo.processing = steps
+
+        if old_alternatives:
+            cls._delete_superseded(old_alternatives, entries)
+            cls._invalidate_thumbnails(photo, old_target)
 
         return True
+
+    @classmethod
+    def _targets_for(cls, photo: Photo) -> tuple[list[int], int | None]:
+        """Targets to regenerate: the photo's own set, or the configured one."""
+        entries = [
+            entry
+            for entry in (photo.alternatives or [])
+            if isinstance(entry, dict) and entry.get("target_size") is not None
+        ]
+
+        if not entries:
+            return list(cls._alternatives), cls._main
+
+        targets = sorted({int(entry["target_size"]) for entry in entries})
+        current_main = next((int(entry["target_size"]) for entry in entries if entry.get("main")), None)
+
+        if current_main in targets:
+            return targets, current_main
+
+        return targets, cls._main if cls._main in targets else targets[-1]
+
+    @classmethod
+    def _delete_superseded(cls, old: list[dict], new: list[dict]) -> None:
+        keep = {entry["path"] for entry in new if isinstance(entry, dict) and entry.get("path")}
+
+        for entry in old:
+            stored = entry.get("path") if isinstance(entry, dict) else None
+
+            if stored and stored not in keep:
+                cls.delete_file(cls.resolve(stored))
+
+    @classmethod
+    def _invalidate_thumbnails(cls, photo: Photo, old_target: int | None) -> None:
+        """Drop the thumbnails of both the previous and the new main target."""
+        from trailframe.services.photos.thumbnail_service import ThumbnailService
+
+        ThumbnailService.delete_target(photo, old_target)
+        ThumbnailService.delete_target(photo, photo.main().target_size)
 
     @classmethod
     async def reprocess(
@@ -194,7 +234,7 @@ class ProcessingService(Service):
         *,
         alternatives: list[int] | None = None,
         main_target: int | None = None,
-        tilt: TiltOverride | None = None,
+        overrides: dict[str, Any] | None = None,
         rescan: bool = True,
     ) -> None:
         """Regenerate the alternatives of an existing photo.
@@ -208,7 +248,9 @@ class ProcessingService(Service):
         cls._reprocessing.add(photo_id)
 
         try:
-            await cls._reprocess(photo_id, alternatives=alternatives, main_target=main_target, tilt=tilt, rescan=rescan)
+            await cls._reprocess(
+                photo_id, alternatives=alternatives, main_target=main_target, overrides=overrides, rescan=rescan
+            )
         finally:
             cls._reprocessing.discard(photo_id)
 
@@ -219,7 +261,7 @@ class ProcessingService(Service):
         *,
         alternatives: list[int] | None,
         main_target: int | None,
-        tilt: TiltOverride | None,
+        overrides: dict[str, Any] | None,
         rescan: bool,
     ) -> None:
         photo = await cls._find_by_id(photo_id)
@@ -236,13 +278,11 @@ class ProcessingService(Service):
             raise ReprocessError("The original file is not available", 422)
 
         targets, main_target = cls._resolve_targets(photo, alternatives, main_target)
-        tilt = cls._validate_tilt(tilt)
+        cls._validate_overrides(overrides)
         old_alternatives = list(photo.alternatives or [])
         old_target = photo.main().target_size
 
-        entries, steps = await ThreadPoolService.run(
-            cls._encode, original, targets, main_target, cls._format, cls._quality, cls._tilt, tilt
-        )
+        entries, steps = await ThreadPoolService.run(cls._encode, original, targets, main_target, overrides)
 
         async def _save(session) -> None:
             stored = (await session.execute(select(Photo).where(Photo.id == photo_id))).scalar_one_or_none()
@@ -338,17 +378,12 @@ class ProcessingService(Service):
         return targets, main_target
 
     @classmethod
-    def _validate_tilt(cls, tilt: TiltOverride | None) -> TiltOverride | None:
-        if tilt is None:
-            return None
+    def _validate_overrides(cls, overrides: dict[str, Any] | None) -> None:
+        for processor in cls._processors:
+            problem = processor.validate_override((overrides or {}).get(processor.name))
 
-        if tilt.angle is not None and (not math.isfinite(tilt.angle) or abs(tilt.angle) > MAX_MANUAL_ANGLE):
-            raise ReprocessError(f"The manual angle must be within ±{MAX_MANUAL_ANGLE:g}°")
-
-        if tilt.crop_mode is not None and tilt.crop_mode not in _CROP_MODES:
-            raise ReprocessError(f"Unknown crop mode '{tilt.crop_mode}'")
-
-        return tilt
+            if problem:
+                raise ReprocessError(problem)
 
     @classmethod
     def _reset_analysis(cls, photo: Photo) -> None:
@@ -366,40 +401,21 @@ class ProcessingService(Service):
         return await DatabaseService.execute(_lookup)
 
     @classmethod
-    async def _generate(cls, original: Path) -> tuple[list[dict], list[dict]]:
-        if not cls._alternatives:
-            return [], []
-
-        return await ThreadPoolService.run(
-            cls._encode, original, list(cls._alternatives), cls._main, cls._format, cls._quality, cls._tilt
-        )
-
-    @classmethod
     def _encode(
-        cls,
-        original: Path,
-        targets: list[int],
-        main_target: int | None,
-        output_format: str,
-        quality: int,
-        tilt: TiltSettings,
-        override: TiltOverride | None = None,
+        cls, original: Path, targets: list[int], main_target: int | None, overrides: dict[str, Any] | None = None
     ) -> tuple[list[dict], list[dict]]:
-        """Encode the alternatives. Runs on the shared thread pool.
+        """Run the processor chain and write the alternatives.
 
-        Files written by a failed attempt are removed again, so a partial run
-        never leaves unreferenced alternatives behind.
+        The driver only decodes, chains the processors, encodes and stores the
+        files. Runs on the shared thread pool; files written by a failed attempt
+        are removed again, so a partial run never leaves unreferenced
+        alternatives behind.
         """
         entries: list[dict] = []
         steps: list[dict] = []
         folder = cls.get_folder()
-        fmt = _FORMAT_ALIASES.get(output_format, output_format)
+        fmt = _FORMAT_ALIASES.get(cls._format, cls._format)
         suffix = ".jpg" if fmt == "jpeg" else f".{fmt}"
-        settings = tilt
-
-        if override is not None and override.crop_mode is not None:
-            settings = replace(tilt, crop_mode=override.crop_mode)
-
         written: list[Path] = []
 
         try:
@@ -407,23 +423,37 @@ class ProcessingService(Service):
                 base = ImageOps.exif_transpose(handle)
                 base.load()
 
-                decision = cls._tilt_decision(base, settings, override)
+                context = ProcessingContext(
+                    source_size=base.size, format=fmt, quality=cls._quality, overrides=dict(overrides or {})
+                )
+                chain = [processor for processor in cls._processors if processor.accept(context)]
 
-                record = cls._tilt_record(decision, settings)
+                for processor in chain:
+                    processor.prepare(base, context)
 
-                if record is not None:
-                    steps.append(record)
+                # Pre-downscale by the chain's own shrink ratio, so the border
+                # crop trims the extra pixels instead of eating into the target.
+                ratio = 1.0
 
-                longest = max(base.size)
+                for processor in chain:
+                    ratio *= processor.scale(context)
 
-                for target in targets:
+                for index, target in enumerate(targets):
+                    context.target = target
                     image = base.copy()
+                    requested = math.ceil(target / ratio) if ratio > 0 else target
 
-                    if target < longest:
-                        image.thumbnail((target, target), Image.Resampling.LANCZOS)
+                    if requested < max(image.size):
+                        image.thumbnail((requested, requested), Image.Resampling.LANCZOS)
 
-                    if decision.applied and decision.estimate is not None:
-                        image, _ = correct(image, decision.estimate.angle, settings)
+                    context.working_size = image.size
+
+                    for processor in chain:
+                        result = processor.execute(image, context)
+                        image = result.image
+
+                        if result.step is not None and (processor.per_target or index == 0):
+                            steps.append(result.step)
 
                     if image.mode not in ("RGB", "RGBA"):
                         if image.mode in ("P", "PA") and "transparency" in image.info:
@@ -435,7 +465,7 @@ class ProcessingService(Service):
                     destination = cls._unique_path(folder, filename)
                     temporary = destination.with_name(destination.name + ".part")
 
-                    image.save(temporary, format=fmt.upper(), quality=quality)
+                    image.save(temporary, format=fmt.upper(), quality=cls._quality)
                     width, height = image.size
                     image.close()
                     written.extend((temporary, destination))
@@ -452,14 +482,6 @@ class ProcessingService(Service):
                             "main": main_target is not None and target == main_target,
                         }
                     )
-                    steps.append(
-                        {
-                            "step": "downscale" if target < longest else "transcode",
-                            "summary": f"{width} × {height}",
-                            "details": {"Target size": f"{target} px", "Format": fmt.upper(), "Quality": str(quality)},
-                            "meta": {},
-                        }
-                    )
         except Exception:
             for path in written:
                 path.unlink(missing_ok=True)
@@ -467,72 +489,3 @@ class ProcessingService(Service):
             raise
 
         return entries, steps
-
-    @classmethod
-    def _tilt_decision(
-        cls, image: Image.Image, tilt: TiltSettings, override: TiltOverride | None = None
-    ) -> TiltDecision:
-        if override is not None:
-            if override.angle is not None:
-                estimate = TiltEstimate(angle=override.angle, confidence=1.0, method=MANUAL_METHOD)
-
-                return TiltDecision(estimate, True, "manual")
-
-            if override.enabled is False:
-                return TiltDecision(None, False, "disabled")
-
-        if not tilt.enabled:
-            return TiltDecision(None, False, "disabled")
-
-        try:
-            estimate = detect_tilt(image, tilt)
-        except Exception as exception:  # noqa: BLE001
-            cls._log(f"tilt detection failed: {exception}", logging.WARNING)
-            return TiltDecision(None, False, "failed")
-
-        return decide(estimate, tilt)
-
-    @classmethod
-    def _tilt_record(cls, decision: TiltDecision, settings: TiltSettings) -> dict | None:
-        estimate = decision.estimate
-
-        if estimate is None:
-            return None
-
-        details: dict[str, str] = {
-            "Detection method": estimate.method,
-            "Confidence": f"{estimate.confidence:.0%}",
-            "Applied": "Yes" if decision.applied else "No",
-        }
-        meta: dict = {"crop_mode": settings.crop_mode}
-        reference = estimate.reference_point
-
-        if not decision.applied:
-            details["Reason"] = _reason_text(decision.reason)
-
-        if reference is not None:
-            details["Reference point"] = f"{reference[0]:.1%}, {reference[1]:.1%}"
-            meta["reference_point"] = {"x": round(reference[0], 4), "y": round(reference[1], 4)}
-
-        if estimate.line is not None:
-            meta["line"] = {
-                "x1": round(estimate.line[0], 4),
-                "y1": round(estimate.line[1], 4),
-                "x2": round(estimate.line[2], 4),
-                "y2": round(estimate.line[3], 4),
-            }
-
-        return {"step": "tilt", "summary": _format_angle(estimate.angle), "details": details, "meta": meta}
-
-
-def _reason_text(reason: str) -> str:
-    return _REASON_TEXT.get(reason, reason.replace("_", " "))
-
-
-def _format_angle(angle: float) -> str:
-    rounded = round(float(angle), 2)
-
-    if rounded == 0:
-        rounded = 0.0
-
-    return f"{rounded:+.2f}°"
