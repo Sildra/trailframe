@@ -72,6 +72,7 @@ export default function PhotoMetadata({ photoId, favorite = false, onToggleFavor
     const [savedTags, setSavedTags] = useState<string[]>([]);
     const [tags, setTags] = useState<string[]>([]);
     const [pickerOpen, setPickerOpen] = useState(false);
+    const [tagsExpanded, setTagsExpanded] = useState(false);
     const [reprocessOpen, setReprocessOpen] = useState(false);
     const [savingTags, setSavingTags] = useState(false);
 
@@ -214,25 +215,43 @@ export default function PhotoMetadata({ photoId, favorite = false, onToggleFavor
             <Accordion disableGutters>
                 <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={{ fontWeight: 600, fontSize: 14 }}>
                     Processing
+                    <Box sx={{ flexGrow: 1 }} />
+                    <Button
+                        size="small"
+                        startIcon={<TuneIcon />}
+                        disabled={photo.source === "Remote"}
+                        title={photo.source === "Remote" ? "Remote photos have no original to reprocess" : undefined}
+                        onClick={(event) => {
+                            event.stopPropagation();
+                            setReprocessOpen(true);
+                        }}
+                    >
+                        Edit
+                    </Button>
                 </AccordionSummary>
                 <AccordionDetails>
-                    <Box sx={{ display: "flex", justifyContent: "flex-end", mb: 1 }}>
-                        <Button
-                            size="small"
-                            startIcon={<TuneIcon />}
-                            disabled={photo.source === "Remote"}
-                            title={photo.source === "Remote" ? "Remote photos have no original to reprocess" : undefined}
-                            onClick={() => setReprocessOpen(true)}
-                        >
-                            Adjust processing
-                        </Button>
-                    </Box>
                     <ProcessingTree entries={photo.processing} onHoverTilt={onHoverTilt} />
                 </AccordionDetails>
             </Accordion>
-            <Accordion disableGutters>
+            <Accordion
+                disableGutters
+                expanded={tagsExpanded}
+                onChange={(_, expanded) => setTagsExpanded(expanded)}
+            >
                 <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={{ fontWeight: 600, fontSize: 14 }}>
                     Tags
+                    <Box sx={{ flexGrow: 1 }} />
+                    <Button
+                        size="small"
+                        startIcon={<EditIcon />}
+                        onClick={(event) => {
+                            event.stopPropagation();
+                            setTagsExpanded(true);
+                            setPickerOpen(true);
+                        }}
+                    >
+                        Edit
+                    </Button>
                 </AccordionSummary>
                 <AccordionDetails>
                     <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
@@ -250,17 +269,16 @@ export default function PhotoMetadata({ photoId, favorite = false, onToggleFavor
                                 ))}
                             </Box>
                         )}
-                        <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                            <Button size="small" startIcon={<EditIcon />} onClick={() => setPickerOpen(true)}>
-                                Edit tags
-                            </Button>
-                            {tagsDirty && (
-                                <Button size="small" variant="contained" onClick={saveTags} disabled={savingTags}>
-                                    Save
-                                </Button>
-                            )}
-                            {savingTags && <CircularProgress size={16} />}
-                        </Box>
+                        {(tagsDirty || savingTags) && (
+                            <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                                {tagsDirty && (
+                                    <Button size="small" variant="contained" onClick={saveTags} disabled={savingTags}>
+                                        Save
+                                    </Button>
+                                )}
+                                {savingTags && <CircularProgress size={16} />}
+                            </Box>
+                        )}
                     </Box>
                 </AccordionDetails>
             </Accordion>
