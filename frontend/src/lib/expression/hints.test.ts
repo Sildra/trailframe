@@ -1,54 +1,84 @@
 import { describe, expect, it } from "vitest";
 import { hintsFor } from "./hints";
 import type { RuleSchema } from "./schema";
+import type { Quantifier } from "../rules";
 
 const OPERATORS = Object.fromEntries(
     ["eq", "neq", "gt", "gte", "lt", "lte", "contains", "not_contains", "in"].map((name) => [
         name,
-        { name, token: { eq: "=", neq: "!=", gt: ">", gte: ">=", lt: "<", lte: "<=" }[name] ?? name, label: name, doc: `${name} doc` },
+        {
+            name,
+            token: { eq: "=", neq: "!=", gt: ">", gte: ">=", lt: "<", lte: "<=" }[name] ?? name,
+            label: name,
+            doc: `${name} doc`,
+        },
     ]),
 );
 
+const ALL_QUANTIFIERS: Quantifier[] = ["any", "none", "one", "all"];
+
 const schema: RuleSchema = {
-    version: 1,
+    version: 2,
     capabilities: ["tokens", "completions", "docs", "snippets"],
     grammar: { keywords: [], operators: OPERATORS },
-    detection: {
-        path: "objects",
-        label_field: "label",
-        label_values: { source: "objects", values: ["dog", "cat"] },
-        operators: ["present", "absent"],
-        metrics: [
-            {
-                name: "confidence",
-                label: "Confidence",
-                description: "How sure the detector is.",
-                kind: "number",
-                operators: ["eq", "neq", "gt", "gte", "lt", "lte"],
-                min: 0,
-                max: 100,
-                step: 1,
-                unit: "%",
-            },
-        ],
-    },
-    groups: [
+    quantifiers: ALL_QUANTIFIERS.map((name) => ({ name, label: name, doc: `${name} doc` })),
+    collections: [
         {
-            name: "Objects",
-            label: "Objects",
-            fields: [
+            path: "objects",
+            group: "Objects",
+            label: "Detected objects",
+            description: "Objects found by the Object scanner.",
+            quantifiers: ALL_QUANTIFIERS,
+            elements: [
                 {
-                    path: "objects",
-                    group: "Objects",
-                    label: "Detected object",
-                    description: "An object found by the Object scanner.",
-                    kind: "detection",
-                    operators: ["present", "absent"],
-                    computed: false,
+                    key: "label",
+                    label: "Label",
+                    description: "The detected label.",
+                    kind: "text",
+                    operators: ["eq", "neq", "contains", "in"],
                     values: { source: "objects", values: [] },
+                },
+                {
+                    key: "confidence",
+                    label: "Confidence",
+                    description: "How sure the detector is.",
+                    kind: "number",
+                    operators: ["eq", "neq", "gt", "gte", "lt", "lte"],
+                    values: { source: "none", values: [] },
+                    min: 0,
+                    max: 1,
+                    step: 0.01,
+                    unit: "%",
                 },
             ],
         },
+        {
+            path: "processing",
+            group: "Processing",
+            label: "Processing steps",
+            description: "The preprocessing steps of the photo.",
+            quantifiers: ALL_QUANTIFIERS,
+            elements: [
+                {
+                    key: "step",
+                    label: "Step",
+                    description: "The step name.",
+                    kind: "text",
+                    operators: ["eq", "neq", "in"],
+                    values: { source: "static", values: ["tilt", "crop", "rescale"] },
+                },
+                {
+                    key: "meta.applied",
+                    label: "Tilt applied",
+                    description: "Whether the tilt was applied.",
+                    kind: "bool",
+                    operators: ["eq", "neq"],
+                    values: { source: "none", values: [] },
+                },
+            ],
+        },
+    ],
+    groups: [
         {
             name: "Camera",
             label: "Camera",
@@ -89,24 +119,40 @@ const schema: RuleSchema = {
                     computed: false,
                     values: { source: "none", values: [] },
                 },
+                {
+                    path: "tags",
+                    group: "File",
+                    label: "Tags",
+                    description: "The photo tags.",
+                    kind: "list",
+                    operators: ["contains", "not_contains"],
+                    computed: false,
+                    values: { source: "tags", values: [] },
+                },
             ],
         },
     ],
 };
 
-const VALUES = { "exif.Make": ["Canon", "Nikon"] };
+const VALUES = { "exif.Make": ["Canon", "Nikon"], objects: ["dog", "cat"] };
 
 function hints(text: string, values: Record<string, string[]> = VALUES) {
     return hintsFor(schema, values, text, text.length);
 }
 
+function inserts(text: string, values?: Record<string, string[]>) {
+    return hints(text, values)?.hints.map((hint) => hint.insert);
+}
+
 describe("hintsFor", () => {
-    it("offers the fields where a condition starts", () => {
+    it("offers the fields and collections where a condition starts", () => {
         const state = hints("");
 
         expect(state?.title).toBe("Fields");
         expect(state?.hints.map((hint) => hint.insert)).toContain('filename = ""');
-        expect(state?.hints.map((hint) => hint.insert)).toContain("objects has ");
+        expect(state?.hints.map((hint) => hint.insert)).toContain("is_favorite ");
+        expect(state?.hints.map((hint) => hint.insert)).toContain("objects [] has any");
+        expect(state?.hints.map((hint) => hint.insert)).toContain("processing [] has any");
     });
 
     it("fills in the quotes of a text field and puts the caret inside them", () => {
@@ -115,14 +161,25 @@ describe("hintsFor", () => {
         expect(hint?.insert).toBe('exif.Make = ""');
         expect(hint?.caret).toBe(hint ? hint.insert.length - 1 : -1);
 
-        const tags = hints("")?.hints.find((item) => item.label === "is_favorite");
+        const tags = hints("")?.hints.find((item) => item.label === "tags");
 
-        expect(tags?.insert).toBe("is_favorite ");
+        expect(tags?.insert).toBe('tags contains ""');
+
+        const favorite = hints("")?.hints.find((item) => item.label === "is_favorite");
+
+        expect(favorite?.insert).toBe("is_favorite ");
+    });
+
+    it("puts the caret inside a collection filter", () => {
+        const hint = hints("")?.hints.find((item) => item.label === "objects");
+
+        expect(hint?.insert).toBe("objects [] has any");
+        expect(hint?.caret).toBe("objects [".length);
     });
 
     it("offers the fields again after and / or / (", () => {
-        for (const text of ["filename = \"a\" and ", "filename = \"a\" or ", "("]) {
-            expect(hints(text)?.hints.map((hint) => hint.insert)).toContain("is_favorite ");
+        for (const text of ['filename = "a" and ', 'filename = "a" or ', "("]) {
+            expect(inserts(text)).toContain("is_favorite ");
         }
     });
 
@@ -139,10 +196,10 @@ describe("hintsFor", () => {
     });
 
     it("offers booleans, known values and a note for free values", () => {
-        expect(hints("is_favorite = ")?.hints.map((hint) => hint.insert)).toEqual(["true", "false"]);
-        expect(hints("exif.Make = ")?.hints.map((hint) => hint.insert)).toEqual(['"Canon"', '"Nikon"']);
-        expect(hints("exif.Make = Can")?.hints.map((hint) => hint.insert)).toEqual(['"Canon"']);
-        expect(hints("is_favorite = tr")?.hints.map((hint) => hint.insert)).toEqual(["true"]);
+        expect(inserts("is_favorite = ")).toEqual(["true", "false"]);
+        expect(inserts("exif.Make = ")).toEqual(['"Canon"', '"Nikon"']);
+        expect(inserts("exif.Make = Can")).toEqual(['"Canon"']);
+        expect(inserts("is_favorite = tr")).toEqual(["true"]);
     });
 
     it("replaces the quote of a partially typed string", () => {
@@ -158,60 +215,64 @@ describe("hintsFor", () => {
         expect(hints("filename in ")?.note).toContain("list");
     });
 
-    it("offers labels, metrics and metric operators for a detection", () => {
-        expect(hints("objects ")?.hints.map((hint) => hint.insert)).toEqual(["has ", "has no "]);
-        expect(hints("objects has ")?.hints.map((hint) => hint.insert)).toEqual(['"dog"', '"cat"']);
-        expect(hints("objects has no ")?.hints.map((hint) => hint.insert)).toEqual(['"dog"', '"cat"']);
-        expect(hints('objects has "dog" ')?.hints.map((hint) => hint.insert)).toEqual(["with "]);
-        expect(hints('objects has "dog" with ')?.hints.map((hint) => hint.insert)).toEqual(["confidence "]);
-        expect(hints('objects has "dog" with confidence ')?.hints.map((hint) => hint.label)).toEqual([
-            "=",
-            "!=",
-            ">",
-            ">=",
-            "<",
-            "<=",
-        ]);
-        expect(hints('objects has "dog" with confidence >= ')?.note).toContain("percentage");
-        expect(hints('objects has "dog" with confidence >= 80% ')).toBeNull();
-        expect(hints('objects has "dog" with confidence >= 80%, ')?.hints.map((hint) => hint.insert)).toEqual([
-            "confidence ",
-        ]);
+    it("offers the element keys inside a filter", () => {
+        const state = hints("objects [");
+
+        expect(state?.title).toBe("Detected objects keys");
+        expect(state?.hints.map((hint) => hint.insert)).toContain('label = ""');
+        expect(state?.hints.map((hint) => hint.insert)).toContain("confidence ");
+    });
+
+    it("offers booleans for element keys", () => {
+        expect(inserts("processing [")).toContain("meta.applied is ");
+        expect(inserts("processing [meta.applied = ")).toEqual(["true", "false"]);
+    });
+
+    it("offers only the operators the element key allows", () => {
+        expect(hints("objects [label ")?.hints.map((hint) => hint.label)).toEqual(["=", "!=", "contains", "in"]);
+        expect(hints("objects [confidence ")?.hints.map((hint) => hint.label)).toEqual(["=", "!=", ">", ">=", "<", "<="]);
+    });
+
+    it("offers element values from the served dictionaries", () => {
+        expect(inserts("objects [label = ")).toEqual(['"dog"', '"cat"']);
+        expect(inserts('objects [label = "do')).toEqual(['"dog"']);
+        expect(inserts("processing [step = ")).toEqual(['"tilt"', '"crop"', '"rescale"']);
+    });
+
+    it("notes the percent scale of a numeric element", () => {
+        expect(hints("objects [confidence >= ")?.note).toContain("percentage");
+    });
+
+    it("offers joiners and closing the filter after a complete element condition", () => {
+        expect(inserts('objects [label = "dog" ')).toEqual(["and ", "or ", "] has any"]);
+    });
+
+    it("offers the quantifiers after the filter closes", () => {
+        expect(inserts('objects [label = "dog"] ')).toEqual(["has any", "has none", "has one", "has all"]);
+        expect(inserts('objects [label = "dog"] has')).toEqual(["any", "none", "one", "all"]);
     });
 
     it("moves past a step keyword that has no trailing space yet", () => {
-        const has = hints("objects has");
+        expect(hints("objects [")?.title).toBe("Detected objects keys");
+        expect(hints('objects [label = "dog" and')?.title).toBe("Detected objects keys");
+        expect(hints('objects [label = "dog"] has')?.title).toBe("Quantifier");
 
-        expect(has?.title).toBe("Object labels");
-        expect(has?.hints.map((hint) => hint.insert)).toEqual(['"dog"', '"cat"']);
-        expect(has?.start).toBe(11);
-        expect(has?.end).toBe(11);
-
-        expect(hints("objects has no")?.title).toBe("Object labels");
-        expect(hints('objects has "dog" with')?.hints.map((hint) => hint.insert)).toEqual(["confidence "]);
-
-        expect(hints("exif.Make is")?.hints.map((hint) => hint.insert)).toEqual(['"Canon"', '"Nikon"']);
-        expect(hints("exif.Make is not")?.hints.map((hint) => hint.insert)).toEqual(['"Canon"', '"Nikon"']);
-        expect(hints("exif.Make contains")?.hints.map((hint) => hint.insert)).toEqual(['"Canon"', '"Nikon"']);
+        expect(inserts("exif.Make is")).toEqual(['"Canon"', '"Nikon"']);
+        expect(inserts("exif.Make is not")).toEqual(['"Canon"', '"Nikon"']);
+        expect(inserts("exif.Make contains")).toEqual(['"Canon"', '"Nikon"']);
         expect(hints("exif.Make in")?.note).toContain("list");
 
         expect(hints('exif.Make = "Canon" and')?.title).toBe("Fields");
-        expect(hints('objects has "dog" and')?.title).toBe("Fields");
+        expect(hints('objects [label = "dog"] has any and')?.title).toBe("Fields");
     });
 
-    it("keeps filtering while the step keyword is incomplete", () => {
-        expect(hints("objects h")?.hints.map((hint) => hint.insert)).toEqual(["has ", "has no "]);
-        expect(hints("exif.Make i")?.hints.map((hint) => hint.insert)).toEqual(["contains ", "in "]);
-    });
-
-    it("offers the next metric after a comma", () => {
-        expect(hints('objects has "dog" with confidence >= 0.8, ')?.hints.map((hint) => hint.insert)).toEqual([
-            "confidence ",
-        ]);
+    it("keeps filtering while a key or operator is incomplete", () => {
+        expect(inserts("objects [conf")).toEqual(["confidence "]);
+        expect(inserts("exif.Make i")).toEqual(["contains ", "in "]);
     });
 
     it("returns nothing in a spot it cannot help with", () => {
-        expect(hints('objects has "dog" with confidence >= 0.8 ')).toBeNull();
         expect(hints("nope = ")).toBeNull();
+        expect(hints("objects [nope ")).toBeNull();
     });
 });

@@ -1,24 +1,23 @@
 """The photo schema that drives rule validation, evaluation and the editor.
 
-One descriptor describes every field a rule can read: its group, label, kind,
-operators, documentation and where its value suggestions come from. The
-backend validates and evaluates against it; the frontend renders it and uses it
-for expression hints, so both sides always agree on what a rule can say.
+One descriptor describes every value a rule can read: scalar fields (path,
+type, unit, range, suggestions) and collections (path plus its filterable
+elements). The backend validates against it and the frontend renders it, while
+evaluation walks the declared `source` generically over `photo_view`.
 """
 
 from __future__ import annotations
 
-import math
 import re
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Any
 
 from trailframe.models.photo import Photo
-from trailframe.services.rules.ast import Condition, Definition
-from trailframe.services.rules.metadata import MISSING, exif_value, image_size, simple_value
+from trailframe.services.rules.ast import Condition, Definition, ElementCondition, ScalarCondition
+from trailframe.services.rules.metadata import MISSING, photo_view, walk
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 MAX_CONDITIONS = 20
 MAX_GROUP_DEPTH = 4
 """How many nested `all`/`any` levels a definition may hold."""
@@ -52,15 +51,22 @@ KIND_OPERATORS: dict[str, tuple[str, ...]] = {
     "bool": ("eq", "neq"),
     "enum": ("eq", "neq", "in"),
     "list": ("contains", "not_contains"),
-    "detection": ("present", "absent"),
 }
 
 NUMERIC_OPS = frozenset({"eq", "neq", "gt", "gte", "lt", "lte"})
 
+QUANTIFIERS: tuple[str, ...] = ("any", "none", "one", "all")
+"""How many elements of a collection must satisfy the filter.
+
+`any` and `none` are existential (false/true on an empty collection); `one`
+requires exactly one match; `all` is true when every element matches (and is
+vacuously true when the collection is empty).
+"""
+
 
 @dataclass(frozen=True, slots=True)
 class FieldSpec:
-    """One metadata field a rule can read."""
+    """One scalar value a rule can read."""
 
     path: str
     group: str
@@ -75,6 +81,8 @@ class FieldSpec:
     max: float | None = None
     step: float | None = None
     unit: str = ""
+    source: str = ""
+    """The path walked over `photo_view`; defaults to `path`."""
 
     @property
     def operators(self) -> tuple[str, ...]:
@@ -82,21 +90,34 @@ class FieldSpec:
 
 
 @dataclass(frozen=True, slots=True)
-class MetricSpec:
-    """One numeric metric of a detection, expressed in the unit `unit`."""
+class ElementSpec:
+    """One key of a collection element a rule can filter on."""
 
-    name: str
+    key: str
     label: str
+    kind: str
     description: str
-    min: float = 0.0
-    max: float = 100.0
-    step: float = 1.0
+    values: str = "none"
+    static_values: tuple[str, ...] = ()
+    min: float | None = None
+    max: float | None = None
+    step: float | None = None
     unit: str = ""
 
+    @property
+    def operators(self) -> tuple[str, ...]:
+        return KIND_OPERATORS[self.kind]
 
-def metric_scale(spec: MetricSpec) -> float:
-    """How many stored units make one rule unit (`confidence` is stored as 0..1)."""
-    return 100.0 if spec.unit == "%" else 1.0
+
+@dataclass(frozen=True, slots=True)
+class CollectionSpec:
+    """A multi-valued field, filtered element by element."""
+
+    path: str
+    group: str
+    label: str
+    description: str
+    elements: tuple[ElementSpec, ...] = field(default_factory=tuple)
 
 
 @dataclass(frozen=True, slots=True)
@@ -184,23 +205,86 @@ OBJECT_LABELS: tuple[str, ...] = (
     "toothbrush",
 )
 
-DETECTION = FieldSpec(
+OBJECTS = CollectionSpec(
     path="objects",
     group="Objects",
-    label="Detected object",
-    kind="detection",
-    description="An object found by the Object scanner, with its confidence and the share of the image it covers.",
-    values="objects",
+    label="Detected objects",
+    description="The objects the Object scanner found, each with its confidence and surface.",
+    elements=(
+        ElementSpec("label", "Label", "text", "The detected object label.", values="objects"),
+        ElementSpec(
+            "confidence",
+            "Confidence",
+            "number",
+            "How sure the detector is, from 0 to 100 percent.",
+            min=0.0,
+            max=1.0,
+            step=0.01,
+            unit="%",
+        ),
+        ElementSpec(
+            "surface",
+            "Surface",
+            "number",
+            "Share of the image area the object covers, from 0 to 100 percent.",
+            min=0.0,
+            max=1.0,
+            step=0.01,
+            unit="%",
+        ),
+    ),
 )
 
-DETECTION_METRICS: tuple[MetricSpec, ...] = (
-    MetricSpec("confidence", "Confidence", "How sure the detector is, from 0 to 100 percent.", unit="%"),
-    MetricSpec("surface", "Surface", "Share of the image area the object covers, from 0 to 100 percent.", unit="%"),
+PROCESSING = CollectionSpec(
+    path="processing",
+    group="Processing",
+    label="Processing steps",
+    description="The preprocessing recipe recorded for the photo.",
+    elements=(
+        ElementSpec(
+            "step", "Step", "enum", "The step name.", values="static", static_values=("tilt", "crop", "rescale")
+        ),
+        ElementSpec("meta.applied", "Tilt applied", "bool", "Whether the tilt correction was applied."),
+        ElementSpec(
+            "meta.crop_mode",
+            "Crop mode",
+            "enum",
+            "How the tilt step cropped the photo.",
+            values="static",
+            static_values=("maximum_valid_rectangle", "none"),
+        ),
+    ),
 )
-METRIC_BY_NAME: dict[str, MetricSpec] = {metric.name: metric for metric in DETECTION_METRICS}
+
+ALTERNATIVES = CollectionSpec(
+    path="alternatives",
+    group="Processing",
+    label="Processed files",
+    description="The alternatives generated by the Processing scanner.",
+    elements=(
+        ElementSpec(
+            "target_size",
+            "Target size",
+            "number",
+            "The longest edge this alternative was generated for.",
+            min=0.0,
+            step=1.0,
+            unit="px",
+        ),
+        ElementSpec("width", "Width", "number", "The alternative's width in pixels.", min=0.0, step=1.0, unit="px"),
+        ElementSpec("height", "Height", "number", "The alternative's height in pixels.", min=0.0, step=1.0, unit="px"),
+        ElementSpec(
+            "file_size", "File size", "number", "The alternative's size in bytes.", min=0.0, step=1.0, unit="B"
+        ),
+        ElementSpec("format", "Format", "text", "The encoded format."),
+        ElementSpec("main", "Main file", "bool", "Whether this alternative is the main one."),
+    ),
+)
+
+COLLECTIONS: tuple[CollectionSpec, ...] = (OBJECTS, PROCESSING, ALTERNATIVES)
+COLLECTION_BY_PATH: dict[str, CollectionSpec] = {spec.path: spec for spec in COLLECTIONS}
 
 GROUPS: tuple[GroupSpec, ...] = (
-    GroupSpec("Objects", "Objects", (DETECTION,)),
     GroupSpec(
         "Camera",
         "Camera",
@@ -260,7 +344,7 @@ GROUPS: tuple[GroupSpec, ...] = (
                 "Image",
                 "Width",
                 "number",
-                "Image width in pixels, from the EXIF dimensions.",
+                "Image width in pixels, from the main file or the EXIF dimensions.",
                 computed=True,
                 min=0.0,
                 step=1.0,
@@ -271,7 +355,7 @@ GROUPS: tuple[GroupSpec, ...] = (
                 "Image",
                 "Height",
                 "number",
-                "Image height in pixels, from the EXIF dimensions.",
+                "Image height in pixels, from the main file or the EXIF dimensions.",
                 computed=True,
                 min=0.0,
                 step=1.0,
@@ -323,6 +407,30 @@ GROUPS: tuple[GroupSpec, ...] = (
                 min=-180.0,
                 max=180.0,
                 step=0.000001,
+            ),
+        ),
+    ),
+    GroupSpec(
+        "Processing",
+        "Processing",
+        (
+            FieldSpec(
+                "processing.tilt.applied",
+                "Processing",
+                "Tilt applied",
+                "bool",
+                "Whether the tilt correction was applied to the alternatives.",
+                source="processing[step=tilt].meta.applied",
+            ),
+            FieldSpec(
+                "processing.tilt.crop_mode",
+                "Processing",
+                "Tilt crop mode",
+                "enum",
+                "How the tilt step cropped the photo.",
+                values="static",
+                static_values=("maximum_valid_rectangle", "none"),
+                source="processing[step=tilt].meta.crop_mode",
             ),
         ),
     ),
@@ -388,28 +496,37 @@ def _field_json(spec: FieldSpec) -> dict[str, Any]:
         if value not in (None, ""):
             payload[name] = value
 
-    if spec.kind == "detection":
-        payload["detection"] = {
-            "label_field": "label",
-            "label_values": {"source": spec.values, "values": list(OBJECT_LABELS)},
-            "operators": list(spec.operators),
-            "metrics": [
-                {
-                    "name": metric.name,
-                    "label": metric.label,
-                    "description": metric.description,
-                    "kind": "number",
-                    "operators": list(KIND_OPERATORS["number"]),
-                    "min": metric.min,
-                    "max": metric.max,
-                    "step": metric.step,
-                    "unit": metric.unit,
-                }
-                for metric in DETECTION_METRICS
-            ],
-        }
+    return payload
+
+
+def _element_json(spec: ElementSpec) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "key": spec.key,
+        "label": spec.label,
+        "description": spec.description,
+        "kind": spec.kind,
+        "operators": list(spec.operators),
+        "values": {"source": spec.values, "values": list(spec.static_values)},
+    }
+
+    for name in ("min", "max", "step", "unit"):
+        value = getattr(spec, name)
+
+        if value not in (None, ""):
+            payload[name] = value
 
     return payload
+
+
+def _collection_json(spec: CollectionSpec) -> dict[str, Any]:
+    return {
+        "path": spec.path,
+        "group": spec.group,
+        "label": spec.label,
+        "description": spec.description,
+        "quantifiers": list(QUANTIFIERS),
+        "elements": [_element_json(element) for element in spec.elements],
+    }
 
 
 def schema() -> dict[str, Any]:
@@ -421,23 +538,25 @@ def schema() -> dict[str, Any]:
             "keywords": [
                 {"token": "and", "kind": "logical", "doc": "Both sides must match."},
                 {"token": "or", "kind": "logical", "doc": "Either side may match."},
-                {"token": "has", "kind": "detection", "doc": "The photo contains a detected object."},
-                {"token": "no", "kind": "detection", "doc": 'Negates a detection: `has no "dog"`.'},
-                {"token": "with", "kind": "detection", "doc": "Narrows a detection by its metrics."},
+                {"token": "not", "kind": "logical", "doc": "Negates the condition that follows."},
+                {"token": "has", "kind": "quantifier", "doc": "Says how many elements must match the filter."},
+                {"token": "any", "kind": "quantifier", "doc": "At least one element matches."},
+                {"token": "none", "kind": "quantifier", "doc": "No element matches."},
+                {"token": "one", "kind": "quantifier", "doc": "Exactly one element matches."},
+                {"token": "all", "kind": "quantifier", "doc": "Every element matches (true when the list is empty)."},
                 {"token": "is", "kind": "comparison", "doc": "Compares a field: `is_favorite is true`."},
-                {"token": "not", "kind": "comparison", "doc": "Negates a comparison: `is not true`."},
                 {"token": "true", "kind": "boolean", "doc": "A true boolean value."},
                 {"token": "false", "kind": "boolean", "doc": "A false boolean value."},
             ],
             "operators": {name: dict(info, name=name) for name, info in OPERATORS.items()},
         },
-        "detection": {
-            "path": DETECTION.path,
-            "label_field": "label",
-            "label_values": {"source": DETECTION.values, "values": list(OBJECT_LABELS)},
-            "operators": list(KIND_OPERATORS["detection"]),
-            "metrics": _field_json(DETECTION)["detection"]["metrics"],
-        },
+        "quantifiers": [
+            {"name": "any", "label": "has any", "doc": "At least one element matches the filter."},
+            {"name": "none", "label": "has none", "doc": "No element matches the filter."},
+            {"name": "one", "label": "has one", "doc": "Exactly one element matches the filter."},
+            {"name": "all", "label": "has all", "doc": "Every element matches the filter."},
+        ],
+        "collections": [_collection_json(spec) for spec in COLLECTIONS],
         "groups": [
             {
                 "name": group.name,
@@ -450,10 +569,19 @@ def schema() -> dict[str, Any]:
 
 
 def field_for(path: str) -> FieldSpec | None:
-    if path.startswith(("exif.", "scores.")):
-        return FIELD_BY_PATH.get(path)
-
     return FIELD_BY_PATH.get(path)
+
+
+def collection_for(path: str) -> CollectionSpec | None:
+    return COLLECTION_BY_PATH.get(path)
+
+
+def element_for(spec: CollectionSpec, key: str) -> ElementSpec | None:
+    for element in spec.elements:
+        if element.key == key:
+            return element
+
+    return None
 
 
 # ----------------------------------------------------------------------
@@ -491,45 +619,38 @@ def resolve(photo: Photo, path: str) -> Any:
     if spec is None:
         return MISSING
 
-    if path == "objects":
-        return (photo.objects or {}).get("detections") or []
+    value = walk(photo_view(photo), spec.source or spec.path)
 
-    if path.startswith("exif."):
-        raw = exif_value(photo, path)
+    if value is MISSING or value is None:
+        return value
 
-        return as_number(raw) if spec.kind == "number" else raw
+    if spec.kind == "number":
+        return as_number(value)
 
-    if path.startswith("scores."):
-        raw = (photo.scores or {}).get(path.split(".", 1)[1])
-
-        return as_number(raw) if spec.kind == "number" else raw
-
-    if path == "width":
-        return image_size(photo)[0]
-
-    if path == "height":
-        return image_size(photo)[1]
-
-    if path == "orientation":
-        width, height = image_size(photo)
-
-        if not width or not height:
-            return None
-
-        if width == height:
-            return "square"
-
-        return "landscape" if width > height else "portrait"
-
-    if path == "date":
-        return photo.date.date().isoformat() if photo.date else None
-
-    value = simple_value(photo, path)
-
-    if value is MISSING:
-        return MISSING
+    if spec.kind == "list":
+        return list(value) if isinstance(value, (list, tuple)) else value
 
     return value
+
+
+def collection_values(photo: Photo, path: str) -> list[Any]:
+    """The elements of a declared collection, or an empty list."""
+    spec = collection_for(path)
+
+    if spec is None:
+        return []
+
+    value = walk(photo_view(photo), spec.path)
+
+    if value is MISSING or not isinstance(value, list):
+        return []
+
+    return value
+
+
+def element_value(item: Any, element: ElementSpec) -> Any:
+    """The value of one declared element key inside a collection element."""
+    return walk(item, element.key)
 
 
 # ----------------------------------------------------------------------
@@ -537,22 +658,9 @@ def resolve(photo: Photo, path: str) -> Any:
 # ----------------------------------------------------------------------
 
 
-def _require_value(condition: Condition) -> None:
-    if condition.type != "scalar":
-        return
-
-    spec = field_for(condition.path)
-
-    if spec is None:
-        raise RuleValidationError(f"Unknown metadata field: {condition.path}")
-
-    op = condition.op
-
-    if op not in spec.operators:
-        raise RuleValidationError(f"'{op}' cannot be used on '{condition.path}'")
-
-    value = condition.value
-
+def _require_operand(
+    label: str, kind: str, op: str, value: Any, low: float | None = None, high: float | None = None
+) -> None:
     if op == "in":
         if not isinstance(value, list) or not value:
             raise RuleValidationError("'in' needs a list of values")
@@ -560,24 +668,53 @@ def _require_value(condition: Condition) -> None:
         values: list[Any] = value
     else:
         if value is None or value == "":
-            raise RuleValidationError(f"'{condition.path}' needs a value")
+            raise RuleValidationError(f"'{label}' needs a value")
 
         values = [value]
 
-    if spec.kind in ("number",):
+    if kind == "number":
         for item in values:
-            if as_number(item) is None:
-                raise RuleValidationError(f"'{condition.path}' needs a number")
+            number = as_number(item)
 
-    if spec.kind == "date":
+            if number is None:
+                raise RuleValidationError(f"'{label}' needs a number")
+
+            if low is not None and high is not None and not low <= number <= high:
+                raise RuleValidationError(f"'{label}' must be between {low:g} and {high:g}")
+
+    if kind == "date":
         for item in values:
             try:
                 date.fromisoformat(str(item))
             except ValueError as exception:
-                raise RuleValidationError(f"'{condition.path}' needs a YYYY-MM-DD date") from exception
+                raise RuleValidationError(f"'{label}' needs a YYYY-MM-DD date") from exception
 
-    if spec.kind == "bool" and not isinstance(value, bool):
-        raise RuleValidationError(f"'{condition.path}' needs true or false")
+    if kind == "bool" and not isinstance(value, bool):
+        raise RuleValidationError(f"'{label}' needs true or false")
+
+
+def _require_value(condition: ScalarCondition) -> None:
+    spec = field_for(condition.path)
+
+    if spec is None:
+        raise RuleValidationError(f"Unknown metadata field: {condition.path}")
+
+    if condition.op not in spec.operators:
+        raise RuleValidationError(f"'{condition.op}' cannot be used on '{condition.path}'")
+
+    _require_operand(condition.path, spec.kind, condition.op, condition.value)
+
+
+def _require_element(condition: ElementCondition, collection: CollectionSpec) -> None:
+    element = element_for(collection, condition.key)
+
+    if element is None:
+        raise RuleValidationError(f"Unknown {collection.path} key: {condition.key}")
+
+    if condition.op not in element.operators:
+        raise RuleValidationError(f"'{condition.op}' cannot be used on '{collection.path}.{condition.key}'")
+
+    _require_operand(condition.key, element.kind, condition.op, condition.value, element.min, element.max)
 
 
 def _count(conditions: list[Condition]) -> int:
@@ -586,13 +723,17 @@ def _count(conditions: list[Condition]) -> int:
     for condition in conditions:
         if condition.type == "group":
             total += _count(condition.conditions)
+        elif condition.type == "collection":
+            total += _count([condition.condition])
         else:
             total += 1
 
     return total
 
 
-def _validate_conditions(conditions: list[Condition], depth: int) -> None:
+def _validate_conditions(
+    conditions: list[Condition], depth: int, scope: str, collection: CollectionSpec | None = None
+) -> None:
     if depth > MAX_GROUP_DEPTH:
         raise RuleValidationError(f"Groups can nest at most {MAX_GROUP_DEPTH} levels")
 
@@ -601,28 +742,32 @@ def _validate_conditions(conditions: list[Condition], depth: int) -> None:
 
     for condition in conditions:
         if condition.type == "group":
-            _validate_conditions(condition.conditions, depth + 1)
+            _validate_conditions(condition.conditions, depth + 1, scope, collection)
 
-        elif condition.type == "detection":
-            known = {metric.name for metric in DETECTION_METRICS}
+        elif condition.type == "collection":
+            if scope != "root":
+                raise RuleValidationError("Collections cannot be nested")
 
-            for metric in condition.metrics:
-                if metric.name not in known:
-                    raise RuleValidationError(f"Unknown object metric: {metric.name}")
+            spec = collection_for(condition.path)
 
-                if metric.op not in KIND_OPERATORS["number"]:
-                    raise RuleValidationError(f"'{metric.op}' cannot be used on '{metric.name}'")
+            if spec is None:
+                raise RuleValidationError(f"Unknown collection: {condition.path}")
 
-                if not math.isfinite(metric.value):
-                    raise RuleValidationError(f"'{metric.name}' needs a finite number")
+            if condition.quantifier not in QUANTIFIERS:
+                raise RuleValidationError(f"Unknown quantifier: {condition.quantifier}")
 
-                spec = METRIC_BY_NAME[metric.name]
-                low, high = spec.min, spec.max
+            _validate_conditions([condition.condition], depth + 1, "element", spec)
 
-                if not low <= metric.value <= high:
-                    raise RuleValidationError(f"'{metric.name}' must be between {low:g} and {high:g}")
+        elif condition.type == "element":
+            if scope != "element" or collection is None:
+                raise RuleValidationError("Element conditions only belong inside a collection filter")
+
+            _require_element(condition, collection)
 
         else:
+            if scope != "root":
+                raise RuleValidationError("A collection filter compares element keys, not photo fields")
+
             _require_value(condition)
 
 
@@ -634,31 +779,39 @@ def validate_definition(definition: Definition) -> Definition:
     if _count(definition.conditions) > MAX_CONDITIONS:
         raise RuleValidationError(f"A rule holds at most {MAX_CONDITIONS} conditions")
 
-    _validate_conditions(definition.conditions, 0)
+    _validate_conditions(definition.conditions, 0, "root")
 
     return definition
 
 
 __all__ = [
-    "DETECTION",
-    "DETECTION_METRICS",
+    "ALTERNATIVES",
+    "COLLECTIONS",
+    "COLLECTION_BY_PATH",
     "FIELDS",
     "FIELD_BY_PATH",
     "GROUPS",
     "KIND_OPERATORS",
     "MAX_CONDITIONS",
     "MAX_GROUP_DEPTH",
-    "METRIC_BY_NAME",
     "NUMERIC_OPS",
+    "OBJECTS",
     "OBJECT_LABELS",
     "OPERATORS",
+    "PROCESSING",
+    "QUANTIFIERS",
     "SCHEMA_VERSION",
+    "CollectionSpec",
+    "ElementSpec",
     "FieldSpec",
-    "MetricSpec",
+    "GroupSpec",
     "RuleValidationError",
     "as_number",
+    "collection_for",
+    "collection_values",
+    "element_for",
+    "element_value",
     "field_for",
-    "metric_scale",
     "resolve",
     "schema",
     "validate_definition",

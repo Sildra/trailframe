@@ -4,13 +4,20 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
 
+ScalarValue = str | float | bool | list[str] | None
 
-class MetricConstraint(BaseModel):
-    """A numeric bound on one detection metric (`confidence`, `surface`)."""
 
-    name: str
-    op: Literal["eq", "neq", "gt", "gte", "lt", "lte"] = "gte"
-    value: float
+class ElementCondition(BaseModel):
+    """One key/value comparison inside a collection filter (`confidence >= 80`).
+
+    Element conditions only make sense inside a `CollectionCondition`; the key
+    is declared by the collection spec, not by the photo's columns.
+    """
+
+    type: Literal["element"] = "element"
+    key: str
+    op: str = "eq"
+    value: ScalarValue = None
 
 
 class ScalarCondition(BaseModel):
@@ -19,19 +26,20 @@ class ScalarCondition(BaseModel):
     type: Literal["scalar"] = "scalar"
     path: str
     op: str = "eq"
-    value: str | float | bool | list[str] | None = None
+    value: ScalarValue = None
 
 
-class DetectionCondition(BaseModel):
-    """A detected object, optionally bound to one label and numeric metrics.
+class CollectionCondition(BaseModel):
+    """A quantified filter over a multi-valued field: `objects[label=dog] has any`.
 
-    The label and its metrics apply to the *same* detection.
+    `condition` is a boolean expression in *element scope*: its leaves are
+    `ElementCondition`s, so every constraint binds to the same element.
     """
 
-    type: Literal["detection"] = "detection"
-    label: str = ""
-    op: Literal["present", "absent"] = "present"
-    metrics: list[MetricConstraint] = Field(default_factory=list)
+    type: Literal["collection"] = "collection"
+    path: str
+    quantifier: Literal["any", "none", "one", "all"] = "any"
+    condition: Condition
 
 
 class GroupCondition(BaseModel):
@@ -42,17 +50,28 @@ class GroupCondition(BaseModel):
     conditions: list[Condition] = Field(default_factory=list)
 
 
-Condition = Annotated[ScalarCondition | DetectionCondition | GroupCondition, Field(discriminator="type")]
+Condition = Annotated[
+    ScalarCondition | CollectionCondition | ElementCondition | GroupCondition, Field(discriminator="type")
+]
 
 
 class Definition(BaseModel):
     """The parsed form of a rule expression; the authoritative rule body."""
 
-    version: int = 1
+    version: int = 2
     match: Literal["all", "any"] = "all"
     conditions: list[Condition] = Field(default_factory=list)
 
 
 GroupCondition.model_rebuild()
+CollectionCondition.model_rebuild()
 
-__all__ = ["Condition", "Definition", "DetectionCondition", "GroupCondition", "MetricConstraint", "ScalarCondition"]
+__all__ = [
+    "CollectionCondition",
+    "Condition",
+    "Definition",
+    "ElementCondition",
+    "GroupCondition",
+    "ScalarCondition",
+    "ScalarValue",
+]

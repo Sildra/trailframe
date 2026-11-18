@@ -6,9 +6,18 @@ from collections.abc import Iterable
 from typing import Any
 
 from trailframe.models.photo import Photo
-from trailframe.services.rules.ast import Condition, Definition, DetectionCondition, ScalarCondition
-from trailframe.services.rules.metadata import MISSING, as_float, detections
-from trailframe.services.rules.schema import METRIC_BY_NAME, as_number, field_for, metric_scale, resolve
+from trailframe.services.rules.ast import CollectionCondition, Condition, Definition, ElementCondition, ScalarCondition
+from trailframe.services.rules.metadata import MISSING, as_float
+from trailframe.services.rules.schema import (
+    CollectionSpec,
+    as_number,
+    collection_for,
+    collection_values,
+    element_for,
+    element_value,
+    field_for,
+    resolve,
+)
 
 
 def tags_for_photo(photo: Photo, rules: Iterable[tuple[str, Definition]]) -> list[str]:
@@ -37,14 +46,22 @@ def matches(photo: Photo, definition: Definition) -> bool:
 
 def _matches_condition(photo: Photo, condition: Condition) -> bool:
     if condition.type == "group":
-        results = [_matches_condition(photo, child) for child in condition.conditions]
+        return _matches_group(condition.match, condition.conditions, lambda child: _matches_condition(photo, child))
 
-        return any(results) if condition.match == "any" else all(results)
+    if condition.type == "collection":
+        return _matches_collection(photo, condition)
 
-    if condition.type == "detection":
-        return _matches_detection(photo, condition)
+    if condition.type == "element":
+        # Element conditions are only meaningful inside a collection filter.
+        return False
 
     return _matches_scalar(photo, condition)
+
+
+def _matches_group(match: str, conditions: list[Condition], evaluate) -> bool:
+    results = [evaluate(condition) for condition in conditions]
+
+    return any(results) if match == "any" else all(results)
 
 
 def _matches_scalar(photo: Photo, condition: ScalarCondition) -> bool:
@@ -58,58 +75,84 @@ def _matches_scalar(photo: Photo, condition: ScalarCondition) -> bool:
     if spec is None:
         return False
 
-    if value is None:
+    return _compare(value, condition.op, condition.value, spec.kind)
+
+
+def _matches_collection(photo: Photo, condition: CollectionCondition) -> bool:
+    spec = collection_for(condition.path)
+
+    if spec is None:
+        return False
+
+    results = [_matches_element(item, condition.condition, spec) for item in collection_values(photo, condition.path)]
+
+    if condition.quantifier == "any":
+        return any(results)
+
+    if condition.quantifier == "none":
+        return not any(results)
+
+    if condition.quantifier == "one":
+        return sum(1 for result in results if result) == 1
+
+    # `all` is vacuously true on an empty collection.
+    return all(results)
+
+
+def _matches_element(item: Any, condition: Condition, spec: CollectionSpec) -> bool:
+    if condition.type == "group":
+        return _matches_group(condition.match, condition.conditions, lambda child: _matches_element(item, child, spec))
+
+    if condition.type != "element":
+        return False
+
+    return _matches_element_condition(item, condition, spec)
+
+
+def _matches_element_condition(item: Any, condition: ElementCondition, spec: CollectionSpec) -> bool:
+    element = element_for(spec, condition.key)
+
+    if element is None:
+        return False
+
+    value = element_value(item, element)
+
+    if value is MISSING or value is None:
         return condition.op in ("neq", "not_contains")
 
     expected = condition.value
 
-    if condition.op == "eq":
-        return _equals(value, expected, spec.kind)
-    if condition.op == "neq":
-        return not _equals(value, expected, spec.kind)
-    if condition.op == "contains":
+    if element.kind == "number":
+        number = as_number(value)
+        bound = as_number(expected)
+
+        if number is None or bound is None:
+            return False
+
+        value = number
+        expected = bound
+
+    return _compare(value, condition.op, expected, element.kind)
+
+
+def _compare(value: Any, op: str, expected: Any, kind: str) -> bool:
+    if value is None:
+        return op in ("neq", "not_contains")
+
+    if op == "eq":
+        return _equals(value, expected, kind)
+    if op == "neq":
+        return not _equals(value, expected, kind)
+    if op == "contains":
         return _contains(value, expected)
-    if condition.op == "not_contains":
+    if op == "not_contains":
         return not _contains(value, expected)
-    if condition.op == "in":
-        return any(_equals(value, item, spec.kind) for item in _list(expected))
-    if condition.op in ("gt", "gte", "lt", "lte"):
-        return _order(value, condition.op, expected, spec.kind)
+    if op == "in":
+        return any(_equals(value, item, kind) for item in _list(expected))
+    if op in ("gt", "gte", "lt", "lte"):
+        return _order(value, op, expected, kind)
 
     return False
-
-
-def _matches_detection(photo: Photo, condition: DetectionCondition) -> bool:
-    found = detections(photo, condition.label or None)
-
-    if condition.op == "absent":
-        return not found
-
-    if not condition.label and not condition.metrics:
-        return bool((photo.objects or {}).get("detections"))
-
-    if not found:
-        return False
-
-    if not condition.metrics:
-        return True
-
-    return any(
-        all(_compare_metric(detection, metric.name, metric.op, metric.value) for metric in condition.metrics)
-        for detection in found
-    )
-
-
-def _compare_metric(detection: dict[str, Any], name: str, op: str, expected: float) -> bool:
-    value = detection.get(name)
-
-    if value is None:
-        return False
-
-    spec = METRIC_BY_NAME.get(name)
-    scale = metric_scale(spec) if spec is not None else 1.0
-
-    return _order(value, op, expected / scale, "number")
 
 
 def _equals(value: Any, expected: Any, kind: str) -> bool:

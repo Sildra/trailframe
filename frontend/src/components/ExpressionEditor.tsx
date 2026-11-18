@@ -7,15 +7,16 @@ const KEYWORDS = new Set([
     "and",
     "or",
     "has",
-    "no",
-    "with",
+    "any",
+    "none",
+    "one",
+    "all",
     "is",
     "not",
     "true",
     "false",
     "contains",
     "in",
-    "objects",
 ]);
 
 /** Shared by the overlay and the textarea so glyphs and caret stay on the same grid. */
@@ -160,8 +161,8 @@ export default function ExpressionEditor({
             return;
         }
 
-        // Hints after a step keyword are appended, so `objects has` becomes
-        // `objects has "dog"` rather than `objects has"dog"`.
+        // Hints after a step keyword are appended, so `objects [label = "dog"] has`
+        // becomes `objects [label = "dog"] has any` rather than `… hasany`.
         const prefix = hints.start === hints.end && hints.start > 0 && !/\s/.test(value[hints.start - 1]) ? " " : "";
         const offset = prefix.length + (hint.caret ?? hint.insert.length);
 
@@ -271,7 +272,7 @@ export default function ExpressionEditor({
                     spellCheck={false}
                     autoCapitalize="off"
                     autoCorrect="off"
-                    placeholder='objects has "dog" with confidence >= 80% and is_favorite is true'
+                    placeholder='objects [label = "dog" and confidence >= 80%] has any and is_favorite is true'
                     aria-label="Rule expression"
                     sx={{
                         position: "relative",

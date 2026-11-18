@@ -1,30 +1,10 @@
-import type { Condition, Definition, NumericOperator, ScalarOperator } from "../rules";
+import type { Condition, Definition, Quantifier, ScalarOperator } from "../rules";
 
-export type FieldKind = "detection" | "text" | "number" | "date" | "bool" | "enum" | "list";
+export type FieldKind = "text" | "number" | "date" | "bool" | "enum" | "list";
 
 export interface ValueSource {
     source: "none" | "static" | "distinct" | "objects" | "tags" | "scanners";
     values: string[];
-}
-
-export interface SchemaMetric {
-    name: string;
-    label: string;
-    description: string;
-    kind: "number";
-    operators: NumericOperator[];
-    min: number;
-    max: number;
-    step: number;
-    unit?: string;
-}
-
-export interface SchemaDetection {
-    path: string;
-    label_field: string;
-    label_values: ValueSource;
-    operators: ("present" | "absent")[];
-    metrics: SchemaMetric[];
 }
 
 export interface SchemaField {
@@ -33,19 +13,36 @@ export interface SchemaField {
     label: string;
     description: string;
     kind: FieldKind;
-    operators: ScalarOperator[] | ("present" | "absent")[];
+    operators: ScalarOperator[];
     computed: boolean;
     values: ValueSource;
     min?: number;
     max?: number;
     step?: number;
     unit?: string;
-    detection?: {
-        label_field: string;
-        label_values: ValueSource;
-        operators: ("present" | "absent")[];
-        metrics: SchemaMetric[];
-    };
+}
+
+/** One filterable key of a collection element. */
+export interface SchemaElement {
+    key: string;
+    label: string;
+    description: string;
+    kind: FieldKind;
+    operators: ScalarOperator[];
+    values: ValueSource;
+    min?: number;
+    max?: number;
+    step?: number;
+    unit?: string;
+}
+
+export interface SchemaCollection {
+    path: string;
+    group: string;
+    label: string;
+    description: string;
+    quantifiers: Quantifier[];
+    elements: SchemaElement[];
 }
 
 export interface SchemaGroup {
@@ -61,6 +58,12 @@ export interface SchemaOperator {
     doc: string;
 }
 
+export interface SchemaQuantifier {
+    name: Quantifier;
+    label: string;
+    doc: string;
+}
+
 export interface RuleSchema {
     version: number;
     capabilities: string[];
@@ -68,7 +71,8 @@ export interface RuleSchema {
         keywords: { token: string; kind: string; doc: string }[];
         operators: Record<string, SchemaOperator>;
     };
-    detection: SchemaDetection;
+    quantifiers: SchemaQuantifier[];
+    collections: SchemaCollection[];
     groups: SchemaGroup[];
 }
 
@@ -79,14 +83,24 @@ export interface ValidationIssue {
 export const MAX_CONDITIONS = 20;
 export const MAX_GROUP_DEPTH = 4;
 
-/** Every field of the schema, flattened. */
+/** Every scalar field of the schema, flattened. */
 export function schemaFields(schema: RuleSchema): SchemaField[] {
     return schema.groups.flatMap((group) => group.fields);
 }
 
-/** The schema field at `path`, when it exists. */
+/** The scalar field at `path`, when it exists. */
 export function fieldFor(schema: RuleSchema, path: string): SchemaField | undefined {
     return schemaFields(schema).find((field) => field.path === path);
+}
+
+/** The collection at `path`, when it exists. */
+export function collectionFor(schema: RuleSchema, path: string): SchemaCollection | undefined {
+    return schema.collections.find((collection) => collection.path === path);
+}
+
+/** The element key of a collection, when it exists. */
+export function elementFor(collection: SchemaCollection, key: string): SchemaElement | undefined {
+    return collection.elements.find((element) => element.key === key);
 }
 
 /** The operator label the editor shows for a field. */
@@ -97,11 +111,6 @@ export function operatorLabel(schema: RuleSchema, name: string): string {
 /** The operator token the expression uses. */
 export function operatorToken(schema: RuleSchema, name: string): string {
     return schema.grammar.operators[name]?.token ?? name;
-}
-
-/** A field uses its detection spec when it is the object field. */
-export function detectionFor(schema: RuleSchema, field: SchemaField) {
-    return field.detection ?? (field.path === schema.detection.path ? schema.detection : undefined);
 }
 
 function issue(message: string): ValidationIssue {
@@ -116,6 +125,51 @@ function isDate(value: unknown): boolean {
     return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(value));
 }
 
+function validateOperand(
+    label: string,
+    kind: FieldKind,
+    op: ScalarOperator,
+    value: unknown,
+    low?: number,
+    high?: number,
+): ValidationIssue[] {
+    if (op === "in") {
+        if (!Array.isArray(value) || value.length === 0) {
+            return [issue("'in' needs a non-empty list of values")];
+        }
+
+        if (kind === "number" && value.some((item) => !isNumber(Number(item)))) {
+            return [issue(`'${label}' needs a list of numbers`)];
+        }
+
+        return [];
+    }
+
+    if (kind === "number") {
+        if (!isNumber(value)) {
+            return [issue(`'${label}' needs a number`)];
+        }
+
+        if (low !== undefined && high !== undefined && (value < low || value > high)) {
+            return [issue(`'${label}' must be between ${low} and ${high}`)];
+        }
+    }
+
+    if (kind === "date" && !isDate(value)) {
+        return [issue(`'${label}' needs a YYYY-MM-DD date`)];
+    }
+
+    if (kind === "bool" && typeof value !== "boolean") {
+        return [issue(`'${label}' needs true or false`)];
+    }
+
+    if ((kind === "text" || kind === "enum" || kind === "list") && typeof value !== "string") {
+        return [issue(`'${label}' needs text`)];
+    }
+
+    return [];
+}
+
 function validateScalar(schema: RuleSchema, condition: Extract<Condition, { type: "scalar" }>): ValidationIssue[] {
     const field = fieldFor(schema, condition.path);
 
@@ -127,63 +181,34 @@ function validateScalar(schema: RuleSchema, condition: Extract<Condition, { type
         return [issue(`'${condition.op}' cannot be used on '${condition.path}'`)];
     }
 
-    if (condition.op === "in") {
-        if (!Array.isArray(condition.value) || condition.value.length === 0) {
-            return [issue("'in' needs a non-empty list of values")];
-        }
-
-        if (field.kind === "number" && condition.value.some((item) => !isNumber(Number(item)))) {
-            return [issue(`'${condition.path}' needs a list of numbers`)];
-        }
-
-        return [];
-    }
-
-    if (field.kind === "number" && !isNumber(condition.value)) {
-        return [issue(`'${condition.path}' needs a number`)];
-    }
-
-    if (field.kind === "date" && !isDate(condition.value)) {
-        return [issue(`'${condition.path}' needs a YYYY-MM-DD date`)];
-    }
-
-    if (field.kind === "bool" && typeof condition.value !== "boolean") {
-        return [issue(`'${condition.path}' needs true or false`)];
-    }
-
-    if ((field.kind === "text" || field.kind === "enum" || field.kind === "list") && typeof condition.value !== "string") {
-        return [issue(`'${condition.path}' needs text`)];
-    }
-
-    return [];
+    return validateOperand(condition.path, field.kind, condition.op, condition.value);
 }
 
-function validateDetection(schema: RuleSchema, condition: Extract<Condition, { type: "detection" }>): ValidationIssue[] {
-    const metrics = new Map(schema.detection.metrics.map((metric) => [metric.name, metric]));
-    const issues: ValidationIssue[] = [];
+function validateElement(
+    collection: SchemaCollection,
+    condition: Extract<Condition, { type: "element" }>,
+): ValidationIssue[] {
+    const element = elementFor(collection, condition.key);
 
-    for (const metric of condition.metrics) {
-        const spec = metrics.get(metric.name);
-
-        if (!spec) {
-            issues.push(issue(`Unknown object metric '${metric.name}'`));
-            continue;
-        }
-
-        if (!isNumber(metric.value)) {
-            issues.push(issue(`'${metric.name}' needs a number`));
-            continue;
-        }
-
-        if (metric.value < spec.min || metric.value > spec.max) {
-            issues.push(issue(`'${metric.name}' must be between ${spec.min} and ${spec.max}`));
-        }
+    if (!element) {
+        return [issue(`Unknown ${collection.path} key '${condition.key}'`)];
     }
 
-    return issues;
+    if (!(element.operators as string[]).includes(condition.op)) {
+        return [issue(`'${condition.op}' cannot be used on '${collection.path}.${condition.key}'`)];
+    }
+
+    return validateOperand(condition.key, element.kind, condition.op, condition.value, element.min, element.max);
 }
 
-function validateConditions(schema: RuleSchema, conditions: Condition[], depth: number, issues: ValidationIssue[]): number {
+function validateConditions(
+    schema: RuleSchema,
+    conditions: Condition[],
+    depth: number,
+    scope: "root" | "element",
+    issues: ValidationIssue[],
+    collection?: SchemaCollection,
+): number {
     if (depth > MAX_GROUP_DEPTH) {
         issues.push(issue(`Groups can nest at most ${MAX_GROUP_DEPTH} levels`));
         return 0;
@@ -197,16 +222,53 @@ function validateConditions(schema: RuleSchema, conditions: Condition[], depth: 
                 issues.push(issue("Every group needs at least one condition"));
             }
 
-            total += validateConditions(schema, condition.conditions, depth + 1, issues);
-        } else {
+            total += validateConditions(schema, condition.conditions, depth + 1, scope, issues, collection);
+            continue;
+        }
+
+        if (condition.type === "collection") {
             total += 1;
 
-            if (condition.type === "scalar") {
-                issues.push(...validateScalar(schema, condition));
-            } else {
-                issues.push(...validateDetection(schema, condition));
+            if (scope !== "root") {
+                issues.push(issue("Collections cannot be nested"));
+                continue;
             }
+
+            const spec = collectionFor(schema, condition.path);
+
+            if (!spec) {
+                issues.push(issue(`Unknown collection '${condition.path}'`));
+                continue;
+            }
+
+            if (!spec.quantifiers.includes(condition.quantifier)) {
+                issues.push(issue(`Unknown quantifier '${condition.quantifier}'`));
+            }
+
+            total += validateConditions(schema, [condition.condition], depth + 1, "element", issues, spec) - 1;
+            continue;
         }
+
+        if (condition.type === "element") {
+            total += 1;
+
+            if (scope !== "element" || !collection) {
+                issues.push(issue("Element conditions only belong inside a collection filter"));
+                continue;
+            }
+
+            issues.push(...validateElement(collection, condition));
+            continue;
+        }
+
+        total += 1;
+
+        if (scope !== "root") {
+            issues.push(issue("A collection filter compares element keys, not photo fields"));
+            continue;
+        }
+
+        issues.push(...validateScalar(schema, condition));
     }
 
     return total;
@@ -221,7 +283,7 @@ export function validateDefinition(schema: RuleSchema, definition: Definition): 
         return issues;
     }
 
-    const total = validateConditions(schema, definition.conditions, 0, issues);
+    const total = validateConditions(schema, definition.conditions, 0, "root", issues);
 
     if (total > MAX_CONDITIONS) {
         issues.push(issue(`A rule holds at most ${MAX_CONDITIONS} conditions`));

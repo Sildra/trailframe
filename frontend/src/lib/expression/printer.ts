@@ -1,14 +1,14 @@
 import type {
+    CollectionCondition,
     Condition,
     Definition,
-    DetectionCondition,
+    ElementCondition,
     GroupCondition,
     MatchMode,
-    MetricConstraint,
     ScalarCondition,
     ScalarOperator,
 } from "../rules";
-import { fieldFor, type RuleSchema } from "./schema";
+import { collectionFor, elementFor, fieldFor, type RuleSchema, type SchemaCollection } from "./schema";
 import { isPrefixUnit } from "./units";
 
 const OPERATOR_TOKENS: Record<ScalarOperator, string> = {
@@ -27,13 +27,36 @@ function quote(value: string): string {
     return JSON.stringify(value);
 }
 
+/** Trim the float noise of a unit conversion (`0.07 * 100` is `7.000000000000001`). */
+function round(value: number): number {
+    return Number(value.toFixed(6));
+}
+
+/**
+ * Write a number with its declared unit. `%` is the only semantic unit: the AST
+ * stores the fraction, so it is multiplied back to the 0–100 scale on print.
+ */
+function numberText(value: number, unit?: string): string {
+    if (unit === "%") {
+        return `${round(value * 100)}%`;
+    }
+
+    const text = String(round(value));
+
+    if (!unit) {
+        return text;
+    }
+
+    return isPrefixUnit(unit) ? `${unit}${text}` : `${text}${unit}`;
+}
+
 function printValue(value: unknown, unit?: string): string {
     if (typeof value === "string") {
         return /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : quote(value);
     }
 
     if (typeof value === "number") {
-        return withUnit(String(value), unit);
+        return numberText(value, unit);
     }
 
     if (typeof value === "boolean") {
@@ -47,35 +70,46 @@ function printValue(value: unknown, unit?: string): string {
     return quote("");
 }
 
-/** Write a number with its unit: `80%`, `35mm`, `f/2.8`. */
-function withUnit(value: string, unit: string | undefined): string {
-    if (!unit) {
-        return value;
+function printElement(condition: ElementCondition, collection: SchemaCollection | undefined): string {
+    const unit = collection ? elementFor(collection, condition.key)?.unit : undefined;
+
+    if (typeof condition.value === "boolean" && (condition.op === "eq" || condition.op === "neq")) {
+        return `${condition.key} is ${condition.op === "neq" ? "not " : ""}${condition.value}`;
     }
 
-    return isPrefixUnit(unit) ? `${unit}${value}` : `${value}${unit}`;
+    return `${condition.key} ${OPERATOR_TOKENS[condition.op]} ${printValue(condition.value, unit)}`;
 }
 
-function printMetric(metric: MetricConstraint, schema?: RuleSchema): string {
-    const unit = schema
-        ? schema.detection.metrics.find((item) => item.name === metric.name)?.unit
-        : "%";
+function printElementExpression(condition: Condition, collection: SchemaCollection | undefined): string {
+    if (condition.type === "group") {
+        return printElementGroup(condition.match, condition.conditions, collection);
+    }
 
-    return `${metric.name} ${OPERATOR_TOKENS[metric.op]} ${withUnit(String(metric.value), unit)}`;
+    if (condition.type !== "element") {
+        return "";
+    }
+
+    return printElement(condition, collection);
 }
 
-function printDetection(condition: DetectionCondition, schema?: RuleSchema): string {
-    const parts = ["objects"];
+function printElementGroup(
+    match: MatchMode,
+    conditions: Condition[],
+    collection: SchemaCollection | undefined,
+): string {
+    const rendered = conditions.map((condition) =>
+        condition.type === "group"
+            ? `(${printElementGroup(condition.match, condition.conditions, collection)})`
+            : printElementExpression(condition, collection),
+    );
 
-    if (condition.label || condition.op === "absent") {
-        parts.push(condition.op === "absent" ? "has no" : "has", quote(condition.label));
-    }
+    return rendered.join(match === "any" ? " or " : " and ");
+}
 
-    if (condition.metrics.length > 0) {
-        parts.push("with", condition.metrics.map((metric) => printMetric(metric, schema)).join(", "));
-    }
+function printCollection(condition: CollectionCondition, schema?: RuleSchema): string {
+    const collection = schema ? collectionFor(schema, condition.path) : undefined;
 
-    return parts.join(" ");
+    return `${condition.path} [${printElementExpression(condition.condition, collection)}] has ${condition.quantifier}`;
 }
 
 function printScalar(condition: ScalarCondition, schema?: RuleSchema): string {
@@ -88,20 +122,24 @@ function printScalar(condition: ScalarCondition, schema?: RuleSchema): string {
     return `${condition.path} ${OPERATOR_TOKENS[condition.op]} ${printValue(condition.value, unit)}`;
 }
 
+function printConditionInner(condition: Condition, schema?: RuleSchema): string {
+    if (condition.type === "group") {
+        return `(${printGroup(condition.match, condition.conditions, schema)})`;
+    }
+
+    if (condition.type === "collection") {
+        return printCollection(condition, schema);
+    }
+
+    if (condition.type === "element") {
+        return printElement(condition, undefined);
+    }
+
+    return printScalar(condition, schema);
+}
+
 function printGroup(match: MatchMode, conditions: Condition[], schema?: RuleSchema): string {
-    const rendered = conditions.map((condition) => {
-        if (condition.type === "group") {
-            return `(${printGroup(condition.match, condition.conditions, schema)})`;
-        }
-
-        if (condition.type === "detection") {
-            return printDetection(condition, schema);
-        }
-
-        return printScalar(condition, schema);
-    });
-
-    return rendered.join(match === "any" ? " or " : " and ");
+    return conditions.map((condition) => printConditionInner(condition, schema)).join(match === "any" ? " or " : " and ");
 }
 
 /** Render an AST back to the expression language. */
@@ -119,9 +157,5 @@ export function printCondition(condition: Condition, schema?: RuleSchema): strin
         return printGroup(condition.match, (condition as GroupCondition).conditions, schema);
     }
 
-    if (condition.type === "detection") {
-        return printDetection(condition, schema);
-    }
-
-    return printScalar(condition, schema);
+    return printConditionInner(condition, schema);
 }

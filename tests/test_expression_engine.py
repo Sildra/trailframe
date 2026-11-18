@@ -12,13 +12,25 @@ class TestExpressionEngine:
     def test_parse(self, app):
         response = app.post(
             "/api/rules/expression/parse",
-            json={"expression": 'objects has "dog" with confidence >= 80% and exif.FNumber >= f/2.8'},
+            json={"expression": 'objects [label = "dog" and confidence >= 80%] has any and exif.FNumber >= f/2.8'},
         )
 
         assert response.status_code == 200
         body = response.json()
         assert body["issues"] == []
-        assert body["definition"]["conditions"][0]["metrics"] == [{"name": "confidence", "op": "gte", "value": 80}]
+        assert body["definition"]["conditions"][0] == {
+            "type": "collection",
+            "path": "objects",
+            "quantifier": "any",
+            "condition": {
+                "type": "group",
+                "match": "all",
+                "conditions": [
+                    {"type": "element", "key": "label", "op": "eq", "value": "dog"},
+                    {"type": "element", "key": "confidence", "op": "gte", "value": 0.8},
+                ],
+            },
+        }
         assert body["definition"]["conditions"][1] == {
             "type": "scalar",
             "path": "exif.FNumber",
@@ -26,23 +38,25 @@ class TestExpressionEngine:
             "value": 2.8,
         }
 
-        invalid = app.post("/api/rules/expression/parse", json={"expression": "width >= 1200"})
+        invalid = app.post("/api/rules/expression/parse", json={"expression": "objects [meta.applied] has any"})
 
         assert invalid.status_code == 200
         assert invalid.json()["definition"] is None
-        assert invalid.json()["issues"][0]["message"] == "Expected the unit 'px' after the number"
+        assert "comparison operator" in invalid.json()["issues"][0]["message"]
 
     @allure.title("Renders a definition back to canonical expression text")
     def test_print(self, app):
         parsed = app.post(
             "/api/rules/expression/parse",
-            json={"expression": 'objects has "dog" with confidence >= 80% and width >= 1200px'},
+            json={"expression": 'objects [label = "dog" and confidence >= 80%] has any and width >= 1200px'},
         ).json()
 
         response = app.post("/api/rules/expression/print", json={"definition": parsed["definition"]})
 
         assert response.status_code == 200
-        assert response.json()["expression"] == 'objects has "dog" with confidence >= 80% and width >= 1200px'
+        assert (
+            response.json()["expression"] == 'objects [label = "dog" and confidence >= 80%] has any and width >= 1200px'
+        )
 
     @allure.title("Rejects expression conversion when JavaScript modules are disabled")
     def test_disabled_returns_service_unavailable(self, app, monkeypatch):

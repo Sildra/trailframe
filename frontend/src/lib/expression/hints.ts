@@ -1,10 +1,21 @@
-/** Contextual hints for the rule expression language: fields, operators, values. */
+/** Contextual hints for the rule expression language: fields, keys, operators, values. */
 
 import type { ScalarOperator } from "../rules";
-import { fieldFor, type RuleSchema, type SchemaField, type SchemaMetric } from "./schema";
+import { currentSegment, openCollection } from "./context";
+import {
+    collectionFor,
+    elementFor,
+    fieldFor,
+    type FieldKind,
+    type RuleSchema,
+    type SchemaCollection,
+    type SchemaElement,
+    type SchemaField,
+    type ValueSource,
+} from "./schema";
 import { tokenize, type Token } from "./tokens";
 
-export type HintKind = "field" | "operator" | "value" | "label" | "metric" | "keyword";
+export type HintKind = "field" | "operator" | "value" | "element" | "quantifier" | "keyword";
 
 export interface Hint {
     /** Text inserted at the caret, replacing the word being typed. */
@@ -30,7 +41,7 @@ export interface HintState {
     note?: string;
 }
 
-const MAX_HINTS = 10;
+const MAX_HINTS = 12;
 
 /** Operators as written in an expression, mapped to their schema names. */
 const OPERATOR_NAMES: Record<string, ScalarOperator> = {
@@ -46,28 +57,23 @@ const OPERATOR_NAMES: Record<string, ScalarOperator> = {
     in: "in",
 };
 
+/** One value slot: a scalar field or one key of a collection element. */
+interface ValueSpec {
+    /** Key into the served value dictionaries. */
+    key: string;
+    /** The path or `collection.key` shown in the hint title. */
+    label: string;
+    kind: FieldKind;
+    values: ValueSource;
+    unit?: string;
+}
+
 function quoted(value: string): string {
     return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 }
 
 function word(token: Token | undefined): string {
     return token?.kind === "word" ? token.text.toLowerCase() : "";
-}
-
-/** The tokens of the condition the caret sits in. */
-function lastSegment(tokens: Token[]): Token[] {
-    let start = 0;
-
-    tokens.forEach((token, index) => {
-        const isJoiner = token.kind === "word" && ["and", "or"].includes(token.text.toLowerCase());
-        const isGroup = token.kind === "punct" && token.text === "(";
-
-        if (isJoiner || isGroup) {
-            start = index + 1;
-        }
-    });
-
-    return tokens.slice(start);
 }
 
 function filterHints(hints: Hint[], partial: string): Hint[] {
@@ -80,65 +86,110 @@ function filterHints(hints: Hint[], partial: string): Hint[] {
     return hints.filter((hint) => hint.label.toLowerCase().includes(needle)).slice(0, MAX_HINTS);
 }
 
-function fieldHints(schema: RuleSchema): Hint[] {
-    return schema.groups.flatMap((group) =>
-        group.fields.map((field) => {
-            const detail = `${field.label} — ${field.description}`;
+function specOfField(field: SchemaField): ValueSpec {
+    return { key: field.path, label: field.path, kind: field.kind, values: field.values, unit: field.unit };
+}
 
-            if (field.kind === "detection") {
-                return { insert: `${field.path} has `, label: `${field.path} has`, detail, kind: "field" as const };
-            }
+function specOfElement(element: SchemaElement, collection: SchemaCollection): ValueSpec {
+    const key = element.values.source === "objects" ? "objects" : element.key;
+
+    return {
+        key,
+        label: `${collection.path}.${element.key}`,
+        kind: element.kind,
+        values: element.values,
+        unit: element.unit,
+    };
+}
+
+function knownValues(values: Record<string, string[]>, spec: ValueSpec): string[] {
+    if (spec.values.source === "static") {
+        return spec.values.values;
+    }
+
+    return values[spec.key] ?? [];
+}
+
+function fieldHints(schema: RuleSchema): Hint[] {
+    const fields = schema.groups.flatMap((group) =>
+        group.fields.map((field): Hint => {
+            const detail = `${field.label} — ${field.description}`;
 
             // Text-like values get their quotes and comparison filled in, with
             // the caret inside the quotes so typing lands in the right place.
             if (field.kind === "text" || field.kind === "enum") {
                 const insert = `${field.path} = ""`;
 
-                return { insert, label: field.path, detail, kind: "field" as const, caret: insert.length - 1 };
+                return { insert, label: field.path, detail, kind: "field", caret: insert.length - 1 };
             }
 
             if (field.kind === "list") {
                 const insert = `${field.path} contains ""`;
 
-                return { insert, label: field.path, detail, kind: "field" as const, caret: insert.length - 1 };
+                return { insert, label: field.path, detail, kind: "field", caret: insert.length - 1 };
             }
 
-            return { insert: `${field.path} `, label: field.path, detail, kind: "field" as const };
+            return { insert: `${field.path} `, label: field.path, detail, kind: "field" };
         }),
     );
+
+    const collections = schema.collections.map((collection): Hint => {
+        const insert = `${collection.path} [] has any`;
+
+        return {
+            insert,
+            label: collection.path,
+            detail: `${collection.label} — ${collection.description}`,
+            kind: "field",
+            caret: collection.path.length + 2,
+        };
+    });
+
+    return [...fields, ...collections];
 }
 
-function operatorHints(schema: RuleSchema, field: SchemaField): Hint[] {
-    return (field.operators as ScalarOperator[]).map((op) => {
+function operatorHints(schema: RuleSchema, operators: ScalarOperator[], fallback: string): Hint[] {
+    return operators.map((op) => {
         const spec = schema.grammar.operators[op];
 
         return {
             insert: `${spec?.token ?? op} `,
             label: spec?.token ?? op,
-            detail: spec ? `${spec.label} — ${spec.doc}` : field.label,
+            detail: spec ? `${spec.label} — ${spec.doc}` : fallback,
             kind: "operator" as const,
         };
     });
 }
 
-function valueHints(values: Record<string, string[]>, field: SchemaField): Hint[] {
-    const known = field.values.source === "static" ? field.values.values : (values[field.path] ?? []);
-
-    return known.map((value) => ({
+function valueHints(values: Record<string, string[]>, spec: ValueSpec): Hint[] {
+    return knownValues(values, spec).map((value) => ({
         insert: quoted(value),
         label: value,
-        detail: field.label,
+        detail: spec.label,
         kind: "value" as const,
     }));
 }
 
-function metricHints(metric: SchemaMetric): Hint {
-    return {
-        insert: `${metric.name} `,
-        label: metric.name,
-        detail: metric.description,
-        kind: "metric",
-    };
+function elementHint(element: SchemaElement): Hint {
+    const detail = `${element.label} — ${element.description}`;
+
+    if (element.kind === "text" || element.kind === "enum") {
+        const insert = `${element.key} = ""`;
+
+        return { insert, label: element.key, detail, kind: "element", caret: insert.length - 1 };
+    }
+
+    if (element.kind === "list") {
+        const insert = `${element.key} contains ""`;
+
+        return { insert, label: element.key, detail, kind: "element", caret: insert.length - 1 };
+    }
+
+    if (element.kind === "bool") {
+        return { insert: `${element.key} is `, label: element.key, detail, kind: "element" };
+    }
+
+    return { insert: `${element.key} `, label: element.key, detail, kind: "element" };
 }
 
 /** The advice shown where a free number is allowed. */
@@ -154,23 +205,25 @@ function numberNote(unit: string | undefined): string {
     return "A number";
 }
 
-function labelHints(schema: RuleSchema): Hint[] {
-    return schema.detection.label_values.values.map((label) => ({
-        insert: quoted(label),
-        label,
-        detail: "A detected object label",
-        kind: "label" as const,
+function quantifierHints(schema: RuleSchema, withHas: boolean): Hint[] {
+    return schema.quantifiers.map((quantifier) => ({
+        insert: withHas ? `has ${quantifier.name}` : quantifier.name,
+        label: withHas ? `has ${quantifier.name}` : quantifier.name,
+        detail: quantifier.doc,
+        kind: "quantifier" as const,
     }));
 }
 
-function scalarHints(
+/** Operators, then the operand, for one field or element key. */
+function predicateHints(
     schema: RuleSchema,
     values: Record<string, string[]>,
-    field: SchemaField,
+    spec: ValueSpec,
+    operators: ScalarOperator[],
     rest: Token[],
 ): HintState | null {
     if (rest.length === 0) {
-        return { start: 0, end: 0, title: `Operators for ${field.path}`, hints: operatorHints(schema, field) };
+        return { start: 0, end: 0, title: `Operators for ${spec.label}`, hints: operatorHints(schema, operators, spec.label) };
     }
 
     const op = OPERATOR_NAMES[word(rest[0])] ?? OPERATOR_NAMES[rest[0]?.text ?? ""];
@@ -180,17 +233,17 @@ function scalarHints(
             return {
                 start: 0,
                 end: 0,
-                title: `Values for ${field.path}`,
+                title: `Values for ${spec.label}`,
                 hints: [],
                 note: 'A list, e.g. ["Norway", "Sweden"]',
             };
         }
 
-        if (field.kind === "bool") {
+        if (spec.kind === "bool") {
             return {
                 start: 0,
                 end: 0,
-                title: `Values for ${field.path}`,
+                title: `Values for ${spec.label}`,
                 hints: [
                     { insert: "true", label: "true", detail: "The value is true", kind: "value" },
                     { insert: "false", label: "false", detail: "The value is false", kind: "value" },
@@ -198,127 +251,164 @@ function scalarHints(
             };
         }
 
-        if (field.kind === "number") {
-            return {
-                start: 0,
-                end: 0,
-                title: `Values for ${field.path}`,
-                hints: [],
-                note: numberNote(field.unit),
-            };
+        if (spec.kind === "number") {
+            return { start: 0, end: 0, title: `Values for ${spec.label}`, hints: [], note: numberNote(spec.unit) };
         }
 
-        if (field.kind === "date") {
+        if (spec.kind === "date") {
             return {
                 start: 0,
                 end: 0,
-                title: `Values for ${field.path}`,
+                title: `Values for ${spec.label}`,
                 hints: [],
                 note: "A date as YYYY-MM-DD",
             };
         }
 
-        return { start: 0, end: 0, title: `Values for ${field.path}`, hints: valueHints(values, field) };
+        return { start: 0, end: 0, title: `Values for ${spec.label}`, hints: valueHints(values, spec) };
     }
 
     if (rest.length === 2 && word(rest[0]) === "is" && word(rest[1]) === "not") {
-        return { start: 0, end: 0, title: `Values for ${field.path}`, hints: valueHints(values, field) };
+        return { start: 0, end: 0, title: `Values for ${spec.label}`, hints: valueHints(values, spec) };
     }
 
     return null;
 }
 
-function detectionHints(schema: RuleSchema, rest: Token[]): HintState | null {
-    const withIndex = rest.findIndex((token) => word(token) === "with");
+/** What can follow a complete element condition: a joiner, or closing the filter. */
+function joinerHints(): Hint[] {
+    return [
+        { insert: "and ", label: "and", detail: "Both must match", kind: "keyword" },
+        { insert: "or ", label: "or", detail: "Either may match", kind: "keyword" },
+        { insert: "] has any", label: "] has any", detail: "Close the filter", kind: "quantifier" },
+    ];
+}
 
-    if (withIndex >= 0) {
-        // Units (`80%`) are syntax, not a step, so they must not shift the maths.
-        const metrics = rest.slice(withIndex + 1).filter((token) => token.kind !== "unit");
-        const step = metrics.length % 4;
+function elementHints(
+    schema: RuleSchema,
+    values: Record<string, string[]>,
+    collection: SchemaCollection,
+    segment: Token[],
+): HintState | null {
+    if (segment.length === 0) {
+        return {
+            start: 0,
+            end: 0,
+            title: `${collection.label} keys`,
+            hints: collection.elements.map((element) => elementHint(element)),
+        };
+    }
 
-        if (step === 0) {
-            return {
-                start: 0,
-                end: 0,
-                title: "Metrics",
-                hints: schema.detection.metrics.map(metricHints),
-            };
-        }
+    const first = segment[0];
 
-        if (step === 1) {
-            const name = word(metrics[metrics.length - 1]);
-            const metric = schema.detection.metrics.find((item) => item.name === name);
-
-            return {
-                start: 0,
-                end: 0,
-                title: name ? `Operators for ${name}` : "Operators",
-                hints: (metric?.operators ?? []).map((op) => {
-                    const spec = schema.grammar.operators[op];
-
-                    return {
-                        insert: `${spec?.token ?? op} `,
-                        label: spec?.token ?? op,
-                        detail: spec?.doc ?? op,
-                        kind: "operator" as const,
-                    };
-                }),
-            };
-        }
-
-        if (step === 2) {
-            const name = word(metrics[metrics.length - 2]);
-            const metric = schema.detection.metrics.find((item) => item.name === name);
-
-            return {
-                start: 0,
-                end: 0,
-                title: "Metric value",
-                hints: [],
-                note: numberNote(metric?.unit),
-            };
-        }
-
+    if (first.kind !== "word") {
         return null;
     }
 
+    const element = elementFor(collection, first.text);
+
+    if (!element) {
+        return null;
+    }
+
+    if (segment.length === 1) {
+        return {
+            start: 0,
+            end: 0,
+            title: `Operators for ${element.key}`,
+            hints: operatorHints(schema, element.operators, element.label),
+        };
+    }
+
+    const state = predicateHints(
+        schema,
+        values,
+        specOfElement(element, collection),
+        element.operators,
+        segment.slice(1),
+    );
+
+    if (state) {
+        return state;
+    }
+
+    if (segment.length >= 3) {
+        return { start: 0, end: 0, title: "Continue the filter", hints: joinerHints() };
+    }
+
+    return null;
+}
+
+/** The steps after a collection path: its filter, then `has <quantifier>`. */
+function collectionHints(schema: RuleSchema, rest: Token[]): HintState | null {
     if (rest.length === 0) {
         return {
             start: 0,
             end: 0,
-            title: "Detection",
-            hints: [
-                { insert: "has ", label: "has", detail: "The photo contains an object", kind: "keyword" },
-                { insert: "has no ", label: "has no", detail: "The photo contains no such object", kind: "keyword" },
-            ],
+            title: "Filter",
+            hints: [{ insert: "[", label: "[", detail: "Open the element filter", kind: "keyword" }],
         };
     }
 
-    const no = word(rest[1]) === "no";
-    const labelIndex = no ? 2 : 1;
-
-    if (rest.length <= labelIndex) {
-        return { start: 0, end: 0, title: "Object labels", hints: labelHints(schema) };
+    if (!(rest[0].kind === "punct" && rest[0].text === "[")) {
+        return null;
     }
 
-    return {
-        start: 0,
-        end: 0,
-        title: "Detection",
-        hints: [{ insert: "with ", label: "with", detail: "Narrow the detection by its metrics", kind: "keyword" }],
-    };
+    const close = rest.findIndex((token) => token.kind === "punct" && token.text === "]");
+
+    if (close < 0) {
+        return null;
+    }
+
+    const after = rest.slice(close + 1);
+
+    if (after.length === 0) {
+        return { start: 0, end: 0, title: "Quantifier", hints: quantifierHints(schema, true) };
+    }
+
+    if (after.length === 1 && word(after[0]) === "has") {
+        return { start: 0, end: 0, title: "Quantifier", hints: quantifierHints(schema, false) };
+    }
+
+    return null;
+}
+
+function rootHints(schema: RuleSchema, values: Record<string, string[]>, segment: Token[]): HintState | null {
+    if (segment.length === 0) {
+        return { start: 0, end: 0, title: "Fields", hints: fieldHints(schema) };
+    }
+
+    const first = segment[0];
+
+    if (first.kind !== "word") {
+        return null;
+    }
+
+    const collection = collectionFor(schema, first.text);
+
+    if (collection) {
+        return collectionHints(schema, segment.slice(1));
+    }
+
+    const field = fieldFor(schema, first.text);
+
+    if (!field) {
+        return null;
+    }
+
+    return predicateHints(schema, values, specOfField(field), field.operators, segment.slice(1));
 }
 
 /**
  * True when `partial` is a step keyword that the grammar already moved past, so
  * the hints belong to the step after it even though no space was typed yet:
- * `objects has`, `objects has no`, `exif.Make is`, `… with`, `… and`.
+ * `objects [` (nothing), `objects […] has`, `exif.Make is`, `… and`.
  */
-function completesStep(tokens: Token[], partial: string): boolean {
-    const segment = lastSegment(tokens);
-    const first = segment[0];
+function completesStep(schema: RuleSchema, tokens: Token[], partial: string): boolean {
+    const bracket = openCollection(schema, tokens);
+    const segment = currentSegment(bracket ? tokens.slice(bracket.open + 1) : tokens);
 
-    if (first === undefined) {
+    if (segment.length === 0) {
         return false;
     }
 
@@ -326,24 +416,10 @@ function completesStep(tokens: Token[], partial: string): boolean {
         return segment.length >= 3;
     }
 
-    const detection = first.kind === "word" && first.text.toLowerCase() === "objects";
+    if (partial === "has") {
+        const last = segment[segment.length - 1];
 
-    if (detection) {
-        const rest = segment.slice(1);
-
-        if (rest.some((token) => word(token) === "with")) {
-            return false;
-        }
-
-        if (rest.length === 0) {
-            return partial === "has";
-        }
-
-        if (rest.length === 1 && word(rest[0]) === "has") {
-            return partial === "no";
-        }
-
-        return partial === "with" && rest[rest.length - 1].kind === "string";
+        return last.kind === "punct" && last.text === "]";
     }
 
     if (partial === "is" || partial === "contains" || partial === "in") {
@@ -358,8 +434,8 @@ function completesStep(tokens: Token[], partial: string): boolean {
 }
 
 /**
- * The hints for the caret position: the fields where a condition starts, the
- * operators after a field, the values after an operator, labels and metrics.
+ * The hints for the caret position: fields where a condition starts, element
+ * keys inside a filter, the operators after a field or key, and the values.
  */
 export function hintsFor(
     schema: RuleSchema,
@@ -381,25 +457,17 @@ export function hintsFor(
 
     // The step keyword is already typed: hints belong after it, and a hint is
     // appended at the caret instead of replacing the keyword.
-    if (partial && completesStep(tokens, partial.toLowerCase())) {
+    if (partial && completesStep(schema, tokens, partial.toLowerCase())) {
         tokens.push({ kind: "word", text: partial, raw: partial, start, end });
         partial = "";
         start = end;
     }
 
-    const segment = lastSegment(tokens);
-    const first = segment[0];
-    let state: HintState | null = null;
-
-    if (segment.length === 0) {
-        state = { start, end, title: "Fields", hints: fieldHints(schema) };
-    } else if (first.kind === "word" && first.text.toLowerCase() === "objects") {
-        state = detectionHints(schema, segment.slice(1));
-    } else if (first.kind === "word") {
-        const field = fieldFor(schema, first.text);
-
-        state = field ? scalarHints(schema, values, field, segment.slice(1)) : null;
-    }
+    const bracket = openCollection(schema, tokens);
+    const segment = currentSegment(bracket ? tokens.slice(bracket.open + 1) : tokens);
+    const state = bracket
+        ? elementHints(schema, values, bracket.collection, segment)
+        : rootHints(schema, values, segment);
 
     if (state === null) {
         return null;

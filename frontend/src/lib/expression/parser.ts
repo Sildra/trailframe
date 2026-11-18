@@ -1,19 +1,18 @@
 import type {
+    CollectionCondition,
     Condition,
     Definition,
-    DetectionCondition,
+    ElementCondition,
     MatchMode,
-    MetricConstraint,
-    NumericOperator,
+    Quantifier,
     ScalarCondition,
     ScalarOperator,
     ScalarValue,
 } from "../rules";
-import { fieldFor, type RuleSchema } from "./schema";
 import { tokenize, type ParseIssue, type Token } from "./tokens";
 import { isKnownUnit, isPrefixUnit } from "./units";
 
-const NUMERIC_OPS = new Set<NumericOperator>(["eq", "neq", "gt", "gte", "lt", "lte"]);
+const QUANTIFIERS = new Set<Quantifier>(["any", "none", "one", "all"]);
 
 const OPERATOR_BY_TOKEN: Record<string, ScalarOperator> = {
     "=": "eq",
@@ -27,13 +26,17 @@ const OPERATOR_BY_TOKEN: Record<string, ScalarOperator> = {
     in: "in",
 };
 
-const NUMERIC_OPERATOR_BY_TOKEN: Record<string, NumericOperator> = {
-    "=": "eq",
-    "!=": "neq",
-    ">": "gt",
-    ">=": "gte",
-    "<": "lt",
-    "<=": "lte",
+/** How `not` flips a comparison; `in` has no inverse operator. */
+const NEGATED_OPERATOR: Record<ScalarOperator, ScalarOperator | null> = {
+    eq: "neq",
+    neq: "eq",
+    gt: "lte",
+    gte: "lt",
+    lt: "gte",
+    lte: "gt",
+    contains: "not_contains",
+    not_contains: "contains",
+    in: null,
 };
 
 interface Group {
@@ -55,11 +58,9 @@ class ParseError extends Error {
 class Parser {
     private index = 0;
     private readonly tokens: Token[];
-    private readonly schema?: RuleSchema;
 
-    constructor(tokens: Token[], schema?: RuleSchema) {
+    constructor(tokens: Token[]) {
         this.tokens = tokens;
-        this.schema = schema;
     }
 
     private peek(offset = 0): Token {
@@ -105,29 +106,17 @@ class Parser {
         throw new ParseError(message, token.start, token.end);
     }
 
-    /** The detection metric the schema describes, when it knows the name. */
-    private metric(name: string) {
-        return this.schema?.detection.metrics.find((metric) => metric.name === name);
-    }
-
     /**
-     * Read a number and its unit. Units are required when the schema declares
-     * one (`35mm`, `f/2.8`, `80%`); without a schema they stay optional so old
-     * expressions still parse.
+     * Read a number and its optional unit. Units are generic sugar: `%` divides
+     * by 100 at parse time (so the AST holds the stored fraction), every other
+     * unit is ignored. The unit may be written before the number (`f/2.8`) or
+     * after it (`80%`, `35mm`).
      */
-    private parseNumber(unit: string | undefined): number {
+    private parseNumber(): number {
         const first = this.peek();
 
         if (first.kind === "unit" && isPrefixUnit(first.text)) {
             this.next();
-
-            if (unit && first.text !== unit) {
-                throw new ParseError(`Expected the unit '${unit}'`, first.start, first.end);
-            }
-
-            if (!unit && !isKnownUnit(first.text)) {
-                throw new ParseError(`Unknown unit '${first.text}'`, first.start, first.end);
-            }
 
             const number = this.next();
 
@@ -149,20 +138,12 @@ class Parser {
             next.kind === "unit" || (next.kind === "word" && isKnownUnit(next.text)) ? next.text : undefined;
 
         if (suffix !== undefined) {
-            if (unit && suffix !== unit) {
-                throw new ParseError(`Expected the unit '${unit}'`, next.start, next.end);
-            }
-
-            if (!unit && this.schema) {
-                throw new ParseError(`Unexpected unit '${suffix}'`, next.start, next.end);
-            }
-
             this.next();
-        } else if (unit) {
-            throw new ParseError(`Expected the unit '${unit}' after the number`, number.start, number.end);
         }
 
-        return Number(number.text);
+        const value = Number(number.text);
+
+        return suffix === "%" ? value / 100 : value;
     }
 
     private asCondition(group: Group): Condition {
@@ -181,7 +162,7 @@ class Parser {
             this.fail(`Unexpected '${token.raw || "end"}'`);
         }
 
-        return { version: 1, match: group.match, conditions: group.conditions };
+        return { version: 2, match: group.match, conditions: group.conditions };
     }
 
     private parseOr(): Group {
@@ -220,6 +201,10 @@ class Parser {
             return group;
         }
 
+        if (this.matchWord("not")) {
+            return this.negate(this.parseUnary());
+        }
+
         return { match: "all", conditions: [this.parsePredicate()] };
     }
 
@@ -230,97 +215,169 @@ class Parser {
             throw new ParseError("Expected a field name", token.start, token.end);
         }
 
-        if (token.text.toLowerCase() === "objects") {
-            return this.parseDetection();
+        // `path [ … ] has <quantifier>` is the only bracket form; anything else
+        // is a scalar comparison.
+        if (this.peek().kind === "punct" && this.peek().text === "[") {
+            return this.parseCollection(token.text);
         }
 
         return this.parseScalar(token.text);
     }
 
     private parseScalar(path: string): ScalarCondition {
+        const { op, value } = this.parseComparison(path);
+
+        return { type: "scalar", path, op, value };
+    }
+
+    private parseCollection(path: string): CollectionCondition {
+        this.expectPunct("[");
+
+        const condition = this.parseElementOr();
+        this.expectPunct("]");
+
+        if (!this.matchWord("has")) {
+            this.fail("Expected 'has' after the filter");
+        }
+
+        const token = this.next();
+        const quantifier = token.kind === "word" ? token.text.toLowerCase() : "";
+
+        if (!QUANTIFIERS.has(quantifier as Quantifier)) {
+            throw new ParseError("Expected any, none, one or all", token.start, token.end);
+        }
+
+        return {
+            type: "collection",
+            path,
+            quantifier: quantifier as Quantifier,
+            condition: this.asCondition(condition),
+        };
+    }
+
+    private parseElementOr(): Group {
+        const items: Group[] = [this.parseElementAnd()];
+
+        while (this.matchWord("or")) {
+            items.push(this.parseElementAnd());
+        }
+
+        if (items.length === 1) {
+            return items[0];
+        }
+
+        return { match: "any", conditions: items.map((item) => this.asCondition(item)) };
+    }
+
+    private parseElementAnd(): Group {
+        const items: Group[] = [this.parseElementUnary()];
+
+        while (this.matchWord("and")) {
+            items.push(this.parseElementUnary());
+        }
+
+        if (items.length === 1) {
+            return items[0];
+        }
+
+        return { match: "all", conditions: items.map((item) => this.asCondition(item)) };
+    }
+
+    private parseElementUnary(): Group {
+        if (this.matchPunct("(")) {
+            const group = this.parseElementOr();
+            this.expectPunct(")");
+
+            return group;
+        }
+
+        if (this.matchWord("not")) {
+            return this.negate(this.parseElementUnary());
+        }
+
+        return { match: "all", conditions: [this.parseElement()] };
+    }
+
+    private parseElement(): ElementCondition {
+        const token = this.next();
+
+        if (token.kind !== "word") {
+            throw new ParseError("Expected an element key", token.start, token.end);
+        }
+
+        const { op, value } = this.parseComparison(token.text);
+
+        return { type: "element", key: token.text, op, value };
+    }
+
+    /** The operator and operand after a field path or an element key. */
+    private parseComparison(label: string): { op: ScalarOperator; value: ScalarValue } {
         if (this.matchWord("is")) {
             const negated = this.matchWord("not");
-            const value = this.parseValue(path);
 
-            return { type: "scalar", path, op: negated ? "neq" : "eq", value };
+            return { op: negated ? "neq" : "eq", value: this.parseValue() };
         }
 
         const token = this.next();
         const op = token.kind === "operator" || token.kind === "word" ? OPERATOR_BY_TOKEN[token.text.toLowerCase()] : undefined;
 
         if (!op) {
-            throw new ParseError(`Expected a comparison operator after '${path}'`, token.start, token.end);
+            throw new ParseError(`Expected a comparison operator after '${label}'`, token.start, token.end);
         }
 
-        const value = op === "in" ? this.parseList() : this.parseValue(path);
-
-        return { type: "scalar", path, op, value };
+        return { op, value: op === "in" ? this.parseList() : this.parseValue() };
     }
 
-    /** A scalar value, reading the field's unit when the schema declares one. */
-    private parseValue(path: string): ScalarValue {
-        const field = this.schema ? fieldFor(this.schema, path) : undefined;
+    /** Push `not` down to the leaves: the AST has no negation node. */
+    private negate(group: Group): Group {
+        const conditions = group.conditions.map((condition) => this.negateCondition(condition));
 
-        if (field?.kind === "number") {
-            return this.parseNumber(field.unit);
+        if (conditions.length === 1) {
+            return { match: "all", conditions };
         }
 
+        return { match: group.match === "any" ? "all" : "any", conditions };
+    }
+
+    private negateCondition(condition: Condition): Condition {
+        if (condition.type === "group") {
+            const negated = this.negate(condition);
+
+            return negated.conditions.length === 1 ? negated.conditions[0] : { type: "group", ...negated };
+        }
+
+        if (condition.type === "collection") {
+            throw new ParseError(
+                "Use 'has none' (or 'has any') instead of 'not' before a collection",
+                this.peek().start,
+                this.peek().end,
+            );
+        }
+
+        const op = NEGATED_OPERATOR[condition.op];
+
+        if (op !== null) {
+            return { ...condition, op };
+        }
+
+        // `not (path in [a, b])` becomes `path != a and path != b`.
+        const values = Array.isArray(condition.value) ? condition.value : [condition.value];
+
+        return {
+            type: "group",
+            match: "all",
+            conditions: values.map((value) => ({ ...condition, op: "neq" as const, value })),
+        };
+    }
+
+    private parseValue(): ScalarValue {
         const first = this.peek();
 
-        if (!this.schema && (first.kind === "number" || (first.kind === "unit" && isPrefixUnit(first.text)))) {
-            return this.parseNumber(undefined);
+        if (first.kind === "number" || (first.kind === "unit" && isPrefixUnit(first.text))) {
+            return this.parseNumber();
         }
 
         return this.parseLiteral();
-    }
-
-    private parseDetection(): DetectionCondition {
-        let op: "present" | "absent" = "present";
-        let label = "";
-        let metrics: MetricConstraint[] = [];
-
-        if (this.matchWord("has")) {
-            if (this.matchWord("no")) {
-                op = "absent";
-            }
-
-            const token = this.peek();
-
-            if (token.kind !== "string") {
-                this.fail("Expected an object label in quotes");
-            }
-
-            label = this.next().text;
-        }
-
-        if (this.matchWord("with")) {
-            metrics = this.parseMetrics();
-        }
-
-        return { type: "detection", label, op, metrics };
-    }
-
-    private parseMetrics(): MetricConstraint[] {
-        const metrics: MetricConstraint[] = [];
-
-        do {
-            const name = this.next();
-
-            if (name.kind !== "word") {
-                throw new ParseError("Expected a metric name", name.start, name.end);
-            }
-
-            const token = this.next();
-            const op = token.kind === "operator" ? NUMERIC_OPERATOR_BY_TOKEN[token.text] : undefined;
-
-            if (!op || !NUMERIC_OPS.has(op)) {
-                throw new ParseError(`Expected a numeric comparison after '${name.text}'`, token.start, token.end);
-            }
-
-            metrics.push({ name: name.text, op, value: this.parseNumber(this.metric(name.text)?.unit) });
-        } while (this.matchPunct(","));
-
-        return metrics;
     }
 
     private parseList(): ScalarValue {
@@ -351,10 +408,6 @@ class Parser {
             return token.text;
         }
 
-        if (token.kind === "number") {
-            return Number(token.text);
-        }
-
         if (token.kind === "word") {
             const word = token.text.toLowerCase();
 
@@ -376,8 +429,13 @@ export interface ParseResult {
     issues: ParseIssue[];
 }
 
-/** Parse an expression into the rule AST, collecting a readable issue. */
-export function parseExpression(source: string, schema?: RuleSchema | null): ParseResult {
+/**
+ * Parse an expression into the rule AST, collecting a readable issue.
+ *
+ * Parsing is schema-free: a collection is recognised by its `[` filter, and
+ * units are optional. The schema is only needed to validate or print.
+ */
+export function parseExpression(source: string): ParseResult {
     const text = source.trim();
 
     if (!text) {
@@ -393,7 +451,7 @@ export function parseExpression(source: string, schema?: RuleSchema | null): Par
     const { tokens } = tokenize(source);
 
     try {
-        return { definition: new Parser(tokens, schema ?? undefined).parse(), issues: [] };
+        return { definition: new Parser(tokens).parse(), issues: [] };
     } catch (error) {
         if (error instanceof ParseError) {
             return { definition: null, issues: [{ message: error.message, start: error.start, end: error.end }] };

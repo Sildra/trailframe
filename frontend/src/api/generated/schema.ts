@@ -1190,13 +1190,61 @@ export interface components {
             file: string;
         };
         /**
+         * CollectionCondition
+         * @description A quantified filter over a multi-valued field: `objects[label=dog] has any`.
+         *
+         *     `condition` is a boolean expression in *element scope*: its leaves are
+         *     `ElementCondition`s, so every constraint binds to the same element.
+         */
+        "CollectionCondition-Input": {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "collection";
+            /** Path */
+            path: string;
+            /**
+             * Quantifier
+             * @default any
+             * @enum {string}
+             */
+            quantifier: "any" | "none" | "one" | "all";
+            /** Condition */
+            condition: components["schemas"]["ScalarCondition"] | components["schemas"]["CollectionCondition-Input"] | components["schemas"]["ElementCondition"] | components["schemas"]["GroupCondition-Input"];
+        };
+        /**
+         * CollectionCondition
+         * @description A quantified filter over a multi-valued field: `objects[label=dog] has any`.
+         *
+         *     `condition` is a boolean expression in *element scope*: its leaves are
+         *     `ElementCondition`s, so every constraint binds to the same element.
+         */
+        "CollectionCondition-Output": {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "collection";
+            /** Path */
+            path: string;
+            /**
+             * Quantifier
+             * @default any
+             * @enum {string}
+             */
+            quantifier: "any" | "none" | "one" | "all";
+            /** Condition */
+            condition: components["schemas"]["ScalarCondition"] | components["schemas"]["CollectionCondition-Output"] | components["schemas"]["ElementCondition"] | components["schemas"]["GroupCondition-Output"];
+        };
+        /**
          * Definition
          * @description The parsed form of a rule expression; the authoritative rule body.
          */
         "Definition-Input": {
             /**
              * Version
-             * @default 1
+             * @default 2
              */
             version: number;
             /**
@@ -1206,7 +1254,7 @@ export interface components {
              */
             match: "all" | "any";
             /** Conditions */
-            conditions?: (components["schemas"]["ScalarCondition"] | components["schemas"]["DetectionCondition"] | components["schemas"]["GroupCondition-Input"])[];
+            conditions?: (components["schemas"]["ScalarCondition"] | components["schemas"]["CollectionCondition-Input"] | components["schemas"]["ElementCondition"] | components["schemas"]["GroupCondition-Input"])[];
         };
         /**
          * Definition
@@ -1215,7 +1263,7 @@ export interface components {
         "Definition-Output": {
             /**
              * Version
-             * @default 1
+             * @default 2
              */
             version: number;
             /**
@@ -1225,33 +1273,7 @@ export interface components {
              */
             match: "all" | "any";
             /** Conditions */
-            conditions?: (components["schemas"]["ScalarCondition"] | components["schemas"]["DetectionCondition"] | components["schemas"]["GroupCondition-Output"])[];
-        };
-        /**
-         * DetectionCondition
-         * @description A detected object, optionally bound to one label and numeric metrics.
-         *
-         *     The label and its metrics apply to the *same* detection.
-         */
-        DetectionCondition: {
-            /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
-             */
-            type: "detection";
-            /**
-             * Label
-             * @default
-             */
-            label: string;
-            /**
-             * Op
-             * @default present
-             * @enum {string}
-             */
-            op: "present" | "absent";
-            /** Metrics */
-            metrics?: components["schemas"]["MetricConstraint"][];
+            conditions?: (components["schemas"]["ScalarCondition"] | components["schemas"]["CollectionCondition-Output"] | components["schemas"]["ElementCondition"] | components["schemas"]["GroupCondition-Output"])[];
         };
         /** Document */
         Document: {
@@ -1272,6 +1294,29 @@ export interface components {
             title: string;
             /** Description */
             description: string;
+        };
+        /**
+         * ElementCondition
+         * @description One key/value comparison inside a collection filter (`confidence >= 80`).
+         *
+         *     Element conditions only make sense inside a `CollectionCondition`; the key
+         *     is declared by the collection spec, not by the photo's columns.
+         */
+        ElementCondition: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "element";
+            /** Key */
+            key: string;
+            /**
+             * Op
+             * @default eq
+             */
+            op: string;
+            /** Value */
+            value?: string | number | boolean | string[] | null;
         };
         /** ExpressionIssue */
         ExpressionIssue: {
@@ -1407,7 +1452,7 @@ export interface components {
              */
             match: "all" | "any";
             /** Conditions */
-            conditions?: (components["schemas"]["ScalarCondition"] | components["schemas"]["DetectionCondition"] | components["schemas"]["GroupCondition-Input"])[];
+            conditions?: (components["schemas"]["ScalarCondition"] | components["schemas"]["CollectionCondition-Input"] | components["schemas"]["ElementCondition"] | components["schemas"]["GroupCondition-Input"])[];
         };
         /**
          * GroupCondition
@@ -1426,7 +1471,7 @@ export interface components {
              */
             match: "all" | "any";
             /** Conditions */
-            conditions?: (components["schemas"]["ScalarCondition"] | components["schemas"]["DetectionCondition"] | components["schemas"]["GroupCondition-Output"])[];
+            conditions?: (components["schemas"]["ScalarCondition"] | components["schemas"]["CollectionCondition-Output"] | components["schemas"]["ElementCondition"] | components["schemas"]["GroupCondition-Output"])[];
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -1453,22 +1498,6 @@ export interface components {
             photos: components["schemas"]["PhotoPoint"][];
             /** Activities */
             activities: components["schemas"]["ActivityTrace"][];
-        };
-        /**
-         * MetricConstraint
-         * @description A numeric bound on one detection metric (`confidence`, `surface`).
-         */
-        MetricConstraint: {
-            /** Name */
-            name: string;
-            /**
-             * Op
-             * @default gte
-             * @enum {string}
-             */
-            op: "eq" | "neq" | "gt" | "gte" | "lt" | "lte";
-            /** Value */
-            value: number;
         };
         /** PackageInfo */
         PackageInfo: {

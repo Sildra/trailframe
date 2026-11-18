@@ -5,15 +5,9 @@ export type RuleResponse = components["schemas"]["RuleResponse"];
 export type MatchMode = "all" | "any";
 export type NumericOperator = "eq" | "neq" | "gt" | "gte" | "lt" | "lte";
 export type ScalarOperator = NumericOperator | "contains" | "not_contains" | "in";
-export type RuleOperator = ScalarOperator | "present" | "absent";
+export type Quantifier = "any" | "none" | "one" | "all";
 
 export type ScalarValue = string | number | boolean | string[] | null;
-
-export interface MetricConstraint {
-    name: string;
-    op: NumericOperator;
-    value: number;
-}
 
 export interface ScalarCondition {
     type: "scalar";
@@ -22,11 +16,20 @@ export interface ScalarCondition {
     value: ScalarValue;
 }
 
-export interface DetectionCondition {
-    type: "detection";
-    label: string;
-    op: "present" | "absent";
-    metrics: MetricConstraint[];
+/** One key/value comparison inside a collection filter. */
+export interface ElementCondition {
+    type: "element";
+    key: string;
+    op: ScalarOperator;
+    value: ScalarValue;
+}
+
+/** A quantified filter over a multi-valued field. */
+export interface CollectionCondition {
+    type: "collection";
+    path: string;
+    quantifier: Quantifier;
+    condition: Condition;
 }
 
 export interface GroupCondition {
@@ -35,7 +38,7 @@ export interface GroupCondition {
     conditions: Condition[];
 }
 
-export type Condition = ScalarCondition | DetectionCondition | GroupCondition;
+export type Condition = ScalarCondition | ElementCondition | CollectionCondition | GroupCondition;
 
 export interface Definition {
     version: number;
@@ -58,7 +61,7 @@ export interface RuleDraft {
 }
 
 export function emptyDefinition(): Definition {
-    return { version: 1, match: "all", conditions: [] };
+    return { version: 2, match: "all", conditions: [] };
 }
 
 /** A blank rule for `tag`, ready to be edited. */
@@ -110,6 +113,8 @@ export function countConditions(definition: Definition): number {
         for (const condition of conditions) {
             if (condition.type === "group") {
                 walk(condition.conditions);
+            } else if (condition.type === "collection") {
+                walk([condition.condition]);
             } else {
                 total += 1;
             }

@@ -43,7 +43,7 @@ export interface RulePageProps {
 }
 
 function storedDefinition(rule: Rule | null): Definition {
-    return rule === null ? { version: 1, match: "all", conditions: [] } : (rule.definition as Definition);
+    return rule === null ? { version: 2, match: "all", conditions: [] } : (rule.definition as Definition);
 }
 
 function initialExpression(rule: Rule | null): string {
@@ -95,8 +95,8 @@ export default function RulePage({ tagPath, rule, onBack, onSaved }: RulePagePro
 
                 setSchema(loaded);
                 setValues(valuesResponse.data ?? {});
-                // Legacy expressions have no units yet, so reprint them now that
-                // the schema says which units each field expects.
+                // The stored AST holds percentages as fractions; reprint it now
+                // that the schema says which fields use `%`.
                 setExpression((current) => (rule === null || current !== initial ? current : printDefinition(stored, loaded)));
             })
             .catch(() => {
@@ -110,7 +110,7 @@ export default function RulePage({ tagPath, rule, onBack, onSaved }: RulePagePro
         };
     }, [rule, stored, initial]);
 
-    const parsed = useMemo(() => parseExpression(expression, schema), [expression, schema]);
+    const parsed = useMemo(() => parseExpression(expression), [expression]);
     const schemaIssues = useMemo(
         () => (schema && parsed.definition ? validateDefinition(schema, parsed.definition) : []),
         [schema, parsed.definition],
@@ -269,7 +269,7 @@ export default function RulePage({ tagPath, rule, onBack, onSaved }: RulePagePro
                     <SchemaForm
                         schema={schema}
                         values={values}
-                        definition={definition ?? { version: 1, match: "all", conditions: [] }}
+                        definition={definition ?? { version: 2, match: "all", conditions: [] }}
                         onChange={(next) => {
                             setExpression(printDefinition(next, schema));
                             setError(null);

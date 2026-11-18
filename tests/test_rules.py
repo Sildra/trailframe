@@ -8,11 +8,22 @@ import pytest
 from trailframe.models.photo import Photo
 from trailframe.services.rules.ast import Definition
 from trailframe.services.rules.evaluator import matches
+from trailframe.services.rules.metadata import MISSING
 from trailframe.services.rules.schema import RuleValidationError, as_number, resolve, validate_definition
 
 
 def _definition(**body) -> Definition:
     return Definition.model_validate(body)
+
+
+def _element(key, op, value=None):
+    return {"type": "element", "key": key, "op": op, "value": value}
+
+
+def _collection(path="objects", quantifier="any", *conditions):
+    body = conditions[0] if len(conditions) == 1 else {"type": "group", "match": "all", "conditions": list(conditions)}
+
+    return {"type": "collection", "path": path, "quantifier": quantifier, "condition": body}
 
 
 def _add_photos(app, photos):
@@ -44,16 +55,11 @@ def _dog_rule(tag: str = "Animals/Pet/Dog") -> dict:
     return {
         "tag": tag,
         "name": "Dogs",
-        "expression": 'objects has "dog" with confidence >= 80%',
+        "expression": 'objects[label = "dog" and confidence >= 80%] has any',
         "definition": {
             "match": "all",
             "conditions": [
-                {
-                    "type": "detection",
-                    "label": "dog",
-                    "op": "present",
-                    "metrics": [{"name": "confidence", "op": "gte", "value": 80}],
-                }
+                _collection("objects", "any", _element("label", "eq", "dog"), _element("confidence", "gte", 0.8))
             ],
         },
     }
@@ -74,6 +80,19 @@ class TestSchema:
         assert resolve(photo, "orientation") == "landscape"
         assert resolve(photo, "date") == "2024-05-01"
 
+    @allure.title("Resolves a selected list entry and misses when it is absent or duplicated")
+    def test_resolve_selected_entry(self):
+        photo = Photo(path="a.jpg", processing=[{"step": "tilt", "meta": {"applied": False, "crop_mode": "none"}}])
+
+        assert resolve(photo, "processing.tilt.applied") is False
+        assert resolve(photo, "processing.tilt.crop_mode") == "none"
+
+        photo.processing = [{"step": "rescale", "meta": {}}]
+        assert resolve(photo, "processing.tilt.applied") is MISSING
+
+        photo.processing = [{"step": "tilt", "meta": {"applied": True}}, {"step": "tilt", "meta": {"applied": False}}]
+        assert resolve(photo, "processing.tilt.applied") is MISSING
+
     @allure.title("Rejects unknown fields, wrong operators and malformed values")
     def test_validation(self):
         with pytest.raises(RuleValidationError):
@@ -92,21 +111,50 @@ class TestSchema:
         with pytest.raises(RuleValidationError):
             validate_definition(_definition(conditions=[]))
 
+    @allure.title("Validates collection paths, element keys, operators and ranges")
+    def test_collection_validation(self):
+        with pytest.raises(RuleValidationError):
+            validate_definition(_definition(conditions=[_collection("nope", "any", _element("label", "eq", "dog"))]))
+
+        with pytest.raises(RuleValidationError):
+            validate_definition(
+                _definition(conditions=[_collection("objects", "any", _element("colour", "eq", "red"))])
+            )
+
+        with pytest.raises(RuleValidationError):
+            validate_definition(
+                _definition(conditions=[_collection("objects", "any", _element("label", "gte", "dog"))])
+            )
+
+        with pytest.raises(RuleValidationError):
+            validate_definition(
+                _definition(conditions=[_collection("objects", "any", _element("confidence", "gte", 1.2))])
+            )
+
+        # A bare `80` (the `%` was forgotten) is out of the 0..1 range.
+        with pytest.raises(RuleValidationError):
+            validate_definition(
+                _definition(conditions=[_collection("objects", "any", _element("confidence", "gte", 80))])
+            )
+
+        with pytest.raises(ValueError):
+            validate_definition(
+                _definition(conditions=[_collection("objects", "some", _element("label", "eq", "dog"))])
+            )
+
+        with pytest.raises(RuleValidationError):
+            validate_definition(_definition(conditions=[_element("label", "eq", "dog")]))
+
         with pytest.raises(RuleValidationError):
             validate_definition(
                 _definition(
                     conditions=[
-                        {
-                            "type": "detection",
-                            "label": "dog",
-                            "op": "present",
-                            "metrics": [{"name": "confidence", "op": "gte", "value": 120}],
-                        }
+                        _collection("objects", "any", _collection("processing", "any", _element("step", "eq", "tilt")))
                     ]
                 )
             )
 
-    @allure.title("Accepts nested all/any groups")
+    @allure.title("Accepts nested all/any groups and a full element expression")
     def test_groups(self):
         definition = _definition(
             match="any",
@@ -116,7 +164,26 @@ class TestSchema:
                     "match": "all",
                     "conditions": [{"type": "scalar", "path": "is_favorite", "op": "eq", "value": True}],
                 },
-                {"type": "detection", "label": "cat", "op": "present"},
+                _collection(
+                    "objects",
+                    "one",
+                    {
+                        "type": "group",
+                        "match": "any",
+                        "conditions": [
+                            {
+                                "type": "group",
+                                "match": "all",
+                                "conditions": [_element("confidence", "gt", 0.8), _element("surface", "gt", 0.1)],
+                            },
+                            {
+                                "type": "group",
+                                "match": "all",
+                                "conditions": [_element("confidence", "gt", 0.9), _element("surface", "gt", 0.07)],
+                            },
+                        ],
+                    },
+                ),
             ],
         )
 
@@ -138,29 +205,19 @@ class TestEvaluation:
             },
         )
 
-        definition = _definition(
+        dog = _definition(
             conditions=[
-                {
-                    "type": "detection",
-                    "label": "dog",
-                    "op": "present",
-                    "metrics": [{"name": "confidence", "op": "gte", "value": 90}],
-                }
+                _collection("objects", "any", _element("label", "eq", "dog"), _element("confidence", "gte", 0.9))
             ]
         )
-        assert matches(photo, definition)
+        cat = _definition(
+            conditions=[
+                _collection("objects", "any", _element("label", "eq", "cat"), _element("confidence", "gte", 0.9))
+            ]
+        )
 
-        definition = _definition(
-            conditions=[
-                {
-                    "type": "detection",
-                    "label": "cat",
-                    "op": "present",
-                    "metrics": [{"name": "confidence", "op": "gte", "value": 90}],
-                }
-            ]
-        )
-        assert not matches(photo, definition)
+        assert matches(photo, dog)
+        assert not matches(photo, cat)
 
     @allure.title("Reads the stored surface instead of recomputing it from the main file")
     def test_surface_uses_stored_reference(self):
@@ -176,15 +233,107 @@ class TestEvaluation:
         )
 
         definition = _definition(
+            conditions=[_collection("objects", "any", _element("label", "eq", "dog"), _element("surface", "gte", 0.2))]
+        )
+
+        assert matches(photo, definition)
+
+    @allure.title("Applies any, none, one and all with their empty-collection rules")
+    def test_quantifiers(self):
+        photo = Photo(
+            path="a.jpg",
+            objects={
+                "detections": [
+                    {"label": "dog", "confidence": 0.95, "surface": 0.2},
+                    {"label": "dog", "confidence": 0.6, "surface": 0.05},
+                ]
+            },
+        )
+        empty = Photo(path="b.jpg")
+
+        def dog(quantifier):
+            return _definition(conditions=[_collection("objects", quantifier, _element("label", "eq", "dog"))])
+
+        assert matches(photo, dog("any"))
+        assert matches(photo, dog("none")) is False
+        assert matches(photo, dog("one")) is False
+        assert matches(photo, dog("all"))
+
+        assert matches(empty, dog("any")) is False
+        assert matches(empty, dog("none"))
+        assert matches(empty, dog("one")) is False
+        assert matches(empty, dog("all"))
+
+        one = _definition(
             conditions=[
-                {
-                    "type": "detection",
-                    "label": "dog",
-                    "op": "present",
-                    "metrics": [{"name": "surface", "op": "gte", "value": 20}],
-                }
+                _collection("objects", "one", _element("label", "eq", "dog"), _element("confidence", "gte", 0.9))
             ]
         )
+        assert matches(photo, one)
+
+    @allure.title("Filters processing steps by their keys")
+    def test_processing_collection(self):
+        photo = Photo(path="a.jpg", processing=[{"step": "tilt", "meta": {"applied": True}}, {"step": "rescale"}])
+
+        applied = _definition(
+            conditions=[
+                _collection("processing", "any", _element("step", "eq", "tilt"), _element("meta.applied", "eq", True))
+            ]
+        )
+        skipped = _definition(
+            conditions=[
+                _collection("processing", "any", _element("step", "eq", "tilt"), _element("meta.applied", "eq", False))
+            ]
+        )
+        scalar = _definition(
+            conditions=[{"type": "scalar", "path": "processing.tilt.applied", "op": "eq", "value": True}]
+        )
+
+        assert matches(photo, applied)
+        assert not matches(photo, skipped)
+        assert matches(photo, scalar)
+
+        photo.processing = [{"step": "rescale"}]
+        assert not matches(photo, applied)
+        assert not matches(photo, scalar)
+
+    @allure.title("Groups element constraints with and/or/not")
+    def test_element_groups(self):
+        photo = Photo(
+            path="a.jpg",
+            objects={
+                "detections": [
+                    {"label": "dog", "confidence": 0.85, "surface": 0.15},
+                    {"label": "dog", "confidence": 0.95, "surface": 0.03},
+                ]
+            },
+        )
+
+        definition = _definition(
+            conditions=[
+                _collection(
+                    "objects",
+                    "one",
+                    {
+                        "type": "group",
+                        "match": "any",
+                        "conditions": [
+                            {
+                                "type": "group",
+                                "match": "all",
+                                "conditions": [_element("confidence", "gt", 0.8), _element("surface", "gt", 0.1)],
+                            },
+                            {
+                                "type": "group",
+                                "match": "all",
+                                "conditions": [_element("confidence", "gt", 0.9), _element("surface", "gt", 0.04)],
+                            },
+                        ],
+                    },
+                )
+            ]
+        )
+
         assert matches(photo, definition)
 
     @allure.title("Compares numbers, dates, booleans and lists in a typed way")
@@ -236,11 +385,18 @@ class TestRulesApi:
     def test_schema_and_values(self, app):
         schema = app.get("/api/rules/schema").json()
 
-        assert {group["name"] for group in schema["groups"]} >= {"Objects", "Camera", "Place"}
-        detection = next(field for group in schema["groups"] for field in group["fields"] if field["path"] == "objects")
-        assert [metric["name"] for metric in detection["detection"]["metrics"]] == ["confidence", "surface"]
-        assert [metric["unit"] for metric in detection["detection"]["metrics"]] == ["%", "%"]
-        assert detection["detection"]["metrics"][0]["max"] == 100
+        assert {group["name"] for group in schema["groups"]} >= {"Camera", "Place", "Processing"}
+        assert {collection["path"] for collection in schema["collections"]} >= {"objects", "processing", "alternatives"}
+        assert [quantifier["name"] for quantifier in schema["quantifiers"]] == ["any", "none", "one", "all"]
+
+        objects = next(collection for collection in schema["collections"] if collection["path"] == "objects")
+        assert [element["key"] for element in objects["elements"]] == ["label", "confidence", "surface"]
+        confidence = next(element for element in objects["elements"] if element["key"] == "confidence")
+        assert confidence["unit"] == "%"
+        assert confidence["max"] == 1.0
+
+        fields = {field["path"] for group in schema["groups"] for field in group["fields"]}
+        assert {"processing.tilt.applied", "processing.tilt.crop_mode"} <= fields
 
         values = app.get("/api/rules/values").json()
         assert "objects" in values and "tags" in values
