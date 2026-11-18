@@ -23,6 +23,7 @@ import TagTree from "../components/TagTree";
 import ThumbnailGallery from "../components/ThumbnailGallery";
 import UploadButton from "../components/UploadButton";
 import { duplicateKey, groupKey, locationIssueKey } from "../lib/groups";
+import { SIDE_PANEL_WIDTH } from "../lib/layout";
 import type { HoveredObject } from "../lib/objectBoxes";
 import type { TiltOverlay } from "../lib/processing";
 import type { TagNode } from "../lib/tags";
@@ -499,7 +500,7 @@ export default function GalleryPage() {
                 sx={{
                     display: "flex",
                     flexDirection: "column",
-                    width: leftCollapsed ? 40 : 320,
+                    width: leftCollapsed ? 40 : SIDE_PANEL_WIDTH,
                     flexShrink: 0,
                     borderRight: 1,
                     borderColor: "divider",
@@ -580,7 +581,7 @@ export default function GalleryPage() {
                 sx={{
                     display: "flex",
                     flexDirection: "column",
-                    width: rightCollapsed ? 40 : 320,
+                    width: rightCollapsed ? 40 : SIDE_PANEL_WIDTH,
                     flexShrink: 0,
                     borderLeft: 1,
                     borderColor: "divider",

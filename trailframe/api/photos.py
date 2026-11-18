@@ -1,16 +1,18 @@
 import mimetypes
 import random
 from datetime import date, datetime, time, timedelta
+from io import BytesIO
 
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse
-from PIL import Image
+from fastapi.responses import FileResponse, Response
+from PIL import Image, ImageOps
 from pydantic import BaseModel
 from sqlalchemy import func, select, text
 
 from trailframe.models.group import PhotoGroup, PhotoGroupSummary
 from trailframe.models.photo import Photo, PhotoDetail, RelatedPhotoGroup
 from trailframe.services.core.database_service import DatabaseService
+from trailframe.services.core.thread_pool_service import ThreadPoolService
 from trailframe.services.map.location_service import LocationService
 from trailframe.services.photos.duplicates_service import DuplicatesService
 from trailframe.services.photos.folder_service import FolderService
@@ -500,6 +502,58 @@ async def get_image(photo_id: int, size: int | None = Query(None)):
         media_type = Image.MIME.get(source.suffix.lstrip(".").upper(), media_type)
 
     return FileResponse(source, media_type=media_type)
+
+
+PREVIEW_MAX_SIZE = 2048
+
+
+@router.get("/{photo_id}/preview")
+async def get_preview(photo_id: int, size: int = Query(PREVIEW_MAX_SIZE, ge=64, le=8192)):
+    """Serve an EXIF-transposed, downscaled copy of the original for the processing preview.
+
+    The editor needs the pixels *before* the tilt/crop/rescale chain, oriented the
+    same way the pipeline orients them, so the normalised horizon geometry stored
+    on the photo lines up. Re-encoding to WebP (bounded on the longest edge) keeps
+    the response small and removes the EXIF orientation, so the browser's own
+    decoding cannot disagree with the backend. The original pixel size is returned
+    in headers for the size captions.
+    """
+
+    async def _get(session):
+        photo = (await session.execute(select(Photo).where(Photo.id == photo_id))).scalar_one_or_none()
+
+        if photo is None:
+            raise HTTPException(404, f"Photo {photo_id} not found")
+
+        return photo
+
+    photo = await DatabaseService.execute(_get)
+    source = PhotoService.resolve(photo, photo.original)
+
+    def _render() -> tuple[bytes, tuple[int, int]]:
+        with Image.open(source) as handle:
+            image = ImageOps.exif_transpose(handle)
+            image.load()
+            original = image.size
+
+            if max(image.size) > size:
+                image.thumbnail((size, size), Image.Resampling.LANCZOS)
+
+            if image.mode not in ("RGB", "RGBA"):
+                image = image.convert("RGB")
+
+            buffer = BytesIO()
+            image.save(buffer, format="WEBP", quality=90)
+
+            return buffer.getvalue(), original
+
+    data, (width, height) = await ThreadPoolService.run(_render)
+
+    return Response(
+        content=data,
+        media_type="image/webp",
+        headers={"X-Original-Width": str(width), "X-Original-Height": str(height)},
+    )
 
 
 @router.get("/{photo_id}/thumbnail")

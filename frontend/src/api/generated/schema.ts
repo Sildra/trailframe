@@ -337,6 +337,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/photos/{photo_id}/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Preview
+         * @description Serve an EXIF-transposed, downscaled copy of the original for the processing preview.
+         *
+         *     The editor needs the pixels *before* the tilt/crop/rescale chain, oriented the
+         *     same way the pipeline orients them, so the normalised horizon geometry stored
+         *     on the photo lines up. Re-encoding to WebP (bounded on the longest edge) keeps
+         *     the response small and removes the EXIF orientation, so the browser's own
+         *     decoding cannot disagree with the backend. The original pixel size is returned
+         *     in headers for the size captions.
+         */
+        get: operations["get_preview_api_photos__photo_id__preview_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/photos/{photo_id}/thumbnail": {
         parameters: {
             query?: never;
@@ -2428,6 +2455,39 @@ export interface operations {
         parameters: {
             query?: {
                 size?: number | null;
+            };
+            header?: never;
+            path: {
+                photo_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_preview_api_photos__photo_id__preview_get: {
+        parameters: {
+            query?: {
+                size?: number;
             };
             header?: never;
             path: {

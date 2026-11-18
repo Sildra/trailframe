@@ -130,6 +130,38 @@ class TestPhotoFileEndpoints:
         assert response.status_code == 200
         assert response.headers["content-type"].startswith("image/webp")
 
+    @allure.title("Serves an oriented, downscaled preview of the original with its pixel size")
+    def test_get_preview(self, app, tmp_path):
+        source = _make_image(_photos_folder(tmp_path) / "preview.jpg", size=(640, 480))
+        photo_id = _add_photos(app, [Photo(path="preview.jpg", filename="preview.jpg", file_size=source.stat().st_size)])[0]
+
+        response = app.get(f"/api/photos/{photo_id}/preview", params={"size": 320})
+        assert response.status_code == 200
+        assert response.headers["content-type"] == "image/webp"
+        assert response.headers["x-original-width"] == "640"
+        assert response.headers["x-original-height"] == "480"
+
+        with Image.open(BytesIO(response.content)) as preview:
+            assert max(preview.size) == 320
+
+        assert app.get("/api/photos/999/preview").status_code == 404
+
+    @allure.title("Applies the EXIF orientation to the preview and reports the transposed size")
+    def test_get_preview_orientation(self, app, tmp_path):
+        path = _photos_folder(tmp_path) / "rotated.jpg"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        image = Image.new("RGB", (640, 480), (10, 20, 30))
+        exif = image.getexif()
+        exif[274] = 6
+        image.save(path, format="JPEG", exif=exif)
+
+        photo_id = _add_photos(app, [Photo(path="rotated.jpg", filename="rotated.jpg", file_size=path.stat().st_size)])[0]
+
+        response = app.get(f"/api/photos/{photo_id}/preview")
+        assert response.status_code == 200
+        assert response.headers["x-original-width"] == "480"
+        assert response.headers["x-original-height"] == "640"
+
     @allure.title("Generates and serves a webp thumbnail, 404s for a missing photo")
     def test_get_thumbnail(self, app, tmp_path):
         source = _make_image(_photos_folder(tmp_path) / "thumb.jpg")

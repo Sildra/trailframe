@@ -84,7 +84,7 @@ export function normalizeProcessing(entries: unknown[] | null | undefined): Proc
     });
 }
 
-function parseLine(value: unknown): ProcessingLine | null {
+export function parseLine(value: unknown): ProcessingLine | null {
     if (
         !isRecord(value) ||
         !isNumber(value.x1) ||
@@ -98,7 +98,7 @@ function parseLine(value: unknown): ProcessingLine | null {
     return { x1: value.x1, y1: value.y1, x2: value.x2, y2: value.y2 };
 }
 
-function parsePoint(value: unknown): ProcessingPoint | null {
+export function parsePoint(value: unknown): ProcessingPoint | null {
     if (!isRecord(value) || !isNumber(value.x) || !isNumber(value.y)) {
         return null;
     }

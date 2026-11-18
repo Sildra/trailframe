@@ -36,7 +36,7 @@ export interface ReprocessPayload {
     rescan: boolean;
 }
 
-function parseAngle(summary: string): number | null {
+export function parseAngle(summary: string): number | null {
     const match = /^([+-]?\d+(?:\.\d+)?)°$/.exec(summary.trim());
 
     if (!match) {
