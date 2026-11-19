@@ -69,6 +69,18 @@ class TestExpressionEngine:
         assert response.status_code == 503
         assert "JavaScript modules are disabled" in response.json()["detail"]
 
+    @allure.title("Parses temporarily while disabled and releases the engine afterwards")
+    def test_temporary_parses_while_disabled(self, monkeypatch):
+        ExpressionEngineService._release()
+        monkeypatch.setattr(ExpressionEngineService, "_enabled", False)
+
+        with ExpressionEngineService.temporary():
+            assert ExpressionEngineService._engine is not None
+            parsed = ExpressionEngineService.parse("width >= 1200px", force=True)
+            assert parsed["definition"]["conditions"][0]["value"] == 1200
+
+        assert ExpressionEngineService._engine is None
+
 
 class TestJavascriptModulesConfig:
     @allure.title("Loads and releases the engine as the configuration flag changes")

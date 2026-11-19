@@ -35,6 +35,8 @@ class AppData:
     """Read and write the misc data."""
 
     OBJECT_MODEL = "object_model"
+    DEFAULT_RULES = "default_rules"
+    """The default rule ids already installed, as a JSON list."""
 
     @staticmethod
     async def get_value(session, key: str) -> str | None:

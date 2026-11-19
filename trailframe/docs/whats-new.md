@@ -62,6 +62,7 @@ The processing core was rebuilt around a shared thread pool.
 - Status messages (uploads, activity imports, server shutdown) now appear as stacked, dismissible toasts instead of the footer message box.
 - API docs at `/api/docs` and app version at `/api/about/version`.
 - Default tags now seed on first start when the `tags` table is empty (no config flag).
+- The default vocabulary gains `Processing/Tilt`, `Processing/Crop` and the COCO wildlife animals, and ships with ready-made rules that tag cats, dogs and wildlife only when a detection has `confidence > 85%` and `surface > 7%`, plus rules for straightened and cropped photos. They install once, never overwrite your edits, and are not brought back after you delete them.
 - Rule conditions are data-agnostic: scalar fields compare directly, and any multi-valued field (`objects`, `processing`, `alternatives`) is filtered in brackets and quantified — `objects [label = "dog" and confidence >= 80%] has any`. A filter takes the full boolean grammar and binds every key to the same element; `has none`, `has one` and `has all` complement `has any`.
 - Units are optional sugar (`80%`, `f/2.8`, `1200px`); `%` is the only meaningful one and is stored as a fraction, so `confidence >= 80%` compares against the stored 0–1 value. Old rules written for the previous detection syntax are skipped rather than migrated; recreate them with the new expressions.
 - The rule editor fills in units and quotes as you type, steps over them with space or comma, and selecting a field inserts its quoted value with the caret inside.

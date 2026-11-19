@@ -9,6 +9,7 @@ from trailframe.models.photo import Photo
 from trailframe.services.rules.ast import Definition
 from trailframe.services.rules.evaluator import matches
 from trailframe.services.rules.metadata import MISSING
+from trailframe.services.rules.rule_service import RuleService
 from trailframe.services.rules.schema import RuleValidationError, as_number, resolve, validate_definition
 
 
@@ -62,6 +63,13 @@ def _dog_rule(tag: str = "Animals/Pet/Dog") -> dict:
                 _collection("objects", "any", _element("label", "eq", "dog"), _element("confidence", "gte", 0.8))
             ],
         },
+    }
+
+
+def _detections(label: str, confidence: float = 0.9, surface: float = 0.1) -> dict:
+    return {
+        "reference": {"width": 1000, "height": 500},
+        "detections": [{"label": label, "confidence": confidence, "box": [0, 0, 10, 10], "surface": surface}],
     }
 
 
@@ -432,7 +440,7 @@ class TestRulesApi:
         assert rule["id"]
 
         listed = app.get("/api/rules").json()
-        assert [item["id"] for item in listed] == [rule["id"]]
+        assert rule["id"] in [item["id"] for item in listed]
 
         preview = app.post(
             "/api/rules/preview", json={"tag": "Animals/Pet/Dog", "definition": _dog_rule()["definition"]}
@@ -447,7 +455,7 @@ class TestRulesApi:
         assert updated.json()["enabled"] is False
 
         assert app.delete(f"/api/rules/{rule['id']}").status_code == 200
-        assert app.get("/api/rules").json() == []
+        assert rule["id"] not in [item["id"] for item in app.get("/api/rules").json()]
 
     @allure.title("A renamed tag carries its rules and a deleted tag removes them")
     def test_tag_lifecycle_carries_rules(self, app):
@@ -463,12 +471,12 @@ class TestRulesApi:
         assert response.status_code == 200, response.text
 
         rules = app.get("/api/rules").json()
-        assert [(item["id"], item["tag"]) for item in rules] == [(created["id"], "Animals/Pet/Good Dog")]
+        assert (created["id"], "Animals/Pet/Good Dog") in [(item["id"], item["tag"]) for item in rules]
 
         target = next(entry for entry in renamed if entry["path"] == "Animals/Pet/Good Dog")
         assert app.delete(f"/api/tags/{target['id']}").status_code == 200
 
-        assert app.get("/api/rules").json() == []
+        assert created["id"] not in [item["id"] for item in app.get("/api/rules").json()]
 
     @allure.title("Applies enabled rules to the library, add-only")
     def test_apply(self, app):
@@ -494,3 +502,63 @@ class TestRulesApi:
 
         photo = app.get(f"/api/photos/{photo_id}/data").json()
         assert "Animals/Pet/Dog" in photo["tags"]
+
+
+class TestDefaultRules:
+    @allure.title("Installs the bundled rules on the default tags")
+    def test_installed(self, app):
+        paths = {entry["path"] for entry in _flatten(app.get("/api/tags").json())}
+        assert {"Processing/Tilt", "Processing/Crop", "Animals/Wildlife/Horse"} <= paths
+
+        rules = {item["id"]: item for item in app.get("/api/rules").json()}
+
+        for tag, expression in RuleService.DEFAULT_RULES.items():
+            rule = rules[RuleService._default_rule_id(tag)]
+            assert rule["tag"] == tag
+            assert rule["expression"] == expression
+            assert rule["enabled"] is True
+
+    @allure.title("Tags photos from the bundled object and processing rules")
+    def test_apply(self, app):
+        ids = _add_photos(
+            app,
+            [
+                Photo(path="cat.jpg", filename="cat.jpg", objects=_detections("cat")),
+                Photo(path="horse.jpg", filename="horse.jpg", objects=_detections("horse")),
+                Photo(
+                    path="tilt.jpg",
+                    filename="tilt.jpg",
+                    processing=[{"step": "tilt", "summary": "1.2°", "meta": {"applied": True, "crop_mode": "none"}}],
+                ),
+                Photo(
+                    path="crop.jpg",
+                    filename="crop.jpg",
+                    processing=[
+                        {"step": "tilt", "summary": "1.2°", "meta": {"applied": True, "crop_mode": "none"}},
+                        {"step": "crop", "summary": "Trimmed"},
+                    ],
+                ),
+                Photo(path="tiny.jpg", filename="tiny.jpg", objects=_detections("cat", surface=0.07)),
+                Photo(path="unsure.jpg", filename="unsure.jpg", objects=_detections("horse", confidence=0.85)),
+            ],
+        )
+
+        applied = app.post("/api/rules/apply")
+        assert applied.status_code == 200, applied.text
+        assert applied.json()["changed"] == 4
+
+        tags = [app.get(f"/api/photos/{photo_id}/data").json()["tags"] for photo_id in ids]
+        assert "Animals/Pet/Cat" in tags[0]
+        assert "Animals/Wildlife/Horse" in tags[1]
+        assert "Processing/Tilt" in tags[2]
+        assert "Processing/Crop" in tags[3]
+        assert not any(tag.startswith("Animals/") for tag in tags[4])  # too small
+        assert not any(tag.startswith("Animals/") for tag in tags[5])  # too uncertain
+
+    @allure.title("Does not restore a default rule the user deleted")
+    def test_deleted_is_not_restored(self, app):
+        rule_id = RuleService._default_rule_id("Animals/Pet/Dog")
+        assert app.delete(f"/api/rules/{rule_id}").status_code == 200
+
+        assert app.db(RuleService.install_default_rules()) == 0
+        assert rule_id not in [item["id"] for item in app.get("/api/rules").json()]

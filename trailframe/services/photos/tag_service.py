@@ -53,20 +53,16 @@ class TagService(Service):
         # },
         "Animals": {
             "Pet": {"Cat": {}, "Dog": {}},
-            # "Wildlife": {
-            #     "Lion": {},
-            #     "Tiger": {},
-            #     "Elephant": {},
-            #     "Bear": {},
-            #     "Deer": {},
-            #     "Fox": {},
-            #     "Horse": {},
-            #     "Sheep": {},
-            #     "Cow": {},
-            #     "Zebra": {},
-            #     "Giraffe": {},
-            # },
-            # "Bird": {},
+            "Wildlife": {
+                "Bird": {},
+                "Horse": {},
+                "Sheep": {},
+                "Cow": {},
+                "Elephant": {},
+                "Bear": {},
+                "Zebra": {},
+                "Giraffe": {},
+            },
             # "Marine": {"Dolphin": {}, "Whale": {}, "Fish": {}},
             # "Insect": {},
         },
@@ -110,6 +106,7 @@ class TagService(Service):
         # },
         # "Event": {"Wedding": {}, "Birthday": {}, "Holiday": {}, "Christmas": {}, "Concert": {}},
         # "Document": {"Screenshot": {}, "Receipt": {}},
+        "Processing": {"Tilt": {}, "Crop": {}},
         "Quality": {"Panorama": {}, "Macro": {}, "Black and White": {}, "Low Light": {}, "Long Exposure": {}},
     }
 

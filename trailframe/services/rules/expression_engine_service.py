@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import json
 import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
 from importlib import resources
 from pathlib import Path
 from typing import Any, ClassVar
@@ -66,13 +68,15 @@ class ExpressionEngineService(Service):
     # ------------------------------------------------------------------
 
     @classmethod
-    def parse(cls, expression: str) -> dict[str, Any]:
+    def parse(cls, expression: str, force: bool = False) -> dict[str, Any]:
         """Parse an expression with the editor's parser.
 
         Returns `{definition, issues}` exactly as the browser sees it; an invalid
-        expression yields `definition: null` rather than an exception.
+        expression yields `definition: null` rather than an exception. `force`
+        is for one-off startup work inside `temporary()`, even when the flag is
+        off; the API never passes it.
         """
-        engine = cls._ensure_engine()
+        engine = cls._ensure_engine(force=force)
 
         with cls._lock:
             raw = engine.eval(
@@ -132,8 +136,25 @@ class ExpressionEngineService(Service):
         return Path(str(resources.files("trailframe") / "frontend" / "dist-expression" / BUNDLE_NAME))
 
     @classmethod
-    def _ensure_engine(cls) -> MiniRacer:
-        if not cls._enabled:
+    @contextmanager
+    def temporary(cls) -> Iterator[None]:
+        """Load the engine for one-off startup work, even when the flag is off.
+
+        The flag keeps the engine out of memory on small machines; a short load
+        (installing the default rules) is harmless, so the engine is released
+        again on exit unless the flag is enabled.
+        """
+        cls._ensure_engine(force=True)
+
+        try:
+            yield
+        finally:
+            if not cls._enabled:
+                cls._release()
+
+    @classmethod
+    def _ensure_engine(cls, force: bool = False) -> MiniRacer:
+        if not cls._enabled and not force:
             raise ExpressionEngineError("JavaScript modules are disabled; enable them under Configuration > General")
 
         if cls._engine is not None:

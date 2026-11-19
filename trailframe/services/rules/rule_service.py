@@ -11,6 +11,7 @@ without a database round-trip.
 
 from __future__ import annotations
 
+import json
 import time
 import uuid
 from dataclasses import dataclass
@@ -21,10 +22,12 @@ from sqlalchemy import select, text
 
 from trailframe.models.photo import Photo
 from trailframe.models.tag import Tag
+from trailframe.services.core.app_data import AppData
 from trailframe.services.core.database_service import DatabaseService
 from trailframe.services.photos.tag_service import TagService
 from trailframe.services.rules import evaluator, schema
 from trailframe.services.rules.ast import Definition
+from trailframe.services.rules.expression_engine_service import ExpressionEngineError, ExpressionEngineService
 from trailframe.services.rules.schema import RuleValidationError, validate_definition
 from trailframe.services.service import Service
 
@@ -53,7 +56,7 @@ class CachedRule:
 class RuleService(Service):
     """Rule CRUD, the evaluator cache and the library-wide operations."""
 
-    _requires = ("DatabaseService", "TagService")
+    _requires = ("DatabaseService", "TagService", "ExpressionEngine")
 
     _records: ClassVar[list[tuple[str, RuleRecord]]] = []
     """Every stored rule, paired with the path of the tag that owns it."""
@@ -68,13 +71,135 @@ class RuleService(Service):
     TEST_SCAN_LIMIT = 5000
     VALUES_TTL = 60.0
 
+    DEFAULT_RULES: ClassVar[dict[str, str]] = {
+        "Animals/Pet/Cat": 'objects [label = "cat" and confidence > 85% and surface > 7%] has any',
+        "Animals/Pet/Dog": 'objects [label = "dog" and confidence > 85% and surface > 7%] has any',
+        "Animals/Wildlife/Bird": 'objects [label = "bird" and confidence > 85% and surface > 7%] has any',
+        "Animals/Wildlife/Horse": 'objects [label = "horse" and confidence > 85% and surface > 7%] has any',
+        "Animals/Wildlife/Sheep": 'objects [label = "sheep" and confidence > 85% and surface > 7%] has any',
+        "Animals/Wildlife/Cow": 'objects [label = "cow" and confidence > 85% and surface > 7%] has any',
+        "Animals/Wildlife/Elephant": 'objects [label = "elephant" and confidence > 85% and surface > 7%] has any',
+        "Animals/Wildlife/Bear": 'objects [label = "bear" and confidence > 85% and surface > 7%] has any',
+        "Animals/Wildlife/Zebra": 'objects [label = "zebra" and confidence > 85% and surface > 7%] has any',
+        "Animals/Wildlife/Giraffe": 'objects [label = "giraffe" and confidence > 85% and surface > 7%] has any',
+        "Processing/Tilt": 'processing [step = "tilt" and meta.applied is true] has any',
+        "Processing/Crop": 'processing [step = "crop"] has any',
+    }
+    """The bundled rules, keyed by the tag path they assign."""
+
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
 
     @classmethod
     async def _start(cls) -> None:
+        created = await cls.install_default_rules()
+
+        if created:
+            cls._log(f"installed {created} default rule(s)")
+
         await cls.refresh()
+
+    @staticmethod
+    def _default_rule_id(tag: str) -> str:
+        """The stable id of the bundled rule that assigns `tag`."""
+        return f"default-{tag.replace('/', '-').casefold()}"
+
+    @classmethod
+    async def install_default_rules(cls) -> int:
+        """Install the bundled rules once, without restoring the deleted ones.
+
+        The ids already installed are recorded in `app_data`, so a default rule
+        the user edited or deleted is never brought back, while a default added
+        by a later release is installed on the next start.
+        """
+
+        async def _installed(session) -> set[str]:
+            raw = await AppData.get_value(session, AppData.DEFAULT_RULES)
+
+            if not raw:
+                return set()
+
+            try:
+                value = json.loads(raw)
+            except ValueError:
+                return set()
+
+            return {str(item) for item in value} if isinstance(value, list) else set()
+
+        installed = await DatabaseService.execute(_installed)
+        pending = [
+            (tag, expression)
+            for tag, expression in cls.DEFAULT_RULES.items()
+            if cls._default_rule_id(tag) not in installed
+        ]
+
+        if not pending:
+            return 0
+
+        records: list[tuple[str, RuleRecord]] = []
+
+        try:
+            with ExpressionEngineService.temporary():
+                for tag, expression in pending:
+                    parsed = ExpressionEngineService.parse(expression, force=True)
+                    definition = parsed.get("definition")
+
+                    if parsed.get("issues") or definition is None:
+                        cls._log(f"could not parse the default rule for '{tag}': {expression}")
+                        continue
+
+                    records.append(
+                        (
+                            tag,
+                            cls.validate(
+                                {
+                                    "id": cls._default_rule_id(tag),
+                                    "name": TagService.name_of(tag),
+                                    "expression": expression,
+                                    "definition": definition,
+                                }
+                            ),
+                        )
+                    )
+        except ExpressionEngineError as exception:
+            cls._log(f"could not load the expression engine for the default rules: {exception}")
+            return 0
+
+        if not records:
+            return 0
+
+        await TagService.ensure_paths(sorted({tag for tag, _ in records}))
+
+        async def _install(session) -> int:
+            rows = list((await session.execute(select(Tag))).scalars().all())
+            by_path = {row.path: row for row in rows}
+            known = {raw.get("id") for row in rows for raw in (row.rules or [])}
+            done: set[str] = set()
+            created = 0
+
+            for tag, record in records:
+                row = by_path.get(tag)
+
+                if record.id in known:
+                    done.add(record.id)
+                    continue
+
+                if row is None:
+                    continue
+
+                row.rules = [*(row.rules or []), record.model_dump()]
+                known.add(record.id)
+                done.add(record.id)
+                created += 1
+
+            ids = installed | done
+            await AppData.set_value(session, AppData.DEFAULT_RULES, json.dumps(sorted(ids)))
+            await session.commit()
+
+            return created
+
+        return await DatabaseService.execute(_install)
 
     @classmethod
     async def refresh(cls) -> None:
