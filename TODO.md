@@ -4,8 +4,15 @@
 
 # Core-features
 
-* Add features to processing service
-  * Others
+* Add features to processing service:
+  Enhancement	Algorithm
+  Exposure correction	Exposure compensation, gamma
+  Contrast	Adaptive tone curve, S-curve
+  White balance	Gray World, temperature/tint
+  Local contrast	CLAHE
+  Vibrance	Adaptive saturation in perceptual color space
+  Sharpening	Unsharp Mask
+  Noise reduction	Bilateral / Non-Local Means
 * Add IA-class scanners (need a pipeline that process by IA instead of by Photo)
   * Scenic
   * Wildlife
