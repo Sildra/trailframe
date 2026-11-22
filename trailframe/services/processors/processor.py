@@ -21,11 +21,15 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any
 
+import numpy as np
 from PIL import Image
 
 from trailframe.log import get_logger
 from trailframe.services.core.configuration_service import Node
-from trailframe.services.photos.processing.tilt import CROP_MODE_NONE
+
+CROP_MODE_MAXIMUM_RECTANGLE = "maximum_valid_rectangle"
+CROP_MODE_NONE = "none"
+CROP_MODES = frozenset({CROP_MODE_MAXIMUM_RECTANGLE, CROP_MODE_NONE})
 
 
 @dataclass
@@ -45,9 +49,48 @@ class ProcessingContext:
     overrides: dict[str, Any] = field(default_factory=dict)
     # Published by the tilt processor and consumed by the crop processor.
     angle: float = 0.0
-    crop_mode: str = CROP_MODE_NONE
+    crop_mode: str = CROP_MODE_MAXIMUM_RECTANGLE
     # Analysis results shared between processors.
     data: dict[str, Any] = field(default_factory=dict)
+
+
+def as_bool(value: object) -> bool:
+    """Interpret YAML/JSON booleans and the usual textual spellings."""
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+
+    return bool(value)
+
+
+def to_rgb_array(image: Image.Image) -> tuple[np.ndarray, Image.Image | None]:
+    """Pixels of an image as an RGB array, keeping any alpha channel aside."""
+    alpha = image.getchannel("A") if "A" in image.getbands() else None
+
+    return np.asarray(image.convert("RGB"), dtype=np.uint8), alpha
+
+
+def from_rgb_array(array: np.ndarray, alpha: Image.Image | None = None) -> Image.Image:
+    """Build an image back from an RGB array, restoring the original alpha."""
+    pixels = np.ascontiguousarray(np.clip(np.nan_to_num(array), 0, 255).astype(np.uint8))
+    result = Image.fromarray(pixels, "RGB")
+
+    if alpha is not None:
+        result.putalpha(alpha)
+
+    return result
+
+
+def analysis_copy(image: Image.Image, max_dimension: int) -> Image.Image:
+    """A downscaled copy for per-photo analysis that does not need full pixels."""
+    longest = max(image.size)
+
+    if max_dimension <= 0 or longest <= max_dimension:
+        return image
+
+    ratio = max_dimension / longest
+    size = (max(1, round(image.width * ratio)), max(1, round(image.height * ratio)))
+
+    return image.resize(size, Image.Resampling.BILINEAR)
 
 
 @dataclass

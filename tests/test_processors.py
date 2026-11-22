@@ -14,13 +14,51 @@ def _processor(name: str):
 
 
 class TestProcessorChain:
-    @allure.title("The chain runs tilt, then crop, then rescale")
+    @allure.title("The chain runs the corrections before the geometric and output steps")
     def test_chain_order(self, app):
         from trailframe.services.photos.processing_service import ProcessingService
 
-        assert [definition.name for definition in PROCESSOR_DEFINITIONS] == ["Tilt", "Crop", "Rescale"]
-        assert [processor.name for processor in ProcessingService._processors] == ["Tilt", "Crop", "Rescale"]
-        assert [processor.step for processor in ProcessingService._processors] == ["tilt", "crop", "rescale"]
+        assert [definition.name for definition in PROCESSOR_DEFINITIONS] == [
+            "Exposure",
+            "White balance",
+            "Contrast",
+            "Local contrast",
+            "Vibrance",
+            "Tilt",
+            "Crop",
+            "Noise reduction",
+            "Rescale",
+            "Sharpening",
+        ]
+        assert [processor.name for processor in ProcessingService._processors] == [
+            definition.name for definition in PROCESSOR_DEFINITIONS
+        ]
+        assert [processor.step for processor in ProcessingService._processors] == [
+            "exposure",
+            "white_balance",
+            "contrast",
+            "local_contrast",
+            "vibrance",
+            "tilt",
+            "crop",
+            "noise_reduction",
+            "rescale",
+            "sharpening",
+        ]
+
+    @allure.title("New corrections are opt-in and leave existing photos alone")
+    def test_new_corrections_default_to_disabled(self, app):
+        from trailframe.services.photos.processing_service import ProcessingService
+
+        assert [processor.name for processor in ProcessingService._processors if not processor.accept()] == [
+            "Exposure",
+            "White balance",
+            "Contrast",
+            "Local contrast",
+            "Vibrance",
+            "Noise reduction",
+            "Sharpening",
+        ]
 
     @allure.title("A crop step is only expected when the horizon correction was applied")
     def test_crop_run_state(self, app):

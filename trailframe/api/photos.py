@@ -17,10 +17,10 @@ from trailframe.services.map.location_service import LocationService
 from trailframe.services.photos.duplicates_service import DuplicatesService
 from trailframe.services.photos.folder_service import FolderService
 from trailframe.services.photos.photo_service import PhotoService
-from trailframe.services.photos.processing.tilt import TiltOverride
 from trailframe.services.photos.processing_service import ProcessingService, ReprocessError
 from trailframe.services.photos.tag_service import TagService
 from trailframe.services.photos.thumbnail_service import ThumbnailService
+from trailframe.services.processors.tilt_processor import TiltOverride
 
 router = APIRouter(prefix="/api/photos", tags=["photos"])
 

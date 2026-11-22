@@ -13,9 +13,10 @@ from sqlalchemy import select
 from trailframe.models.photo import Photo
 from trailframe.services.core.database_service import DatabaseService
 from trailframe.services.photos.folder_service import FolderService
-from trailframe.services.photos.processing.tilt import TiltOverride, TiltSettings
 from trailframe.services.photos.processing_service import ProcessingService, ReprocessError
 from trailframe.services.photos.thumbnail_service import ThumbnailService
+from trailframe.services.processors.exposure_processor import ExposureSettings
+from trailframe.services.processors.tilt_processor import TiltOverride, TiltSettings
 
 
 class Upload:
@@ -304,6 +305,39 @@ class TestProcessingService:
         assert all((processed / entry["path"]).is_file() for entry in photo.alternatives)
         assert all(not (processed / path).exists() for path in previous)
         assert (photos / "old.png").is_file()
+
+    @allure.title("Enabling a correction later re-encodes photos that predate it")
+    def test_enabling_new_correction_reruns_photo(self, app, tmp_path):
+        processed, _ = _folders(tmp_path)
+        photo = _stored_photo(tmp_path, "older.png", _wide_image())
+
+        app.db(ProcessingService.preprocess(photo))
+        previous = {entry["path"] for entry in photo.alternatives}
+        exposure = next(processor for processor in ProcessingService._processors if processor.name == "Exposure")
+        previous_settings = exposure._settings
+        previous_enabled = exposure._enabled
+        changed = False
+
+        try:
+            assert ProcessingService.needs_processing(photo) is False
+
+            exposure._settings = ExposureSettings(enabled=True, exposure=1.0)
+            exposure._enabled = True
+
+            assert ProcessingService.needs_processing(photo) is True
+
+            changed = app.db(ProcessingService.preprocess(photo))
+        finally:
+            exposure._settings = previous_settings
+            exposure._enabled = previous_enabled
+
+        steps = [step["step"] for step in photo.processing]
+
+        assert changed is True
+        assert "exposure" in steps
+        assert steps.index("exposure") < steps.index("rescale")
+        assert all((processed / entry["path"]).is_file() for entry in photo.alternatives)
+        assert all(not (processed / path).exists() for path in previous)
 
     @allure.title("An upload is stored by the folder service and processed by the pipeline")
     def test_upload_flows_through_pipeline(self, app, tmp_path):

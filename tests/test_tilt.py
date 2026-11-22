@@ -7,23 +7,20 @@ import pytest
 from PIL import Image, ImageDraw
 
 from trailframe.services.core.configuration_service import Node
-from trailframe.services.photos.processing.tilt import (
-    CROP_MODE_MAXIMUM_RECTANGLE,
-    CROP_MODE_NONE,
+from trailframe.services.processors.crop_processor import CropProcessor, largest_inscribed_rectangle
+from trailframe.services.processors.processor import CROP_MODE_MAXIMUM_RECTANGLE, CROP_MODE_NONE, ProcessingContext
+from trailframe.services.processors.tilt_processor import (
     HoughTiltDetector,
     TiltEstimate,
     TiltOverride,
+    TiltProcessor,
     TiltSettings,
     available_detectors,
     decide,
     detect_tilt,
     get_detector,
-    largest_inscribed_rectangle,
     register_detector,
 )
-from trailframe.services.processors.crop_processor import CropProcessor
-from trailframe.services.processors.processor import ProcessingContext
-from trailframe.services.processors.tilt_processor import TiltProcessor
 
 
 def _tilted_line(angle: float, size: tuple[int, int] = (900, 600)) -> Image.Image:

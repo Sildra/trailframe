@@ -39,9 +39,9 @@ class ProcessingService(Service):
     """Photo preprocessing: decoded originals are re-encoded into alternatives.
 
     The service is a technical driver only: it decodes the original, runs the
-    configured processor chain (tilt → crop → rescale), and writes the encoded
-    files. The individual steps live in `trailframe.services.processors` and
-    record their own provenance in `photo.processing`.
+    configured processor chain, and writes the encoded files. The individual
+    steps live in `trailframe.services.processors` and record their own
+    provenance in `photo.processing`.
 
     The originals live in `photos_folder` and are owned by `FolderService`; this
     service reads them and writes the configured alternatives into the processed

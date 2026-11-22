@@ -4,7 +4,7 @@
 
 # Core-features
 
-* Add features to processing service:
+* [x] Add features to processing service (implemented as opt-in processors under `trailframe/services/processors/`):
   Enhancement	Algorithm
   Exposure correction	Exposure compensation, gamma
   Contrast	Adaptive tone curve, S-curve

@@ -6,8 +6,7 @@ import math
 
 from PIL import Image
 
-from trailframe.services.photos.processing.tilt import CROP_MODE_NONE, largest_inscribed_rectangle
-from trailframe.services.processors.processor import ProcessingContext, Processor, ProcessorResult
+from trailframe.services.processors.processor import CROP_MODE_NONE, ProcessingContext, Processor, ProcessorResult
 
 
 class CropProcessor(Processor):
@@ -78,3 +77,33 @@ class CropProcessor(Processor):
         # Nothing to crop when the horizon was not corrected, or when the
         # correction deliberately keeps the expanded canvas.
         return not meta.get("applied") or meta.get("crop_mode") == CROP_MODE_NONE
+
+
+def largest_inscribed_rectangle(width: int, height: int, angle: float) -> tuple[int, int]:
+    """Largest axis-aligned rectangle with no border, after rotating by ``angle``."""
+    if width <= 0 or height <= 0:
+        return max(1, width), max(1, height)
+
+    radians = math.radians(abs(angle) % 180.0)
+
+    if radians > math.pi / 2:
+        radians = math.pi - radians
+
+    sin_a = abs(math.sin(radians))
+    cos_a = abs(math.cos(radians))
+
+    if sin_a < 1e-9 or cos_a < 1e-9:
+        return width, height
+
+    width_is_longer = width >= height
+    long_side, short_side = (width, height) if width_is_longer else (height, width)
+
+    if short_side <= 2 * sin_a * cos_a * long_side or abs(sin_a - cos_a) < 1e-9:
+        half = 0.5 * short_side
+        rect_width, rect_height = (half / sin_a, half / cos_a) if width_is_longer else (half / cos_a, half / sin_a)
+    else:
+        cos_2a = cos_a * cos_a - sin_a * sin_a
+        rect_width = (width * cos_a - height * sin_a) / cos_2a
+        rect_height = (height * cos_a - width * sin_a) / cos_2a
+
+    return (max(1, min(width, round(rect_width))), max(1, min(height, round(rect_height))))
