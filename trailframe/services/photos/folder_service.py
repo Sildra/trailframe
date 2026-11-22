@@ -51,9 +51,15 @@ class FolderService(Service):
         cls._creation_throttle = general_node.get_path_value(
             "creation_throttle", "Throttle items simultaneously added to the pipeline", 0
         )
-        cls._failsafe = general_node.get_path_value(
-            "failsafe", "Start without scanning or watching the photos folder", False
-        )
+
+    @classmethod
+    def set_failsafe(cls, enabled: bool) -> None:
+        """Set the startup-only failsafe switch supplied on the command line.
+
+        This is deliberately not a configuration value: it applies to the current
+        process only and is never read from or written to the config file.
+        """
+        cls._failsafe = enabled
 
     @classmethod
     async def _start(cls) -> None:

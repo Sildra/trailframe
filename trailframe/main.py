@@ -23,6 +23,7 @@ from trailframe.api.statistics import router as statistics_router
 from trailframe.api.tags import router as tags_router
 from trailframe.api.tiles import router as tiles_router
 from trailframe.services.core.configuration_service import ConfigurationError, ConfigurationService
+from trailframe.services.photos.folder_service import FolderService
 from trailframe.services.service_registry import ServiceRegistry
 from trailframe.version import app_version
 
@@ -81,10 +82,12 @@ def create_app(args: argparse.Namespace) -> FastAPI:
         api_port_node.set_value(args.port)
     if args.database:
         database_node.set_value(str(args.database))
-    if args.failsafe:
-        general_node.get_node("failsafe").set_value(True)
+    # Drop the old persisted switch so a previous --failsafe run cannot affect
+    # later starts. The CLI flag is applied to this process only.
+    general_node.children.pop("failsafe", None)
 
     ServiceRegistry.configure(root_node)
+    FolderService.set_failsafe(args.failsafe)
     ConfigurationService.save()
 
     @asynccontextmanager

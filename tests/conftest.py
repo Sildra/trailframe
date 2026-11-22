@@ -84,6 +84,7 @@ def app(tmp_path) -> AppHarness:
 
     FolderService._folder = None
     FolderService._trash_folder = None
+    FolderService._failsafe = False
     FolderService._task = None
     FolderService._running = False
     FolderService._lock = None
