@@ -4,6 +4,7 @@ import {
     confidenceRegions,
     dedupeObjectBoxes,
     objectRect,
+    OBJECT_OVERLAY_ALPHA,
     type ObjectDetectionBox,
 } from "./objectBoxes";
 
@@ -94,10 +95,10 @@ describe("confidenceRegions", () => {
         expect(at(90)).toBe(0.5);
     });
 
-    it("makes low and high confidences visibly different from the fixed single-box fill", () => {
-        expect(confidenceOpacity(0.28)).toBeGreaterThan(0.22);
-        expect(confidenceOpacity(0.9)).toBeGreaterThan(0.6);
-        expect(confidenceOpacity(1)).toBeGreaterThan(confidenceOpacity(0.5));
-        expect(confidenceOpacity(0.5)).toBeGreaterThan(confidenceOpacity(0));
+    it("scales the original fill alpha by confidence", () => {
+        expect(confidenceOpacity(1)).toBeCloseTo(OBJECT_OVERLAY_ALPHA);
+        expect(confidenceOpacity(0.5)).toBeCloseTo(OBJECT_OVERLAY_ALPHA / 2);
+        expect(confidenceOpacity(0.28)).toBeCloseTo(OBJECT_OVERLAY_ALPHA * 0.28);
+        expect(confidenceOpacity(0)).toBe(0);
     });
 });

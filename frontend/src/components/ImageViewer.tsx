@@ -6,6 +6,7 @@ import {
     confidenceRegions,
     dedupeObjectBoxes,
     objectRect,
+    OBJECT_OVERLAY_ALPHA,
     type ObjectHover,
 } from "../lib/objectBoxes";
 import type { TiltOverlay } from "../lib/processing";
@@ -120,8 +121,9 @@ export default function ImageViewer({ photoId, version = 0, hoveredObject, hover
                                             y={entry.rect.y}
                                             width={entry.rect.width}
                                             height={entry.rect.height}
-                                            fill={showAll ? "none" : "rgba(255,0,0,0.15)"}
+                                            fill={showAll ? "none" : `rgba(255,0,0,${OBJECT_OVERLAY_ALPHA})`}
                                             stroke="red"
+                                            strokeOpacity={showAll ? confidenceOpacity(entry.confidence) : 1}
                                             strokeWidth={2}
                                         />
                                     ))}

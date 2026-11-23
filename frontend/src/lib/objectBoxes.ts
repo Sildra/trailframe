@@ -154,9 +154,12 @@ export function confidenceRegions(boxes: ObjectDetectionBox[]): ConfidenceRegion
     return regions;
 }
 
-/** Maps a detection confidence to the red fill opacity used in the gallery. */
+/** The fixed alpha of the single-object highlight and the ceiling for the overview. */
+export const OBJECT_OVERLAY_ALPHA = 0.15;
+
+/** Scales the original fill alpha by confidence, so the photo stays visible. */
 export function confidenceOpacity(confidence: number): number {
-    return 0.05 + confidenceOf(confidence) * 0.7;
+    return OBJECT_OVERLAY_ALPHA * confidenceOf(confidence);
 }
 
 /**
