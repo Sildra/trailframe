@@ -259,7 +259,7 @@ export default function ReprocessDialog({ photo, onClose, onUpdated }: Reprocess
     const windowSeconds = useMemo(() => parseWindow(windowText)?.seconds ?? 3600, [windowText]);
 
     const seedCandidate = useMemo<SimilarCandidate>(
-        () => ({ photo, similar: true, score: 1, phash_distance: null, shared_objects: [] }),
+        () => ({ photo, similar: true, score: 1, shared_objects: [] }),
         [photo],
     );
     const galleryCandidates = useMemo(
@@ -308,6 +308,17 @@ export default function ReprocessDialog({ photo, onClose, onUpdated }: Reprocess
             ),
         [candidates],
     );
+    const fingerprints = useMemo(() => {
+        if (!multiEdit) {
+            return undefined;
+        }
+
+        return Object.fromEntries(
+            candidates
+                .filter((candidate) => candidate.photo.id != null)
+                .map((candidate) => [candidate.photo.id as number, candidate.fingerprint]),
+        );
+    }, [candidates, multiEdit]);
     const editedIds = useMemo(() => {
         const ids = new Set<number>();
 
@@ -449,7 +460,6 @@ export default function ReprocessDialog({ photo, onClose, onUpdated }: Reprocess
                 body: {
                     photo_id: photo.id,
                     window_seconds: windowSeconds,
-                    max_hamming: 12,
                     min_object_overlap: 0.4,
                 },
                 signal,
@@ -929,6 +939,7 @@ export default function ReprocessDialog({ photo, onClose, onUpdated }: Reprocess
                                         onToggleCheck={toggleCheck}
                                         badges={badges}
                                         editedIds={editedIds}
+                                        fingerprints={fingerprints}
                                         thumbSize={96}
                                         onSelect={selectPhoto}
                                     />

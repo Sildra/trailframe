@@ -240,7 +240,7 @@ export interface paths {
         put?: never;
         /**
          * Similar Candidates
-         * @description List photos in a relative time window, flagging object/phash matches.
+         * @description List photos in a relative time window, flagging object or texture matches.
          */
         post: operations["similar_candidates_api_photos_similar_candidates_post"];
         delete?: never;
@@ -1421,6 +1421,47 @@ export interface components {
             /** Value */
             value: boolean;
         };
+        /**
+         * Fingerprint
+         * @description The features used to compare a candidate with the seed photo.
+         */
+        Fingerprint: {
+            /**
+             * Method
+             * @enum {string}
+             */
+            method: "objects" | "texture";
+            reference: components["schemas"]["ImageSize"];
+            /**
+             * Markers
+             * @default []
+             */
+            markers: components["schemas"]["FingerprintMarker"][];
+        };
+        /**
+         * FingerprintMarker
+         * @description One fingerprint feature, in normalised image coordinates.
+         */
+        FingerprintMarker: {
+            /** Key */
+            key: string;
+            /** Label */
+            label: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "object" | "texture";
+            /** Box */
+            box: number[];
+            /** Confidence */
+            confidence: number;
+            /**
+             * Shared
+             * @default false
+             */
+            shared: boolean;
+        };
         /** FolderStat */
         FolderStat: {
             /** Name */
@@ -1534,6 +1575,16 @@ export interface components {
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /**
+         * ImageSize
+         * @description Pixel dimensions of the image a fingerprint was measured on.
+         */
+        ImageSize: {
+            /** Width */
+            width: number;
+            /** Height */
+            height: number;
         };
         /** ImportResult */
         ImportResult: {
@@ -2007,11 +2058,6 @@ export interface components {
              */
             window_seconds: number;
             /**
-             * Max Hamming
-             * @default 12
-             */
-            max_hamming: number;
-            /**
              * Min Object Overlap
              * @default 0.4
              */
@@ -2027,13 +2073,12 @@ export interface components {
             similar: boolean;
             /** Score */
             score: number;
-            /** Phash Distance */
-            phash_distance?: number | null;
             /**
              * Shared Objects
              * @default []
              */
             shared_objects: string[];
+            fingerprint?: components["schemas"]["Fingerprint"] | null;
         };
         /** StorageStats */
         StorageStats: {

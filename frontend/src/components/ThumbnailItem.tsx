@@ -2,6 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import { Box, Checkbox, Chip } from "@mui/material";
 import StarIcon from "@mui/icons-material/Star";
 import { api } from "../api/client";
+import type { components } from "../api/generated/schema";
+
+type Fingerprint = components["schemas"]["Fingerprint"];
 
 interface ThumbnailItemProps {
     photoId: number;
@@ -21,10 +24,26 @@ interface ThumbnailItemProps {
     edited?: boolean;
     /** Outlines the normalization reference in a distinct colour. */
     reference?: boolean;
+    /** Fingerprint boxes drawn over the thumbnail in multi-edit mode. */
+    fingerprint?: Fingerprint | null;
     onSelect: () => void;
 }
 
-export default function ThumbnailItem({ photoId, selected = false, favorite = false, size = 160, version = 0, checkable = false, checked = false, onToggleCheck, badge, edited = false, reference = false, onSelect }: ThumbnailItemProps) {
+export default function ThumbnailItem({
+    photoId,
+    selected = false,
+    favorite = false,
+    size = 160,
+    version = 0,
+    checkable = false,
+    checked = false,
+    onToggleCheck,
+    badge,
+    edited = false,
+    reference = false,
+    fingerprint,
+    onSelect,
+}: ThumbnailItemProps) {
     const rootRef = useRef<HTMLDivElement | null>(null);
     const [visible, setVisible] = useState(false);
     const [src, setSrc] = useState<string | null>(null);
@@ -106,7 +125,45 @@ export default function ThumbnailItem({ photoId, selected = false, favorite = fa
             })}
         >
             {src ? (
-                <img src={src} alt={`Photo ${photoId}`} style={{ display: "block", width: "100%", height: "100%", objectFit: "cover" }} />
+                fingerprint ? (
+                    <svg
+                        viewBox={`0 0 ${fingerprint.reference.width} ${fingerprint.reference.height}`}
+                        preserveAspectRatio="xMidYMid slice"
+                        role="img"
+                        aria-label={`Photo ${photoId}`}
+                        style={{ display: "block", width: "100%", height: "100%" }}
+                    >
+                        <image
+                            href={src}
+                            x={0}
+                            y={0}
+                            width={fingerprint.reference.width}
+                            height={fingerprint.reference.height}
+                            preserveAspectRatio="none"
+                        />
+                        {fingerprint.markers.map((marker, index) => (
+                            <rect
+                                key={`${marker.key}-${index}`}
+                                x={marker.box[0] * fingerprint.reference.width}
+                                y={marker.box[1] * fingerprint.reference.height}
+                                width={Math.max(0, (marker.box[2] - marker.box[0]) * fingerprint.reference.width)}
+                                height={Math.max(0, (marker.box[3] - marker.box[1]) * fingerprint.reference.height)}
+                                fill="none"
+                                stroke={marker.shared ? "#00e676" : "rgba(255, 255, 255, 0.9)"}
+                                strokeWidth={marker.shared ? 2 : 1}
+                                vectorEffect="non-scaling-stroke"
+                            >
+                                <title>{`${marker.label}${marker.shared ? " (shared)" : ""}`}</title>
+                            </rect>
+                        ))}
+                    </svg>
+                ) : (
+                    <img
+                        src={src}
+                        alt={`Photo ${photoId}`}
+                        style={{ display: "block", width: "100%", height: "100%", objectFit: "cover" }}
+                    />
+                )
             ) : (
                 <Box
                     sx={{

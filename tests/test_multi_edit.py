@@ -32,15 +32,24 @@ def _objects(label: str) -> dict:
     }
 
 
-def _seed_photo(app, tmp_path, name: str) -> Photo:
+def _seed_photo(app, tmp_path, name: str, color=(30, 90, 150), stripes: str = "") -> Photo:
     from trailframe.services.core.database_service import DatabaseService
 
     photos = tmp_path / "data" / "photos"
     photos.mkdir(parents=True, exist_ok=True)
     original = photos / name
 
+    image = Image.new("RGB", (640, 480), color)
+
+    if stripes:
+        for offset in range(0, 640, 80):
+            if stripes == "horizontal":
+                image.paste((0, 0, 0), (0, offset, 640, offset + 20))
+            else:
+                image.paste((0, 0, 0), (offset, 0, offset + 20, 480))
+
     buffer = BytesIO()
-    Image.new("RGB", (640, 480), (30, 90, 150)).save(buffer, format="PNG")
+    image.save(buffer, format="PNG")
     original.write_bytes(buffer.getvalue())
 
     photo = Photo(
@@ -73,7 +82,7 @@ def _processing(photo_id: int, app) -> list[dict]:
 
 
 class TestSimilarCandidates:
-    @allure.title("Similarity candidates use a relative time window, objects and perceptual hash")
+    @allure.title("Similarity candidates use a relative time window and stored object fingerprints")
     def test_similar_candidates(self, app):
         ids = _add_photos(
             app,
@@ -111,17 +120,41 @@ class TestSimilarCandidates:
 
         response = app.post(
             "/api/photos/similar-candidates",
-            json={"photo_id": ids[0], "window_seconds": 3600, "max_hamming": 12, "min_object_overlap": 0.4},
+            json={"photo_id": ids[0], "window_seconds": 3600, "min_object_overlap": 0.4},
         )
 
         assert response.status_code == 200
         body = response.json()
         assert [entry["photo"]["id"] for entry in body] == [ids[1], ids[0], ids[2]]
         assert body[0]["similar"] is True
-        assert body[0]["phash_distance"] == 2
         assert body[0]["shared_objects"] == ["dog"]
+        assert body[0]["fingerprint"]["method"] == "objects"
+        assert body[0]["fingerprint"]["markers"][0]["label"] == "dog"
+        assert body[0]["fingerprint"]["markers"][0]["shared"] is True
+        assert "phash_distance" not in body[0]
         assert body[1]["photo"]["id"] == ids[0]
         assert body[2]["similar"] is False
+        assert body[2]["fingerprint"]["markers"][0]["shared"] is False
+
+    @allure.title("Similarity falls back to a texture fingerprint without YOLO objects")
+    def test_similar_candidates_texture_fallback(self, app, tmp_path):
+        first = _seed_photo(app, tmp_path, f"texture-a-{tmp_path.name}.png", stripes="horizontal")
+        second = _seed_photo(app, tmp_path, f"texture-b-{tmp_path.name}.png", stripes="horizontal")
+        third = _seed_photo(app, tmp_path, f"texture-c-{tmp_path.name}.png", stripes="vertical")
+
+        response = app.post(
+            "/api/photos/similar-candidates",
+            json={"photo_id": first.id, "window_seconds": 3600, "min_object_overlap": 0.4},
+        )
+
+        assert response.status_code == 200
+        by_id = {entry["photo"]["id"]: entry for entry in response.json()}
+
+        assert by_id[second.id]["similar"] is True
+        assert by_id[second.id]["fingerprint"]["method"] == "texture"
+        assert len(by_id[second.id]["fingerprint"]["markers"]) == 16
+        assert any(marker["shared"] for marker in by_id[second.id]["fingerprint"]["markers"])
+        assert by_id[third.id]["similar"] is False
 
     @allure.title("Similarity rejects a seed without a capture date")
     def test_similar_candidates_without_date(self, app):
@@ -129,7 +162,7 @@ class TestSimilarCandidates:
 
         response = app.post(
             "/api/photos/similar-candidates",
-            json={"photo_id": photo_id, "window_seconds": 3600, "max_hamming": 12, "min_object_overlap": 0.4},
+            json={"photo_id": photo_id, "window_seconds": 3600, "min_object_overlap": 0.4},
         )
 
         assert response.status_code == 422

@@ -124,7 +124,6 @@ class SimilarCandidatesRequest(BaseModel):
 
     photo_id: int
     window_seconds: int = Field(default=3600, ge=1, le=30 * 24 * 3600)
-    max_hamming: int = Field(default=12, ge=0, le=64)
     min_object_overlap: float = Field(default=0.4, ge=0, le=1)
 
 
@@ -449,12 +448,10 @@ async def delete_group(group_id: int):
 
 @router.post("/similar-candidates", response_model=list[SimilarPhoto])
 async def similar_candidates(payload: SimilarCandidatesRequest) -> list[SimilarPhoto]:
-    """List photos in a relative time window, flagging object/phash matches."""
+    """List photos in a relative time window, flagging object or texture matches."""
 
     try:
-        return await SimilarityService.candidates(
-            payload.photo_id, payload.window_seconds, payload.max_hamming, payload.min_object_overlap
-        )
+        return await SimilarityService.candidates(payload.photo_id, payload.window_seconds, payload.min_object_overlap)
     except SimilarityError as error:
         raise HTTPException(error.status_code, str(error)) from error
 

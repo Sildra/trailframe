@@ -1,5 +1,8 @@
 import { Box } from "@mui/material";
+import type { components } from "../api/generated/schema";
 import ThumbnailItem from "./ThumbnailItem";
+
+type Fingerprint = components["schemas"]["Fingerprint"];
 
 interface ThumbnailGalleryProps {
     photoIds: number[];
@@ -15,6 +18,8 @@ interface ThumbnailGalleryProps {
     editedIds?: Set<number>;
     /** Photo whose parameters are used as the normalization reference. */
     referenceId?: number | null;
+    /** Fingerprint boxes, shown only while multi-edit is active. */
+    fingerprints?: Record<number, Fingerprint | null | undefined>;
     onSelect: (photoId: number) => void;
 }
 
@@ -29,6 +34,7 @@ export default function ThumbnailGallery({
     badges,
     editedIds,
     referenceId,
+    fingerprints,
     onSelect,
 }: ThumbnailGalleryProps) {
     const checkable = onToggleCheck !== undefined;
@@ -55,6 +61,7 @@ export default function ThumbnailGallery({
                     badge={badges?.[photoId]}
                     edited={editedIds?.has(photoId) ?? false}
                     reference={referenceId === photoId}
+                    fingerprint={fingerprints?.[photoId]}
                     onSelect={() => onSelect(photoId)}
                 />
             ))}
