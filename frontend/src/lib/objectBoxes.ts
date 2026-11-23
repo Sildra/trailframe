@@ -156,7 +156,7 @@ export function confidenceRegions(boxes: ObjectDetectionBox[]): ConfidenceRegion
 
 /** Maps a detection confidence to the red fill opacity used in the gallery. */
 export function confidenceOpacity(confidence: number): number {
-    return 0.08 + confidenceOf(confidence) * 0.32;
+    return 0.05 + confidenceOf(confidence) * 0.7;
 }
 
 /**

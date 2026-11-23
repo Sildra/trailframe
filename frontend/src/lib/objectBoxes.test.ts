@@ -94,7 +94,9 @@ describe("confidenceRegions", () => {
         expect(at(90)).toBe(0.5);
     });
 
-    it("makes a single confidence fade with its percentage", () => {
+    it("makes low and high confidences visibly different from the fixed single-box fill", () => {
+        expect(confidenceOpacity(0.28)).toBeGreaterThan(0.22);
+        expect(confidenceOpacity(0.9)).toBeGreaterThan(0.6);
         expect(confidenceOpacity(1)).toBeGreaterThan(confidenceOpacity(0.5));
         expect(confidenceOpacity(0.5)).toBeGreaterThan(confidenceOpacity(0));
     });
