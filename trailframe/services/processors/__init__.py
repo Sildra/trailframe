@@ -1,17 +1,17 @@
 from dataclasses import dataclass
 
 from trailframe.services.core.configuration_service import Node
-from trailframe.services.processors.contrast_processor import ContrastProcessor
+from trailframe.services.processors.contrast_processor import ContrastOverride, ContrastProcessor
 from trailframe.services.processors.crop_processor import CropProcessor
-from trailframe.services.processors.exposure_processor import ExposureProcessor
-from trailframe.services.processors.local_contrast_processor import LocalContrastProcessor
-from trailframe.services.processors.noise_reduction_processor import NoiseReductionProcessor
+from trailframe.services.processors.exposure_processor import ExposureOverride, ExposureProcessor
+from trailframe.services.processors.local_contrast_processor import LocalContrastOverride, LocalContrastProcessor
+from trailframe.services.processors.noise_reduction_processor import NoiseReductionOverride, NoiseReductionProcessor
 from trailframe.services.processors.processor import ProcessingContext, Processor, ProcessorResult
 from trailframe.services.processors.rescale_processor import RescaleProcessor
-from trailframe.services.processors.sharpening_processor import SharpeningProcessor
-from trailframe.services.processors.tilt_processor import TiltProcessor
-from trailframe.services.processors.vibrance_processor import VibranceProcessor
-from trailframe.services.processors.white_balance_processor import WhiteBalanceProcessor
+from trailframe.services.processors.sharpening_processor import SharpeningOverride, SharpeningProcessor
+from trailframe.services.processors.tilt_processor import TiltOverride, TiltProcessor
+from trailframe.services.processors.vibrance_processor import VibranceOverride, VibranceProcessor
+from trailframe.services.processors.white_balance_processor import WhiteBalanceOverride, WhiteBalanceProcessor
 
 
 @dataclass(frozen=True)
@@ -38,6 +38,18 @@ PROCESSOR_DEFINITIONS: tuple[ProcessorDefinition, ...] = (
 PROCESSORS: dict[str, ProcessorDefinition] = {definition.name: definition for definition in PROCESSOR_DEFINITIONS}
 
 
+PROCESSOR_OVERRIDES: dict[str, type] = {
+    "Exposure": ExposureOverride,
+    "White balance": WhiteBalanceOverride,
+    "Contrast": ContrastOverride,
+    "Local contrast": LocalContrastOverride,
+    "Vibrance": VibranceOverride,
+    "Tilt": TiltOverride,
+    "Noise reduction": NoiseReductionOverride,
+    "Sharpening": SharpeningOverride,
+}
+
+
 def create_processors(config: Node) -> list[Processor]:
     """Instantiate and configure the processing chain in its fixed order."""
     processors = [definition.cls() for definition in PROCESSOR_DEFINITIONS]
@@ -51,6 +63,7 @@ def create_processors(config: Node) -> list[Processor]:
 __all__ = [
     "PROCESSORS",
     "PROCESSOR_DEFINITIONS",
+    "PROCESSOR_OVERRIDES",
     "ProcessingContext",
     "Processor",
     "ProcessorDefinition",

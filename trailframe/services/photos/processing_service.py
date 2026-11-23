@@ -428,6 +428,20 @@ class ProcessingService(Service):
                 )
                 chain = [processor for processor in cls._processors if processor.accept(context)]
 
+                # A per-photo override that disables a processor must leave a
+                # recipe marker, otherwise the next pipeline pass sees a missing
+                # step and re-enables the configured correction.
+                for processor in cls._processors:
+                    override = (overrides or {}).get(processor.name)
+
+                    if (
+                        processor.overridable
+                        and processor.accept()
+                        and processor not in chain
+                        and getattr(override, "enabled", None) is False
+                    ):
+                        steps.append(processor.skipped_step())
+
                 for processor in chain:
                     processor.prepare(base, context)
 
@@ -487,5 +501,8 @@ class ProcessingService(Service):
                 path.unlink(missing_ok=True)
 
             raise
+
+        order = {processor.step: index for index, processor in enumerate(cls._processors)}
+        steps.sort(key=lambda step: order.get(step.get("step"), len(order)))
 
         return entries, steps

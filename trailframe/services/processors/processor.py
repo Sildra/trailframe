@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import logging
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields, replace
 from typing import Any
 
 import numpy as np
@@ -93,6 +93,22 @@ def analysis_copy(image: Image.Image, max_dimension: int) -> Image.Image:
     return image.resize(size, Image.Resampling.BILINEAR)
 
 
+def with_overrides(settings, override):
+    """Copy frozen settings, applying every non-None field of a per-run override."""
+    if override is None:
+        return settings
+
+    values = {}
+
+    for item in fields(settings):
+        value = getattr(override, item.name, None)
+
+        if value is not None:
+            values[item.name] = value
+
+    return replace(settings, **values)
+
+
 @dataclass
 class ProcessorResult:
     """The transformed image plus the provenance entry describing the step."""
@@ -108,6 +124,9 @@ class Processor(ABC):
     step: str = "processing"
     # Whether the step is recorded once per photo or once per target size.
     per_target: bool = False
+    # Whether a per-run override can enable/disable this processor. Tilt keeps
+    # its own decision logic and records "Not applied" instead of being skipped.
+    overridable: bool = False
 
     def __init__(self, name: str) -> None:
         self.name = name
@@ -125,7 +144,22 @@ class Processor(ABC):
 
     def accept(self, context: ProcessingContext | None = None) -> bool:
         """Whether the processor takes part in this photo."""
+        override = None if context is None else context.overrides.get(self.name)
+        enabled = getattr(override, "enabled", None) if self.overridable and override is not None else None
+
+        if enabled is not None:
+            return bool(enabled)
+
         return self._enabled
+
+    def skipped_step(self) -> dict:
+        """Provenance for a processor a per-photo override explicitly disabled."""
+        return {
+            "step": self.step,
+            "summary": "Not applied",
+            "details": {"Applied": "No", "Reason": "disabled"},
+            "meta": {"applied": False},
+        }
 
     def prepare(self, image: Image.Image, context: ProcessingContext) -> None:
         """Analyse the source image once, before the per-target passes."""

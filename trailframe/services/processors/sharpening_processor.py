@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 import cv2
@@ -16,6 +17,7 @@ from trailframe.services.processors.processor import (
     as_bool,
     from_rgb_array,
     to_rgb_array,
+    with_overrides,
 )
 
 
@@ -38,6 +40,16 @@ class SharpeningSettings:
         )
 
 
+@dataclass(frozen=True)
+class SharpeningOverride:
+    """Per-photo override of the sharpening step."""
+
+    enabled: bool | None = None
+    radius: float | None = None
+    amount: float | None = None
+    threshold: float | None = None
+
+
 class SharpeningProcessor(Processor):
     """Adds a high-pass detail layer back to the image.
 
@@ -47,6 +59,7 @@ class SharpeningProcessor(Processor):
     """
 
     step = "sharpening"
+    overridable = True
 
     def __init__(self) -> None:
         super().__init__("Sharpening")
@@ -57,8 +70,25 @@ class SharpeningProcessor(Processor):
         self._settings = SharpeningSettings.from_node(node)
         self._enabled = self._settings.enabled
 
+    def validate_override(self, override) -> str | None:
+        if not isinstance(override, SharpeningOverride):
+            return None
+
+        if override.radius is not None and (not math.isfinite(override.radius) or not 0.1 <= override.radius <= 10):
+            return "Radius must be between 0.1 and 10."
+
+        if override.amount is not None and (not math.isfinite(override.amount) or not 0.0 <= override.amount <= 3.0):
+            return "Amount must be between 0 and 3."
+
+        if override.threshold is not None and (
+            not math.isfinite(override.threshold) or not 0.0 <= override.threshold <= 50.0
+        ):
+            return "Threshold must be between 0 and 50."
+
+        return None
+
     def execute(self, image: Image.Image, context: ProcessingContext) -> ProcessorResult:
-        settings = self._settings
+        settings = with_overrides(self._settings, context.overrides.get(self.name))
         pixels, alpha = to_rgb_array(image)
         radius = max(0.1, settings.radius)
         blur = cv2.GaussianBlur(pixels, (0, 0), radius)

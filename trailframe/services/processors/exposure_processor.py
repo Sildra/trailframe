@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 from PIL import Image
@@ -14,6 +15,7 @@ from trailframe.services.processors.processor import (
     as_bool,
     from_rgb_array,
     to_rgb_array,
+    with_overrides,
 )
 
 
@@ -34,6 +36,15 @@ class ExposureSettings:
         )
 
 
+@dataclass(frozen=True)
+class ExposureOverride:
+    """Per-photo override of the exposure step."""
+
+    enabled: bool | None = None
+    exposure: float | None = None
+    gamma: float | None = None
+
+
 class ExposureProcessor(Processor):
     """Scales brightness by a stop-based gain, then applies a gamma curve.
 
@@ -43,6 +54,7 @@ class ExposureProcessor(Processor):
     """
 
     step = "exposure"
+    overridable = True
 
     def __init__(self) -> None:
         super().__init__("Exposure")
@@ -54,7 +66,7 @@ class ExposureProcessor(Processor):
         self._enabled = self._settings.enabled
 
     def execute(self, image: Image.Image, context: ProcessingContext) -> ProcessorResult:
-        settings = self._settings
+        settings = with_overrides(self._settings, context.overrides.get(self.name))
         pixels, alpha = to_rgb_array(image)
         values = pixels.astype("float32") / 255.0
 
@@ -68,16 +80,24 @@ class ExposureProcessor(Processor):
 
         result = from_rgb_array(values * 255.0, alpha)
 
-        return ProcessorResult(result, self._record(gain, gamma))
+        return ProcessorResult(result, self._record(settings, gain, gamma))
 
-    def _record(self, gain: float, gamma: float) -> dict:
+    def validate_override(self, override) -> str | None:
+        if not isinstance(override, ExposureOverride):
+            return None
+
+        if override.exposure is not None and (not math.isfinite(override.exposure) or abs(override.exposure) > 6):
+            return "Exposure must be between -6 and +6 EV."
+
+        if override.gamma is not None and (not math.isfinite(override.gamma) or not 0.2 <= override.gamma <= 5):
+            return "Gamma must be between 0.2 and 5."
+
+        return None
+
+    def _record(self, settings: ExposureSettings, gain: float, gamma: float) -> dict:
         return {
             "step": self.step,
             "summary": f"{gain:g}× · γ {gamma:g}",
-            "details": {
-                "Exposure": f"{self._settings.exposure:+.2f} EV",
-                "Gamma": f"{self._settings.gamma:.2f}",
-                "Applied": "Yes",
-            },
-            "meta": {"exposure": self._settings.exposure, "gamma": self._settings.gamma},
+            "details": {"Exposure": f"{settings.exposure:+.2f} EV", "Gamma": f"{settings.gamma:.2f}", "Applied": "Yes"},
+            "meta": {"exposure": settings.exposure, "gamma": settings.gamma},
         }

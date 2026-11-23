@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
     Accordion,
     AccordionDetails,
@@ -38,7 +38,7 @@ import {
     type ReprocessOptions,
     type TiltMode,
 } from "../lib/reprocess";
-import ProcessingPreview from "./ProcessingPreview";
+import ProcessingPreview, { type PreviewCorrections } from "./ProcessingPreview";
 
 type Photo = components["schemas"]["PhotoDetail"];
 
@@ -88,6 +88,86 @@ function SizeRow({ label, width, height }: { label: string; width: number; heigh
     );
 }
 
+function SliderRow({
+    label,
+    value,
+    min,
+    max,
+    step,
+    onChange,
+    format,
+}: {
+    label: string;
+    value: number;
+    min: number;
+    max: number;
+    step: number;
+    onChange: (value: number) => void;
+    format?: (value: number) => string;
+}) {
+    return (
+        <Box sx={{ display: "flex", flexDirection: "column", gap: 0.25 }}>
+            <Box sx={{ display: "flex", justifyContent: "space-between", gap: 1 }}>
+                <Typography variant="caption" color="text.secondary">
+                    {label}
+                </Typography>
+                <Typography variant="caption">{format ? format(value) : value}</Typography>
+            </Box>
+            <Slider
+                size="small"
+                min={min}
+                max={max}
+                step={step}
+                value={value}
+                onChange={(_, next) => onChange(next as number)}
+            />
+        </Box>
+    );
+}
+
+function CorrectionAccordion({
+    title,
+    enabled,
+    onEnabled,
+    children,
+}: {
+    title: string;
+    enabled: boolean;
+    onEnabled: (value: boolean) => void;
+    children: ReactNode;
+}) {
+    return (
+        <Accordion disableGutters>
+            <AccordionSummary
+                expandIcon={<ExpandMoreIcon />}
+                sx={{ fontWeight: 600, fontSize: 14, minHeight: 40 }}
+            >
+                <Box sx={{ display: "flex", alignItems: "center", gap: 1, width: "100%" }}>
+                    <span>{title}</span>
+                    <Box sx={{ flex: 1 }} />
+                    <Switch
+                        size="small"
+                        checked={enabled}
+                        onChange={(event) => onEnabled(event.target.checked)}
+                        onClick={(event) => event.stopPropagation()}
+                        slotProps={{ input: { "aria-label": `Enable ${title}` } }}
+                    />
+                </Box>
+            </AccordionSummary>
+            <AccordionDetails sx={{ display: "flex", flexDirection: "column", gap: 1.5 }}>{children}</AccordionDetails>
+        </Accordion>
+    );
+}
+
+type CorrectionKey =
+    | "exposure"
+    | "whiteBalance"
+    | "contrast"
+    | "localContrast"
+    | "vibrance"
+    | "noiseReduction"
+    | "sharpening";
+
 export default function ReprocessDialog({ photo, onClose, onUpdated }: ReprocessDialogProps) {
     const [options, setOptions] = useState<ReprocessOptions>(() => defaultReprocessOptions(photo));
     const [angleText, setAngleText] = useState(() => formatAngle(defaultReprocessOptions(photo).angle));
@@ -96,6 +176,27 @@ export default function ReprocessDialog({ photo, onClose, onUpdated }: Reprocess
     const [error, setError] = useState<string | null>(null);
     const [preview, setPreview] = useState<PreviewImage | null>(null);
     const [previewError, setPreviewError] = useState<string | null>(null);
+
+    const corrections = useMemo<PreviewCorrections>(
+        () => ({
+            exposure: options.exposure,
+            whiteBalance: options.whiteBalance,
+            contrast: options.contrast,
+            localContrast: options.localContrast,
+            vibrance: options.vibrance,
+            noiseReduction: options.noiseReduction,
+            sharpening: options.sharpening,
+        }),
+        [
+            options.exposure,
+            options.whiteBalance,
+            options.contrast,
+            options.localContrast,
+            options.vibrance,
+            options.noiseReduction,
+            options.sharpening,
+        ],
+    );
 
     const tilt = useMemo(() => {
         const step = normalizeProcessing(photo.processing).find((entry) => entry.step === "tilt") ?? null;
@@ -117,7 +218,7 @@ export default function ReprocessDialog({ photo, onClose, onUpdated }: Reprocess
         const controller = new AbortController();
         let objectUrl: string | null = null;
 
-        fetch(`./api/photos/${photo.id}/preview`, { signal: controller.signal })
+        fetch(`./api/photos/${photo.id}/preview?size=1200`, { signal: controller.signal })
             .then(async (response) => {
                 if (!response.ok) {
                     throw new Error(`Preview unavailable (${response.status}).`);
@@ -169,6 +270,9 @@ export default function ReprocessDialog({ photo, onClose, onUpdated }: Reprocess
 
     const update = (patch: Partial<ReprocessOptions>) =>
         setOptions((current) => ({ ...current, ...patch }));
+
+    const patchCorrection = <K extends CorrectionKey>(key: K, patch: Partial<ReprocessOptions[K]>) =>
+        setOptions((current) => ({ ...current, [key]: { ...current[key], ...patch } }));
 
     const setAngle = (value: number) => {
         const rounded = Math.round(value * 100) / 100;
@@ -300,6 +404,7 @@ export default function ReprocessDialog({ photo, onClose, onUpdated }: Reprocess
                             <ProcessingPreview
                                 imageUrl={preview?.url ?? null}
                                 model={model}
+                                corrections={corrections}
                                 loading={!preview && !previewError}
                                 error={previewError}
                             />
@@ -359,6 +464,184 @@ export default function ReprocessDialog({ photo, onClose, onUpdated }: Reprocess
                         }}
                     >
                         <Box sx={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
+                            <CorrectionAccordion
+                                title="Exposure"
+                                enabled={options.exposure.enabled}
+                                onEnabled={(enabled) => patchCorrection("exposure", { enabled })}
+                            >
+                                <SliderRow
+                                    label="Exposure"
+                                    value={options.exposure.exposure}
+                                    min={-6}
+                                    max={6}
+                                    step={0.05}
+                                    format={(value) => `${value > 0 ? "+" : ""}${value.toFixed(2)} EV`}
+                                    onChange={(exposure) => patchCorrection("exposure", { exposure })}
+                                />
+                                <SliderRow
+                                    label="Gamma"
+                                    value={options.exposure.gamma}
+                                    min={0.2}
+                                    max={5}
+                                    step={0.05}
+                                    format={(value) => value.toFixed(2)}
+                                    onChange={(gamma) => patchCorrection("exposure", { gamma })}
+                                />
+                            </CorrectionAccordion>
+
+                            <CorrectionAccordion
+                                title="White balance"
+                                enabled={options.whiteBalance.enabled}
+                                onEnabled={(enabled) => patchCorrection("whiteBalance", { enabled })}
+                            >
+                                <TextField
+                                    select
+                                    size="small"
+                                    label="Method"
+                                    value={options.whiteBalance.method}
+                                    onChange={(event) =>
+                                        patchCorrection("whiteBalance", {
+                                            method: event.target.value as "gray_world" | "manual",
+                                        })
+                                    }
+                                >
+                                    <MenuItem value="gray_world">Gray World</MenuItem>
+                                    <MenuItem value="manual">Manual</MenuItem>
+                                </TextField>
+                                <SliderRow
+                                    label="Strength"
+                                    value={options.whiteBalance.strength}
+                                    min={0}
+                                    max={1}
+                                    step={0.01}
+                                    format={(value) => `${Math.round(value * 100)}%`}
+                                    onChange={(strength) => patchCorrection("whiteBalance", { strength })}
+                                />
+                                {options.whiteBalance.method === "manual" && (
+                                    <>
+                                        <SliderRow
+                                            label="Temperature"
+                                            value={options.whiteBalance.temperature}
+                                            min={-1}
+                                            max={1}
+                                            step={0.01}
+                                            format={(value) => value.toFixed(2)}
+                                            onChange={(temperature) => patchCorrection("whiteBalance", { temperature })}
+                                        />
+                                        <SliderRow
+                                            label="Tint"
+                                            value={options.whiteBalance.tint}
+                                            min={-1}
+                                            max={1}
+                                            step={0.01}
+                                            format={(value) => value.toFixed(2)}
+                                            onChange={(tint) => patchCorrection("whiteBalance", { tint })}
+                                        />
+                                    </>
+                                )}
+                            </CorrectionAccordion>
+
+                            <CorrectionAccordion
+                                title="Contrast"
+                                enabled={options.contrast.enabled}
+                                onEnabled={(enabled) => patchCorrection("contrast", { enabled })}
+                            >
+                                <TextField
+                                    select
+                                    size="small"
+                                    label="Method"
+                                    value={options.contrast.method}
+                                    onChange={(event) =>
+                                        patchCorrection("contrast", {
+                                            method: event.target.value as "s_curve" | "adaptive",
+                                        })
+                                    }
+                                >
+                                    <MenuItem value="s_curve">S-curve</MenuItem>
+                                    <MenuItem value="adaptive">Adaptive</MenuItem>
+                                </TextField>
+                                <SliderRow
+                                    label="Strength"
+                                    value={options.contrast.strength}
+                                    min={0}
+                                    max={1}
+                                    step={0.01}
+                                    format={(value) => `${Math.round(value * 100)}%`}
+                                    onChange={(strength) => patchCorrection("contrast", { strength })}
+                                />
+                                {options.contrast.method === "adaptive" && (
+                                    <>
+                                        <SliderRow
+                                            label="Black point percentile"
+                                            value={options.contrast.low_percentile}
+                                            min={0}
+                                            max={100}
+                                            step={1}
+                                            onChange={(low_percentile) => patchCorrection("contrast", { low_percentile })}
+                                        />
+                                        <SliderRow
+                                            label="White point percentile"
+                                            value={options.contrast.high_percentile}
+                                            min={0}
+                                            max={100}
+                                            step={1}
+                                            onChange={(high_percentile) =>
+                                                patchCorrection("contrast", { high_percentile })
+                                            }
+                                        />
+                                    </>
+                                )}
+                            </CorrectionAccordion>
+
+                            <CorrectionAccordion
+                                title="Local contrast"
+                                enabled={options.localContrast.enabled}
+                                onEnabled={(enabled) => patchCorrection("localContrast", { enabled })}
+                            >
+                                <SliderRow
+                                    label="Clip limit"
+                                    value={options.localContrast.clip_limit}
+                                    min={0.01}
+                                    max={20}
+                                    step={0.1}
+                                    format={(value) => value.toFixed(2)}
+                                    onChange={(clip_limit) => patchCorrection("localContrast", { clip_limit })}
+                                />
+                                <SliderRow
+                                    label="Tile grid"
+                                    value={options.localContrast.tile_grid}
+                                    min={1}
+                                    max={64}
+                                    step={1}
+                                    onChange={(tile_grid) => patchCorrection("localContrast", { tile_grid })}
+                                />
+                                <SliderRow
+                                    label="Strength"
+                                    value={options.localContrast.strength}
+                                    min={0}
+                                    max={1}
+                                    step={0.01}
+                                    format={(value) => `${Math.round(value * 100)}%`}
+                                    onChange={(strength) => patchCorrection("localContrast", { strength })}
+                                />
+                            </CorrectionAccordion>
+
+                            <CorrectionAccordion
+                                title="Vibrance"
+                                enabled={options.vibrance.enabled}
+                                onEnabled={(enabled) => patchCorrection("vibrance", { enabled })}
+                            >
+                                <SliderRow
+                                    label="Strength"
+                                    value={options.vibrance.strength}
+                                    min={0}
+                                    max={1}
+                                    step={0.01}
+                                    format={(value) => `${Math.round(value * 100)}%`}
+                                    onChange={(strength) => patchCorrection("vibrance", { strength })}
+                                />
+                            </CorrectionAccordion>
+
                             <Accordion disableGutters defaultExpanded>
                                 <AccordionSummary
                                     expandIcon={<ExpandMoreIcon />}
@@ -549,6 +832,100 @@ export default function ReprocessDialog({ photo, onClose, onUpdated }: Reprocess
                                     {model && <SizeRow label="Output" width={model.output.width} height={model.output.height} />}
                                 </AccordionDetails>
                             </Accordion>
+
+                            <CorrectionAccordion
+                                title="Noise reduction"
+                                enabled={options.noiseReduction.enabled}
+                                onEnabled={(enabled) => patchCorrection("noiseReduction", { enabled })}
+                            >
+                                <TextField
+                                    select
+                                    size="small"
+                                    label="Method"
+                                    value={options.noiseReduction.method}
+                                    onChange={(event) =>
+                                        patchCorrection("noiseReduction", {
+                                            method: event.target.value as "bilateral" | "nl_means",
+                                        })
+                                    }
+                                >
+                                    <MenuItem value="bilateral">Bilateral</MenuItem>
+                                    <MenuItem value="nl_means">Non-local means</MenuItem>
+                                </TextField>
+                                {options.noiseReduction.method === "bilateral" ? (
+                                    <>
+                                        <SliderRow
+                                            label="Radius"
+                                            value={options.noiseReduction.radius}
+                                            min={1}
+                                            max={30}
+                                            step={1}
+                                            onChange={(radius) => patchCorrection("noiseReduction", { radius })}
+                                        />
+                                        <SliderRow
+                                            label="Colour sigma"
+                                            value={options.noiseReduction.sigma_color}
+                                            min={1}
+                                            max={200}
+                                            step={1}
+                                            onChange={(sigma_color) => patchCorrection("noiseReduction", { sigma_color })}
+                                        />
+                                        <SliderRow
+                                            label="Spatial sigma"
+                                            value={options.noiseReduction.sigma_space}
+                                            min={1}
+                                            max={200}
+                                            step={1}
+                                            onChange={(sigma_space) => patchCorrection("noiseReduction", { sigma_space })}
+                                        />
+                                    </>
+                                ) : (
+                                    <SliderRow
+                                        label="Strength"
+                                        value={options.noiseReduction.strength}
+                                        min={1}
+                                        max={30}
+                                        step={1}
+                                        onChange={(strength) => patchCorrection("noiseReduction", { strength })}
+                                    />
+                                )}
+                                <Typography variant="caption" color="text.secondary">
+                                    Preview uses a fast blur approximation; the saved file uses the selected algorithm.
+                                </Typography>
+                            </CorrectionAccordion>
+
+                            <CorrectionAccordion
+                                title="Sharpening"
+                                enabled={options.sharpening.enabled}
+                                onEnabled={(enabled) => patchCorrection("sharpening", { enabled })}
+                            >
+                                <SliderRow
+                                    label="Radius"
+                                    value={options.sharpening.radius}
+                                    min={0.1}
+                                    max={10}
+                                    step={0.1}
+                                    format={(value) => value.toFixed(1)}
+                                    onChange={(radius) => patchCorrection("sharpening", { radius })}
+                                />
+                                <SliderRow
+                                    label="Amount"
+                                    value={options.sharpening.amount}
+                                    min={0}
+                                    max={3}
+                                    step={0.05}
+                                    format={(value) => value.toFixed(2)}
+                                    onChange={(amount) => patchCorrection("sharpening", { amount })}
+                                />
+                                <SliderRow
+                                    label="Threshold"
+                                    value={options.sharpening.threshold}
+                                    min={0}
+                                    max={50}
+                                    step={1}
+                                    onChange={(threshold) => patchCorrection("sharpening", { threshold })}
+                                />
+                            </CorrectionAccordion>
 
                             <Accordion disableGutters>
                                 <AccordionSummary

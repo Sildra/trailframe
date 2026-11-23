@@ -1,17 +1,86 @@
-import { useId } from "react";
+import { useEffect, useId, useState } from "react";
 import { Box, CircularProgress, Typography } from "@mui/material";
+import { applyColorPreview } from "../lib/colorPreview";
 import type { PreviewModel } from "../lib/preview";
+import type { CorrectionSettings } from "../lib/reprocess";
+
+export type PreviewCorrections = CorrectionSettings;
 
 interface ProcessingPreviewProps {
     imageUrl: string | null;
     model: PreviewModel | null;
+    corrections: PreviewCorrections;
     loading: boolean;
     error: string | null;
 }
 
-/** The live photo preview: the original rotated by the correction, with the crop shadowed. */
-export default function ProcessingPreview({ imageUrl, model, loading, error }: ProcessingPreviewProps) {
+/** The live photo preview: locally corrected pixels with the tilt/crop overlay. */
+export default function ProcessingPreview({
+    imageUrl,
+    model,
+    corrections,
+    loading,
+    error,
+}: ProcessingPreviewProps) {
     const uid = useId().replace(/[^a-zA-Z0-9_-]/g, "");
+    const [processed, setProcessed] = useState<{ url: string; key: string } | null>(null);
+    const key = imageUrl ? `${imageUrl}|${JSON.stringify(corrections)}` : "";
+    const correctedUrl = processed?.key === key ? processed.url : null;
+
+    useEffect(() => {
+        if (!imageUrl) {
+            return;
+        }
+
+        let cancelled = false;
+        let objectUrl: string | null = null;
+        const image = new Image();
+
+        image.onload = () => {
+            if (cancelled) {
+                return;
+            }
+
+            const canvas = document.createElement("canvas");
+            canvas.width = image.naturalWidth;
+            canvas.height = image.naturalHeight;
+            const context = canvas.getContext("2d", { willReadFrequently: true });
+
+            if (!context) {
+                setProcessed({ url: imageUrl, key });
+                return;
+            }
+
+            context.drawImage(image, 0, 0);
+            const pixels = context.getImageData(0, 0, canvas.width, canvas.height);
+            applyColorPreview(pixels, corrections);
+            context.putImageData(pixels, 0, 0);
+            canvas.toBlob((blob) => {
+                if (cancelled || !blob) {
+                    return;
+                }
+
+                objectUrl = URL.createObjectURL(blob);
+                setProcessed({ url: objectUrl, key });
+            }, "image/webp");
+        };
+
+        image.onerror = () => {
+            if (!cancelled) {
+                setProcessed({ url: imageUrl, key });
+            }
+        };
+
+        image.src = imageUrl;
+
+        return () => {
+            cancelled = true;
+
+            if (objectUrl) {
+                URL.revokeObjectURL(objectUrl);
+            }
+        };
+    }, [imageUrl, corrections, key]);
 
     if (loading) {
         return (
@@ -64,7 +133,7 @@ export default function ProcessingPreview({ imageUrl, model, loading, error }: P
                 <g clipPath={`url(#${clipId})`}>
                     <g transform={rotate}>
                         <image
-                            href={imageUrl}
+                            href={correctedUrl ?? imageUrl}
                             x={image.x}
                             y={image.y}
                             width={image.width}

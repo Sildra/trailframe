@@ -20,6 +20,7 @@ from trailframe.services.photos.photo_service import PhotoService
 from trailframe.services.photos.processing_service import ProcessingService, ReprocessError
 from trailframe.services.photos.tag_service import TagService
 from trailframe.services.photos.thumbnail_service import ThumbnailService
+from trailframe.services.processors import PROCESSOR_OVERRIDES
 from trailframe.services.processors.tilt_processor import TiltOverride
 
 router = APIRouter(prefix="/api/photos", tags=["photos"])
@@ -50,12 +51,69 @@ class ReprocessTilt(BaseModel):
     crop_mode: str | None = None
 
 
+class ReprocessExposure(BaseModel):
+    enabled: bool | None = None
+    exposure: float | None = None
+    gamma: float | None = None
+
+
+class ReprocessWhiteBalance(BaseModel):
+    enabled: bool | None = None
+    method: str | None = None
+    strength: float | None = None
+    temperature: float | None = None
+    tint: float | None = None
+
+
+class ReprocessContrast(BaseModel):
+    enabled: bool | None = None
+    method: str | None = None
+    strength: float | None = None
+    low_percentile: float | None = None
+    high_percentile: float | None = None
+
+
+class ReprocessLocalContrast(BaseModel):
+    enabled: bool | None = None
+    clip_limit: float | None = None
+    tile_grid: int | None = None
+    strength: float | None = None
+
+
+class ReprocessVibrance(BaseModel):
+    enabled: bool | None = None
+    strength: float | None = None
+
+
+class ReprocessNoiseReduction(BaseModel):
+    enabled: bool | None = None
+    method: str | None = None
+    radius: int | None = None
+    sigma_color: float | None = None
+    sigma_space: float | None = None
+    strength: float | None = None
+
+
+class ReprocessSharpening(BaseModel):
+    enabled: bool | None = None
+    radius: float | None = None
+    amount: float | None = None
+    threshold: float | None = None
+
+
 class ReprocessRequest(BaseModel):
     """Per-photo overrides; omitted fields keep the current/configured values."""
 
     alternatives: list[int] | None = None
     main: int | None = None
     tilt: ReprocessTilt | None = None
+    exposure: ReprocessExposure | None = None
+    white_balance: ReprocessWhiteBalance | None = None
+    contrast: ReprocessContrast | None = None
+    local_contrast: ReprocessLocalContrast | None = None
+    vibrance: ReprocessVibrance | None = None
+    noise_reduction: ReprocessNoiseReduction | None = None
+    sharpening: ReprocessSharpening | None = None
     rescan: bool = True
 
 
@@ -445,7 +503,7 @@ async def get_photo(photo_id: int) -> PhotoDetail:
 @router.post("/{photo_id}/reprocess", response_model=PhotoDetail)
 async def reprocess_photo(photo_id: int, payload: ReprocessRequest) -> PhotoDetail:
     """Regenerate the alternatives of a photo from its original."""
-    overrides = None
+    overrides = {}
 
     if payload.tilt is not None:
         mode = payload.tilt.mode.lower()
@@ -456,13 +514,25 @@ async def reprocess_photo(photo_id: int, payload: ReprocessRequest) -> PhotoDeta
         if mode == "manual" and payload.tilt.angle is None:
             raise HTTPException(400, "A manual angle is required")
 
-        overrides = {
-            "Tilt": TiltOverride(
-                enabled=mode != "off",
-                angle=payload.tilt.angle if mode == "manual" else None,
-                crop_mode=payload.tilt.crop_mode,
-            )
-        }
+        overrides["Tilt"] = TiltOverride(
+            enabled=mode != "off",
+            angle=payload.tilt.angle if mode == "manual" else None,
+            crop_mode=payload.tilt.crop_mode,
+        )
+
+    corrections = {
+        "Exposure": payload.exposure,
+        "White balance": payload.white_balance,
+        "Contrast": payload.contrast,
+        "Local contrast": payload.local_contrast,
+        "Vibrance": payload.vibrance,
+        "Noise reduction": payload.noise_reduction,
+        "Sharpening": payload.sharpening,
+    }
+
+    for name, model in corrections.items():
+        if model is not None:
+            overrides[name] = PROCESSOR_OVERRIDES[name](**model.model_dump(exclude_none=True))
 
     try:
         await ProcessingService.reprocess(

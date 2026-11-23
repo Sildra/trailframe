@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 import cv2
@@ -17,6 +18,7 @@ from trailframe.services.processors.processor import (
     as_bool,
     from_rgb_array,
     to_rgb_array,
+    with_overrides,
 )
 
 S_CURVE = "s_curve"
@@ -65,6 +67,18 @@ class ContrastSettings:
 
 
 @dataclass(frozen=True)
+class ContrastOverride:
+    """Per-photo override of the contrast step."""
+
+    enabled: bool | None = None
+    method: str | None = None
+    strength: float | None = None
+    low_percentile: float | None = None
+    high_percentile: float | None = None
+    analysis_max_dimension: int | None = None
+
+
+@dataclass(frozen=True)
 class ContrastDecision:
     """Tone endpoints measured once for the photo."""
 
@@ -81,6 +95,7 @@ class ContrastProcessor(Processor):
     """
 
     step = "contrast"
+    overridable = True
 
     def __init__(self) -> None:
         super().__init__("Contrast")
@@ -92,30 +107,59 @@ class ContrastProcessor(Processor):
         self._enabled = self._settings.enabled
 
     def prepare(self, image: Image.Image, context: ProcessingContext) -> None:
-        context.data[self.name] = self._detect(image)
+        settings = with_overrides(self._settings, context.overrides.get(self.name))
+        context.data[self.name] = self._detect(image, settings)
 
     def execute(self, image: Image.Image, context: ProcessingContext) -> ProcessorResult:
+        settings = with_overrides(self._settings, context.overrides.get(self.name))
         decision = context.data.get(self.name)
 
         if not isinstance(decision, ContrastDecision):
-            decision = self._detect(image)
+            decision = self._detect(image, settings)
 
         pixels, alpha = to_rgb_array(image)
         values = pixels.astype("float32") / 255.0
 
-        if self._settings.method == ADAPTIVE:
+        if settings.method == ADAPTIVE:
             span = max(decision.white - decision.black, 1.0)
             curved = np.clip((values * 255.0 - decision.black) / span, 0.0, 1.0)
         else:
             curved = values * values * (3.0 - 2.0 * values)
 
-        strength = max(0.0, min(1.0, self._settings.strength))
+        strength = max(0.0, min(1.0, settings.strength))
         blended = values + strength * (curved - values)
 
-        return ProcessorResult(from_rgb_array(blended * 255.0, alpha), self._record(decision))
+        return ProcessorResult(from_rgb_array(blended * 255.0, alpha), self._record(settings, decision))
 
-    def _detect(self, image: Image.Image) -> ContrastDecision:
-        settings = self._settings
+    def validate_override(self, override) -> str | None:
+        if not isinstance(override, ContrastOverride):
+            return None
+
+        if override.method is not None and override.method not in METHODS:
+            return f"Unknown contrast method '{override.method}'."
+
+        if override.strength is not None and (
+            not math.isfinite(override.strength) or not 0.0 <= override.strength <= 1.0
+        ):
+            return "Strength must be between 0 and 1."
+
+        for name, value in (("Low percentile", override.low_percentile), ("High percentile", override.high_percentile)):
+            if value is not None and (not math.isfinite(value) or not 0.0 <= value <= 100.0):
+                return f"{name} must be between 0 and 100."
+
+        if (
+            override.low_percentile is not None
+            and override.high_percentile is not None
+            and override.low_percentile >= override.high_percentile
+        ):
+            return "The low percentile must be below the high percentile."
+
+        if override.analysis_max_dimension is not None and not 1 <= override.analysis_max_dimension <= 8192:
+            return "The analysis size must be between 1 and 8192 px."
+
+        return None
+
+    def _detect(self, image: Image.Image, settings: ContrastSettings) -> ContrastDecision:
         sample, _ = to_rgb_array(analysis_copy(image, settings.analysis_max_dimension))
         gray = cv2.cvtColor(sample, cv2.COLOR_RGB2GRAY)
 
@@ -132,13 +176,13 @@ class ContrastProcessor(Processor):
 
         return ContrastDecision(float(black), float(white))
 
-    def _record(self, decision: ContrastDecision) -> dict:
+    def _record(self, settings: ContrastSettings, decision: ContrastDecision) -> dict:
         details = {
-            "Method": "Adaptive tone curve" if self._settings.method == ADAPTIVE else "S-curve",
-            "Strength": f"{self._settings.strength:.0%}",
+            "Method": "Adaptive tone curve" if settings.method == ADAPTIVE else "S-curve",
+            "Strength": f"{settings.strength:.0%}",
         }
 
-        if self._settings.method == ADAPTIVE:
+        if settings.method == ADAPTIVE:
             details["Black point"] = f"{decision.black:.0f}"
             details["White point"] = f"{decision.white:.0f}"
 
@@ -147,8 +191,8 @@ class ContrastProcessor(Processor):
             "summary": details["Method"],
             "details": details,
             "meta": {
-                "method": self._settings.method,
-                "strength": self._settings.strength,
+                "method": settings.method,
+                "strength": settings.strength,
                 "black": round(decision.black, 2),
                 "white": round(decision.white, 2),
             },

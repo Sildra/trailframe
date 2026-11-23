@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 import cv2
@@ -15,6 +16,7 @@ from trailframe.services.processors.processor import (
     as_bool,
     from_rgb_array,
     to_rgb_array,
+    with_overrides,
 )
 
 
@@ -37,6 +39,16 @@ class LocalContrastSettings:
         )
 
 
+@dataclass(frozen=True)
+class LocalContrastOverride:
+    """Per-photo override of the local contrast step."""
+
+    enabled: bool | None = None
+    clip_limit: float | None = None
+    tile_grid: int | None = None
+    strength: float | None = None
+
+
 class LocalContrastProcessor(Processor):
     """Boosts local detail without amplifying the global tone curve.
 
@@ -46,6 +58,7 @@ class LocalContrastProcessor(Processor):
     """
 
     step = "local_contrast"
+    overridable = True
 
     def __init__(self) -> None:
         super().__init__("Local contrast")
@@ -56,8 +69,27 @@ class LocalContrastProcessor(Processor):
         self._settings = LocalContrastSettings.from_node(node)
         self._enabled = self._settings.enabled
 
+    def validate_override(self, override) -> str | None:
+        if not isinstance(override, LocalContrastOverride):
+            return None
+
+        if override.clip_limit is not None and (
+            not math.isfinite(override.clip_limit) or not 0.01 <= override.clip_limit <= 20
+        ):
+            return "Clip limit must be between 0.01 and 20."
+
+        if override.tile_grid is not None and not 1 <= override.tile_grid <= 64:
+            return "Tile grid must be between 1 and 64."
+
+        if override.strength is not None and (
+            not math.isfinite(override.strength) or not 0.0 <= override.strength <= 1.0
+        ):
+            return "Strength must be between 0 and 1."
+
+        return None
+
     def execute(self, image: Image.Image, context: ProcessingContext) -> ProcessorResult:
-        settings = self._settings
+        settings = with_overrides(self._settings, context.overrides.get(self.name))
         pixels, alpha = to_rgb_array(image)
         lab = cv2.cvtColor(pixels, cv2.COLOR_RGB2LAB)
         lightness, a, b = cv2.split(lab)

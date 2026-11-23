@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 import cv2
@@ -16,6 +17,7 @@ from trailframe.services.processors.processor import (
     as_bool,
     from_rgb_array,
     to_rgb_array,
+    with_overrides,
 )
 
 
@@ -34,6 +36,14 @@ class VibranceSettings:
         )
 
 
+@dataclass(frozen=True)
+class VibranceOverride:
+    """Per-photo override of the vibrance step."""
+
+    enabled: bool | None = None
+    strength: float | None = None
+
+
 class VibranceProcessor(Processor):
     """Raises saturation mostly where colours are already muted.
 
@@ -43,6 +53,7 @@ class VibranceProcessor(Processor):
     """
 
     step = "vibrance"
+    overridable = True
 
     def __init__(self) -> None:
         super().__init__("Vibrance")
@@ -53,7 +64,19 @@ class VibranceProcessor(Processor):
         self._settings = VibranceSettings.from_node(node)
         self._enabled = self._settings.enabled
 
+    def validate_override(self, override) -> str | None:
+        if not isinstance(override, VibranceOverride):
+            return None
+
+        if override.strength is not None and (
+            not math.isfinite(override.strength) or not 0.0 <= override.strength <= 1.0
+        ):
+            return "Strength must be between 0 and 1."
+
+        return None
+
     def execute(self, image: Image.Image, context: ProcessingContext) -> ProcessorResult:
+        settings = with_overrides(self._settings, context.overrides.get(self.name))
         pixels, alpha = to_rgb_array(image)
         lab = cv2.cvtColor(pixels, cv2.COLOR_RGB2LAB).astype("float32")
         lightness = lab[:, :, 0] / 255.0
@@ -63,7 +86,7 @@ class VibranceProcessor(Processor):
         chroma = np.sqrt(a * a + b * b) / 181.0
         hue_weight = 1.0 - np.clip(chroma, 0.0, 1.0)
         tone_weight = 1.0 - np.abs(2.0 * lightness - 1.0)
-        factor = 1.0 + max(0.0, min(1.0, self._settings.strength)) * hue_weight * np.clip(tone_weight, 0.0, 1.0)
+        factor = 1.0 + max(0.0, min(1.0, settings.strength)) * hue_weight * np.clip(tone_weight, 0.0, 1.0)
 
         lab[:, :, 1] = 128.0 + a * factor
         lab[:, :, 2] = 128.0 + b * factor
@@ -74,7 +97,7 @@ class VibranceProcessor(Processor):
             {
                 "step": self.step,
                 "summary": "Adaptive LAB",
-                "details": {"Method": "Adaptive saturation (LAB)", "Strength": f"{self._settings.strength:.0%}"},
-                "meta": {"strength": self._settings.strength},
+                "details": {"Method": "Adaptive saturation (LAB)", "Strength": f"{settings.strength:.0%}"},
+                "meta": {"strength": settings.strength},
             },
         )

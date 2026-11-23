@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 import numpy as np
@@ -16,6 +17,7 @@ from trailframe.services.processors.processor import (
     as_bool,
     from_rgb_array,
     to_rgb_array,
+    with_overrides,
 )
 
 GRAY_WORLD = "gray_world"
@@ -56,6 +58,18 @@ class WhiteBalanceSettings:
 
 
 @dataclass(frozen=True)
+class WhiteBalanceOverride:
+    """Per-photo override of the white balance step."""
+
+    enabled: bool | None = None
+    method: str | None = None
+    strength: float | None = None
+    temperature: float | None = None
+    tint: float | None = None
+    analysis_max_dimension: int | None = None
+
+
+@dataclass(frozen=True)
 class WhiteBalanceDecision:
     """Channel gains detected once for the photo."""
 
@@ -72,6 +86,7 @@ class WhiteBalanceProcessor(Processor):
     """
 
     step = "white_balance"
+    overridable = True
 
     def __init__(self) -> None:
         super().__init__("White balance")
@@ -83,22 +98,46 @@ class WhiteBalanceProcessor(Processor):
         self._enabled = self._settings.enabled
 
     def prepare(self, image: Image.Image, context: ProcessingContext) -> None:
-        context.data[self.name] = WhiteBalanceDecision(gains=self._detect(image), method=self._settings.method)
+        settings = with_overrides(self._settings, context.overrides.get(self.name))
+        context.data[self.name] = WhiteBalanceDecision(gains=self._detect(image, settings), method=settings.method)
 
     def execute(self, image: Image.Image, context: ProcessingContext) -> ProcessorResult:
+        settings = with_overrides(self._settings, context.overrides.get(self.name))
         decision = context.data.get(self.name)
 
         if not isinstance(decision, WhiteBalanceDecision):
-            decision = WhiteBalanceDecision(self._detect(image), self._settings.method)
+            decision = WhiteBalanceDecision(self._detect(image, settings), settings.method)
 
-        strength = max(0.0, min(1.0, self._settings.strength))
+        strength = max(0.0, min(1.0, settings.strength))
         gains = np.array([1.0 + strength * (gain - 1.0) for gain in decision.gains], dtype="float32")
         pixels, alpha = to_rgb_array(image)
 
-        return ProcessorResult(from_rgb_array(pixels.astype("float32") * gains, alpha), self._record(decision, gains))
+        return ProcessorResult(
+            from_rgb_array(pixels.astype("float32") * gains, alpha), self._record(settings, decision, gains)
+        )
 
-    def _detect(self, image: Image.Image) -> tuple[float, float, float]:
-        settings = self._settings
+    def validate_override(self, override) -> str | None:
+        if not isinstance(override, WhiteBalanceOverride):
+            return None
+
+        if override.method is not None and override.method not in METHODS:
+            return f"Unknown white balance method '{override.method}'."
+
+        if override.strength is not None and (
+            not math.isfinite(override.strength) or not 0.0 <= override.strength <= 1.0
+        ):
+            return "Strength must be between 0 and 1."
+
+        for name, value in (("Temperature", override.temperature), ("Tint", override.tint)):
+            if value is not None and (not math.isfinite(value) or abs(value) > 1):
+                return f"{name} must be between -1 and 1."
+
+        if override.analysis_max_dimension is not None and not 1 <= override.analysis_max_dimension <= 8192:
+            return "The analysis size must be between 1 and 8192 px."
+
+        return None
+
+    def _detect(self, image: Image.Image, settings: WhiteBalanceSettings) -> tuple[float, float, float]:
         temperature = max(-1.0, min(1.0, settings.temperature))
         tint = max(-1.0, min(1.0, settings.tint))
         manual = np.array(
@@ -127,22 +166,22 @@ class WhiteBalanceProcessor(Processor):
 
         return tuple(float(gain) for gain in np.clip(detected * manual, 0.5, 2.0))
 
-    def _record(self, decision: WhiteBalanceDecision, gains: np.ndarray) -> dict:
+    def _record(self, settings: WhiteBalanceSettings, decision: WhiteBalanceDecision, gains: np.ndarray) -> dict:
         return {
             "step": self.step,
             "summary": "Neutralized" if decision.method == GRAY_WORLD else "Temperature/tint",
             "details": {
                 "Method": "Gray World" if decision.method == GRAY_WORLD else "Manual",
                 "Gains": ", ".join(f"{gain:.2f}×" for gain in gains),
-                "Strength": f"{self._settings.strength:.0%}",
-                "Temperature": f"{self._settings.temperature:+.2f}",
-                "Tint": f"{self._settings.tint:+.2f}",
+                "Strength": f"{settings.strength:.0%}",
+                "Temperature": f"{settings.temperature:+.2f}",
+                "Tint": f"{settings.tint:+.2f}",
             },
             "meta": {
                 "method": decision.method,
                 "gains": [round(float(gain), 4) for gain in decision.gains],
-                "strength": self._settings.strength,
-                "temperature": self._settings.temperature,
-                "tint": self._settings.tint,
+                "strength": settings.strength,
+                "temperature": settings.temperature,
+                "tint": settings.tint,
             },
         }

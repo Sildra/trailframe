@@ -1683,6 +1683,54 @@ export interface components {
             /** Scanners */
             scanners: string[];
         };
+        /** ReprocessContrast */
+        ReprocessContrast: {
+            /** Enabled */
+            enabled?: boolean | null;
+            /** Method */
+            method?: string | null;
+            /** Strength */
+            strength?: number | null;
+            /** Low Percentile */
+            low_percentile?: number | null;
+            /** High Percentile */
+            high_percentile?: number | null;
+        };
+        /** ReprocessExposure */
+        ReprocessExposure: {
+            /** Enabled */
+            enabled?: boolean | null;
+            /** Exposure */
+            exposure?: number | null;
+            /** Gamma */
+            gamma?: number | null;
+        };
+        /** ReprocessLocalContrast */
+        ReprocessLocalContrast: {
+            /** Enabled */
+            enabled?: boolean | null;
+            /** Clip Limit */
+            clip_limit?: number | null;
+            /** Tile Grid */
+            tile_grid?: number | null;
+            /** Strength */
+            strength?: number | null;
+        };
+        /** ReprocessNoiseReduction */
+        ReprocessNoiseReduction: {
+            /** Enabled */
+            enabled?: boolean | null;
+            /** Method */
+            method?: string | null;
+            /** Radius */
+            radius?: number | null;
+            /** Sigma Color */
+            sigma_color?: number | null;
+            /** Sigma Space */
+            sigma_space?: number | null;
+            /** Strength */
+            strength?: number | null;
+        };
         /**
          * ReprocessRequest
          * @description Per-photo overrides; omitted fields keep the current/configured values.
@@ -1693,11 +1741,29 @@ export interface components {
             /** Main */
             main?: number | null;
             tilt?: components["schemas"]["ReprocessTilt"] | null;
+            exposure?: components["schemas"]["ReprocessExposure"] | null;
+            white_balance?: components["schemas"]["ReprocessWhiteBalance"] | null;
+            contrast?: components["schemas"]["ReprocessContrast"] | null;
+            local_contrast?: components["schemas"]["ReprocessLocalContrast"] | null;
+            vibrance?: components["schemas"]["ReprocessVibrance"] | null;
+            noise_reduction?: components["schemas"]["ReprocessNoiseReduction"] | null;
+            sharpening?: components["schemas"]["ReprocessSharpening"] | null;
             /**
              * Rescan
              * @default true
              */
             rescan: boolean;
+        };
+        /** ReprocessSharpening */
+        ReprocessSharpening: {
+            /** Enabled */
+            enabled?: boolean | null;
+            /** Radius */
+            radius?: number | null;
+            /** Amount */
+            amount?: number | null;
+            /** Threshold */
+            threshold?: number | null;
         };
         /** ReprocessTilt */
         ReprocessTilt: {
@@ -1710,6 +1776,26 @@ export interface components {
             angle?: number | null;
             /** Crop Mode */
             crop_mode?: string | null;
+        };
+        /** ReprocessVibrance */
+        ReprocessVibrance: {
+            /** Enabled */
+            enabled?: boolean | null;
+            /** Strength */
+            strength?: number | null;
+        };
+        /** ReprocessWhiteBalance */
+        ReprocessWhiteBalance: {
+            /** Enabled */
+            enabled?: boolean | null;
+            /** Method */
+            method?: string | null;
+            /** Strength */
+            strength?: number | null;
+            /** Temperature */
+            temperature?: number | null;
+            /** Tint */
+            tint?: number | null;
         };
         /** RuleApplyResponse */
         RuleApplyResponse: {

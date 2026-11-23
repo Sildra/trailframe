@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 import cv2
@@ -15,6 +16,7 @@ from trailframe.services.processors.processor import (
     as_bool,
     from_rgb_array,
     to_rgb_array,
+    with_overrides,
 )
 
 BILATERAL = "bilateral"
@@ -50,6 +52,18 @@ class NoiseReductionSettings:
         )
 
 
+@dataclass(frozen=True)
+class NoiseReductionOverride:
+    """Per-photo override of the noise reduction step."""
+
+    enabled: bool | None = None
+    method: str | None = None
+    radius: int | None = None
+    sigma_color: float | None = None
+    sigma_space: float | None = None
+    strength: float | None = None
+
+
 class NoiseReductionProcessor(Processor):
     """Smooths noise while keeping edges.
 
@@ -59,6 +73,7 @@ class NoiseReductionProcessor(Processor):
     """
 
     step = "noise_reduction"
+    overridable = True
 
     def __init__(self) -> None:
         super().__init__("Noise reduction")
@@ -69,8 +84,29 @@ class NoiseReductionProcessor(Processor):
         self._settings = NoiseReductionSettings.from_node(node)
         self._enabled = self._settings.enabled
 
+    def validate_override(self, override) -> str | None:
+        if not isinstance(override, NoiseReductionOverride):
+            return None
+
+        if override.method is not None and override.method not in METHODS:
+            return f"Unknown noise reduction method '{override.method}'."
+
+        if override.radius is not None and not 1 <= override.radius <= 30:
+            return "Radius must be between 1 and 30."
+
+        for name, value in (("Sigma colour", override.sigma_color), ("Sigma space", override.sigma_space)):
+            if value is not None and (not math.isfinite(value) or not 1.0 <= value <= 200.0):
+                return f"{name} must be between 1 and 200."
+
+        if override.strength is not None and (
+            not math.isfinite(override.strength) or not 1.0 <= override.strength <= 30.0
+        ):
+            return "Strength must be between 1 and 30."
+
+        return None
+
     def execute(self, image: Image.Image, context: ProcessingContext) -> ProcessorResult:
-        settings = self._settings
+        settings = with_overrides(self._settings, context.overrides.get(self.name))
         pixels, alpha = to_rgb_array(image)
 
         if settings.method == NL_MEANS:

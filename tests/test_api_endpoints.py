@@ -133,7 +133,9 @@ class TestPhotoFileEndpoints:
     @allure.title("Serves an oriented, downscaled preview of the original with its pixel size")
     def test_get_preview(self, app, tmp_path):
         source = _make_image(_photos_folder(tmp_path) / "preview.jpg", size=(640, 480))
-        photo_id = _add_photos(app, [Photo(path="preview.jpg", filename="preview.jpg", file_size=source.stat().st_size)])[0]
+        photo_id = _add_photos(
+            app, [Photo(path="preview.jpg", filename="preview.jpg", file_size=source.stat().st_size)]
+        )[0]
 
         response = app.get(f"/api/photos/{photo_id}/preview", params={"size": 320})
         assert response.status_code == 200
@@ -155,7 +157,9 @@ class TestPhotoFileEndpoints:
         exif[274] = 6
         image.save(path, format="JPEG", exif=exif)
 
-        photo_id = _add_photos(app, [Photo(path="rotated.jpg", filename="rotated.jpg", file_size=path.stat().st_size)])[0]
+        photo_id = _add_photos(app, [Photo(path="rotated.jpg", filename="rotated.jpg", file_size=path.stat().st_size)])[
+            0
+        ]
 
         response = app.get(f"/api/photos/{photo_id}/preview")
         assert response.status_code == 200

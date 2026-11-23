@@ -17,6 +17,7 @@ from trailframe.services.photos.processing_service import ProcessingService, Rep
 from trailframe.services.photos.thumbnail_service import ThumbnailService
 from trailframe.services.processors.exposure_processor import ExposureSettings
 from trailframe.services.processors.tilt_processor import TiltOverride, TiltSettings
+from trailframe.services.processors.vibrance_processor import VibranceOverride
 
 
 class Upload:
@@ -520,6 +521,35 @@ class TestProcessingService:
         assert all(step["step"] != "crop" for step in entry.processing)
         assert entry.alternatives[0]["width"] == 1080
 
+    @allure.title("A configured correction disabled for one reprocess leaves a recipe marker")
+    def test_reprocess_correction_off(self, app, tmp_path):
+        photo = _seed_photo(app, tmp_path)
+        processor = next(item for item in ProcessingService._processors if item.name == "Vibrance")
+        previously_enabled = processor._enabled
+        processor._enabled = True
+
+        try:
+            app.db(
+                ProcessingService.reprocess(
+                    photo.id,
+                    alternatives=[1080],
+                    main_target=1080,
+                    overrides={"Vibrance": VibranceOverride(enabled=False)},
+                    rescan=False,
+                )
+            )
+        finally:
+            processor._enabled = previously_enabled
+
+        entry = app.db(_load_photo(photo.id))
+        vibrance = next(step for step in entry.processing if step["step"] == "vibrance")
+
+        assert vibrance["summary"] == "Not applied"
+        assert vibrance["details"]["Reason"] == "disabled"
+        assert vibrance["meta"]["applied"] is False
+        steps = [step["step"] for step in entry.processing]
+        assert steps.index("vibrance") < steps.index("tilt") < steps.index("rescale")
+
     @allure.title("Reprocessing replaces the thumbnails of the main target")
     def test_reprocess_invalidates_thumbnails(self, app, tmp_path):
         photo = _seed_photo(app, tmp_path)
@@ -585,6 +615,29 @@ class TestReprocessAPI:
         assert {entry["target_size"] for entry in body["alternatives"]} == {320, 640}
         assert next(entry for entry in body["alternatives"] if entry["main"])["target_size"] == 320
 
+    @allure.title("The reprocess endpoint applies per-photo correction overrides")
+    def test_reprocess_endpoint_corrections(self, app, tmp_path):
+        photo = _seed_photo(app, tmp_path)
+
+        response = app.post(
+            f"/api/photos/{photo.id}/reprocess",
+            json={
+                "alternatives": [1080],
+                "main": 1080,
+                "rescan": False,
+                "exposure": {"enabled": True, "exposure": 1, "gamma": 1.2},
+                "vibrance": {"enabled": True, "strength": 0.8},
+                "sharpening": {"enabled": True, "radius": 1.5, "amount": 0.7, "threshold": 1},
+            },
+        )
+
+        assert response.status_code == 200
+        steps = {step["step"]: step for step in response.json()["processing"]}
+        assert steps["exposure"]["meta"]["exposure"] == 1
+        assert steps["exposure"]["meta"]["gamma"] == 1.2
+        assert steps["vibrance"]["meta"]["strength"] == 0.8
+        assert steps["sharpening"]["meta"]["amount"] == 0.7
+
     @allure.title("The reprocess endpoint rejects unknown photos and malformed options")
     def test_reprocess_endpoint_errors(self, app, tmp_path):
         photo = _seed_photo(app, tmp_path)
@@ -603,9 +656,13 @@ class TestReprocessAPI:
             f"/api/photos/{photo.id}/reprocess",
             json={"tilt": {"mode": "auto", "crop_mode": "sideways"}, "rescan": False},
         )
+        bad_exposure = app.post(
+            f"/api/photos/{photo.id}/reprocess", json={"exposure": {"enabled": True, "exposure": 99}, "rescan": False}
+        )
 
         assert missing.status_code == 404
         assert bad_main.status_code == 400
         assert manual_without_angle.status_code == 400
         assert unknown_mode.status_code == 400
         assert unknown_crop.status_code == 400
+        assert bad_exposure.status_code == 400
