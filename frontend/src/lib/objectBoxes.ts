@@ -162,6 +162,11 @@ export function confidenceOpacity(confidence: number): number {
     return OBJECT_OVERLAY_ALPHA * confidenceOf(confidence);
 }
 
+/** Box outlines keep their full alpha, scaled only by confidence. */
+export function confidenceStrokeOpacity(confidence: number): number {
+    return confidenceOf(confidence);
+}
+
 /**
  * Maps a detection box, stored in the reference image space, onto the displayed
  * image. X and Y scale independently, so a differently sized or proportioned

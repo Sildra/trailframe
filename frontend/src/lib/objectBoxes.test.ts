@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
     confidenceOpacity,
     confidenceRegions,
+    confidenceStrokeOpacity,
     dedupeObjectBoxes,
     objectRect,
     OBJECT_OVERLAY_ALPHA,
@@ -100,5 +101,11 @@ describe("confidenceRegions", () => {
         expect(confidenceOpacity(0.5)).toBeCloseTo(OBJECT_OVERLAY_ALPHA / 2);
         expect(confidenceOpacity(0.28)).toBeCloseTo(OBJECT_OVERLAY_ALPHA * 0.28);
         expect(confidenceOpacity(0)).toBe(0);
+    });
+
+    it("keeps box outlines at full confidence alpha", () => {
+        expect(confidenceStrokeOpacity(0.93)).toBeCloseTo(0.93);
+        expect(confidenceStrokeOpacity(1)).toBe(1);
+        expect(confidenceStrokeOpacity(0)).toBe(0);
     });
 });

@@ -4,6 +4,7 @@ import { Box, Typography } from "@mui/material";
 import {
     confidenceOpacity,
     confidenceRegions,
+    confidenceStrokeOpacity,
     dedupeObjectBoxes,
     objectRect,
     OBJECT_OVERLAY_ALPHA,
@@ -123,7 +124,7 @@ export default function ImageViewer({ photoId, version = 0, hoveredObject, hover
                                             height={entry.rect.height}
                                             fill={showAll ? "none" : `rgba(255,0,0,${OBJECT_OVERLAY_ALPHA})`}
                                             stroke="red"
-                                            strokeOpacity={showAll ? confidenceOpacity(entry.confidence) : 1}
+                                            strokeOpacity={showAll ? confidenceStrokeOpacity(entry.confidence) : 1}
                                             strokeWidth={2}
                                         />
                                     ))}
