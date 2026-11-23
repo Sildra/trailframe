@@ -294,45 +294,48 @@ export default function PhotoMetadata({ photoId, favorite = false, onToggleFavor
                 </AccordionDetails>
             </Accordion>
             {objects.length > 0 && (
-                <Box onMouseEnter={showAllObjects} onMouseLeave={() => onHoverObject?.(null)}>
-                    <Accordion disableGutters>
-                        <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={{ fontWeight: 600, fontSize: 14 }}>
-                            Objects
-                        </AccordionSummary>
-                        <AccordionDetails>
-                            <Box sx={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                                {objects.map((obj, i) => (
-                                    <Box
-                                        key={i}
-                                        sx={{
-                                            display: "flex",
-                                            justifyContent: "space-between",
-                                            fontSize: 13,
-                                            px: 0.5,
-                                            borderRadius: 1,
-                                            cursor: "default",
-                                            "&:hover": { bgcolor: "action.hover" },
-                                        }}
-                                        onMouseEnter={() => {
-                                            if (obj.box && objectReference) {
-                                                onHoverObject?.({ box: obj.box, reference: objectReference });
-                                            } else {
-                                                showAllObjects();
-                                            }
-                                        }}
-                                        onMouseLeave={showAllObjects}
-                                    >
-                                        <span>{obj.label}</span>
-                                        <span style={{ opacity: 0.6 }}>
-                                            p: {Math.round((obj.confidence ?? 0) * 100)}% . s:{" "}
-                                            {Math.round((obj.surface ?? 0) * 1000) / 10}%
-                                        </span>
-                                    </Box>
-                                ))}
-                            </Box>
-                        </AccordionDetails>
-                    </Accordion>
-                </Box>
+                <Accordion disableGutters>
+                    <AccordionSummary
+                        expandIcon={<ExpandMoreIcon />}
+                        sx={{ fontWeight: 600, fontSize: 14 }}
+                        onMouseEnter={showAllObjects}
+                        onMouseLeave={() => onHoverObject?.(null)}
+                    >
+                        Objects
+                    </AccordionSummary>
+                    <AccordionDetails>
+                        <Box
+                            sx={{ display: "flex", flexDirection: "column", gap: "2px" }}
+                            onMouseLeave={() => onHoverObject?.(null)}
+                        >
+                            {objects.map((obj, i) => (
+                                <Box
+                                    key={i}
+                                    sx={{
+                                        display: "flex",
+                                        justifyContent: "space-between",
+                                        fontSize: 13,
+                                        px: 0.5,
+                                        borderRadius: 1,
+                                        cursor: "default",
+                                        "&:hover": { bgcolor: "action.hover" },
+                                    }}
+                                    onMouseEnter={() =>
+                                        obj.box && objectReference
+                                            ? onHoverObject?.({ box: obj.box, reference: objectReference })
+                                            : onHoverObject?.(null)
+                                    }
+                                >
+                                    <span>{obj.label}</span>
+                                    <span style={{ opacity: 0.6 }}>
+                                        p: {Math.round((obj.confidence ?? 0) * 100)}% . s:{" "}
+                                        {Math.round((obj.surface ?? 0) * 1000) / 10}%
+                                    </span>
+                                </Box>
+                            ))}
+                        </Box>
+                    </AccordionDetails>
+                </Accordion>
             )}
             {groups.map((group) => (
                 <Accordion key={group.name} disableGutters>
