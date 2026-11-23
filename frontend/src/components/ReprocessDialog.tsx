@@ -85,6 +85,30 @@ function errorMessage(error: unknown, fallback: string): string {
     return typeof detail === "string" ? detail : fallback;
 }
 
+function parseWindow(text: string): { seconds: number; value: number; unit: WindowUnit } | null {
+    const match = /^\s*(\d+(?:\.\d+)?)\s*(minutes?|mins?|m|hours?|hrs?|h|days?|d)\s*$/i.exec(text);
+
+    if (!match) {
+        return null;
+    }
+
+    const value = Number(match[1]);
+
+    if (!Number.isFinite(value) || value <= 0) {
+        return null;
+    }
+
+    const short = match[2].toLowerCase();
+    const unit: WindowUnit = short.startsWith("m") ? "minute" : short.startsWith("h") ? "hour" : "day";
+    const factor = unit === "minute" ? 60 : unit === "hour" ? 3600 : 86400;
+    return { seconds: Math.max(1, Math.min(30 * 24 * 3600, Math.round(value * factor))), value, unit };
+}
+
+function formatWindow(value: number, unit: WindowUnit): string {
+    const label = unit === "minute" ? "minute" : unit === "hour" ? "hour" : "day";
+    return `${value} ${value === 1 ? label : `${label}s`}`;
+}
+
 function omitIds<T>(record: Record<number, T>, ids: number[]): Record<number, T> {
     const next = { ...record };
 
@@ -218,14 +242,12 @@ export default function ReprocessDialog({ photo, onClose, onUpdated }: Reprocess
     const [preview, setPreview] = useState<PreviewImage | null>(null);
     const [previewError, setPreviewError] = useState<PreviewError | null>(null);
     const [activeId, setActiveId] = useState<number | null>(photo.id ?? null);
-    const [windowValue, setWindowValue] = useState("1");
-    const [windowUnit, setWindowUnit] = useState<WindowUnit>("hour");
+    const [windowText, setWindowText] = useState(() => formatWindow(1, "hour"));
     const [candidates, setCandidates] = useState<SimilarCandidate[]>([]);
     const [checkedIds, setCheckedIds] = useState<Set<number>>(() =>
         new Set(photo.id == null ? [] : [photo.id]),
     );
     const [normalizationMode, setNormalizationMode] = useState<NormalizationMode>("reference");
-    const [referenceId, setReferenceId] = useState<number | null>(photo.id ?? null);
     const [finding, setFinding] = useState(photo.id != null);
     const [candidateError, setCandidateError] = useState<string | null>(null);
     const [confirmOpen, setConfirmOpen] = useState(false);
@@ -234,16 +256,7 @@ export default function ReprocessDialog({ photo, onClose, onUpdated }: Reprocess
     const optionsFor = (target: Photo): ReprocessOptions =>
         target.id != null ? (optionsById[target.id] ?? defaultReprocessOptions(target)) : defaultReprocessOptions(target);
 
-    const windowSeconds = useMemo(() => {
-        const amount = Number(windowValue);
-
-        if (!Number.isFinite(amount) || amount <= 0) {
-            return 3600;
-        }
-
-        const factor = windowUnit === "minute" ? 60 : windowUnit === "hour" ? 3600 : 86400;
-        return Math.max(1, Math.min(30 * 24 * 3600, Math.round(amount * factor)));
-    }, [windowValue, windowUnit]);
+    const windowSeconds = useMemo(() => parseWindow(windowText)?.seconds ?? 3600, [windowText]);
 
     const seedCandidate = useMemo<SimilarCandidate>(
         () => ({ photo, similar: true, score: 1, phash_distance: null, shared_objects: [] }),
@@ -283,9 +296,6 @@ export default function ReprocessDialog({ photo, onClose, onUpdated }: Reprocess
         () => galleryPhotos.map((candidate) => candidate.id).filter((id): id is number => id != null),
         [galleryPhotos],
     );
-    const effectiveReferenceId = checkedPhotos.some((candidate) => candidate.id === referenceId)
-        ? referenceId
-        : (checkedPhotos[0]?.id ?? null);
     const badges = useMemo(
         () =>
             Object.fromEntries(
@@ -461,7 +471,6 @@ export default function ReprocessDialog({ photo, onClose, onUpdated }: Reprocess
                 .filter((candidate) => candidate.similar && candidate.photo.id != null)
                 .map((candidate) => candidate.photo.id as number);
             setCheckedIds(new Set(matched.includes(photo.id) ? matched : [photo.id, ...matched]));
-            setReferenceId(photo.id);
         },
         [photo.id, windowSeconds],
     );
@@ -550,10 +559,14 @@ export default function ReprocessDialog({ photo, onClose, onUpdated }: Reprocess
             return;
         }
 
+        const referenceSource =
+            normalizationMode === "reference" && activePhoto.id != null && !checkedPhotos.some((target) => target.id === activePhoto.id)
+                ? [activePhoto, ...checkedPhotos]
+                : checkedPhotos;
         const next = normalizeReprocessOptions(
-            checkedPhotos,
+            referenceSource,
             normalizationMode,
-            effectiveReferenceId,
+            activePhoto.id,
             optionsById,
         );
 
@@ -834,118 +847,94 @@ export default function ReprocessDialog({ photo, onClose, onUpdated }: Reprocess
                             minHeight: 0,
                         }}
                     >
-                        <Box
-                            sx={{
-                                flexShrink: 0,
-                                borderBottom: 1,
-                                borderColor: "divider",
-                                p: 1.5,
-                                display: "flex",
-                                flexDirection: "column",
-                                gap: 1,
-                            }}
+                        <Accordion
+                            defaultExpanded
+                            disableGutters
+                            elevation={0}
+                            sx={{ flexShrink: 0, borderRadius: 0, borderBottom: 1, borderColor: "divider" }}
                         >
-                            <Box sx={{ display: "flex", alignItems: "center", gap: 0.75 }}>
-                                <PhotoLibraryIcon fontSize="small" />
-                                <Typography variant="subtitle2">Nearby photos</Typography>
-                                <Box sx={{ flex: 1 }} />
-                                <Typography variant="caption" color="text.secondary">
-                                    ordered by time
-                                </Typography>
-                            </Box>
-                            <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1, alignItems: "center" }}>
-                                <TextField
-                                    size="small"
-                                    type="number"
-                                    label="Window ±"
-                                    value={windowValue}
-                                    onChange={(event) => setWindowValue(event.target.value)}
-                                    slotProps={{ htmlInput: { min: 1, step: 1 } }}
-                                    sx={{ width: 92 }}
-                                />
-                                <TextField
-                                    select
-                                    size="small"
-                                    label="Unit"
-                                    value={windowUnit}
-                                    onChange={(event) => setWindowUnit(event.target.value as WindowUnit)}
-                                    sx={{ width: 100 }}
-                                >
-                                    <MenuItem value="minute">Minutes</MenuItem>
-                                    <MenuItem value="hour">Hours</MenuItem>
-                                    <MenuItem value="day">Days</MenuItem>
-                                </TextField>
-                                <Button
-                                    size="small"
-                                    onClick={() => void loadCandidates()}
-                                    disabled={finding || photo.id == null}
-                                    startIcon={finding ? <CircularProgress size={14} color="inherit" /> : undefined}
-                                >
-                                    Auto-detect
-                                </Button>
-                                <Button
-                                    size="small"
-                                    onClick={() => setCheckedIds(new Set(candidateIds))}
-                                    disabled={candidateIds.length === 0}
-                                >
-                                    Select all
-                                </Button>
-                                <Button size="small" onClick={() => setCheckedIds(new Set())} disabled={checkedIds.size === 0}>
-                                    Clear
-                                </Button>
-                            </Box>
-                            {multiEdit && (
+                            <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={{ minHeight: 40 }}>
+                                <Box sx={{ display: "flex", alignItems: "center", gap: 0.75, width: "100%" }}>
+                                    <PhotoLibraryIcon fontSize="small" />
+                                    <Typography variant="subtitle2">Nearby photos</Typography>
+                                    <Box sx={{ flex: 1 }} />
+                                    <Typography variant="caption" color="text.secondary">
+                                        {galleryPhotos.length}
+                                    </Typography>
+                                </Box>
+                            </AccordionSummary>
+                            <AccordionDetails sx={{ display: "flex", flexDirection: "column", gap: 1, pt: 0 }}>
                                 <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1, alignItems: "center" }}>
                                     <TextField
-                                        select
                                         size="small"
-                                        label="Normalization"
-                                        value={normalizationMode}
-                                        onChange={(event) => setNormalizationMode(event.target.value as NormalizationMode)}
-                                        sx={{ minWidth: 145 }}
-                                    >
-                                        <MenuItem value="reference">Reference</MenuItem>
-                                        <MenuItem value="barycentric">Barycentric</MenuItem>
-                                    </TextField>
-                                    <TextField
-                                        select
+                                        label="Time window"
+                                        value={windowText}
+                                        onChange={(event) => setWindowText(event.target.value)}
+                                        onBlur={() => {
+                                            const parsed = parseWindow(windowText);
+
+                                            if (parsed) {
+                                                setWindowText(formatWindow(parsed.value, parsed.unit));
+                                            } else {
+                                                setError("Enter a time window like “1 hour”.");
+                                            }
+                                        }}
+                                        sx={{ width: 116 }}
+                                    />
+                                    {multiEdit && (
+                                        <TextField
+                                            select
+                                            size="small"
+                                            label="Normalization"
+                                            value={normalizationMode}
+                                            onChange={(event) => setNormalizationMode(event.target.value as NormalizationMode)}
+                                            sx={{ minWidth: 120 }}
+                                        >
+                                            <MenuItem value="reference">Reference</MenuItem>
+                                            <MenuItem value="barycentric">Barycentric</MenuItem>
+                                        </TextField>
+                                    )}
+                                    <Button
                                         size="small"
-                                        label="Reference photo"
-                                        value={effectiveReferenceId ?? ""}
-                                        disabled={normalizationMode !== "reference" || checkedPhotos.length === 0}
-                                        onChange={(event) => setReferenceId(Number(event.target.value))}
-                                        sx={{ minWidth: 150 }}
+                                        onClick={() => void loadCandidates()}
+                                        disabled={finding || photo.id == null || parseWindow(windowText) === null}
+                                        startIcon={finding ? <CircularProgress size={14} color="inherit" /> : undefined}
                                     >
-                                        {checkedPhotos.map((target) => (
-                                            <MenuItem key={target.id ?? 0} value={target.id ?? 0}>
-                                                {target.filename ?? `Photo ${target.id}`}
-                                            </MenuItem>
-                                        ))}
-                                    </TextField>
-                                    <Button size="small" onClick={normalizeSelection} disabled={checkedPhotos.length === 0}>
-                                        Normalize
+                                        Auto-detect
                                     </Button>
+                                    <Button
+                                        size="small"
+                                        onClick={() => setCheckedIds(new Set(candidateIds))}
+                                        disabled={candidateIds.length === 0}
+                                    >
+                                        Select all
+                                    </Button>
+                                    <Button size="small" onClick={() => setCheckedIds(new Set())} disabled={checkedIds.size === 0}>
+                                        Clear
+                                    </Button>
+                                    {multiEdit && (
+                                        <Button size="small" onClick={normalizeSelection} disabled={checkedPhotos.length === 0}>
+                                            Normalize
+                                        </Button>
+                                    )}
                                 </Box>
-                            )}
-                            {candidateError && <Alert severity="error">{candidateError}</Alert>}
-                            {error && <Alert severity="error">{error}</Alert>}
-                            <Box sx={{ height: 220, overflowY: "auto" }}>
-                                <ThumbnailGallery
-                                    photoIds={candidateIds}
-                                    selectedPhotoId={activePhoto.id ?? null}
-                                    checkedIds={checkedIds}
-                                    onToggleCheck={toggleCheck}
-                                    badges={badges}
-                                    editedIds={editedIds}
-                                    thumbSize={96}
-                                    onSelect={selectPhoto}
-                                />
-                            </Box>
-                            <Typography variant="caption" color="text.secondary">
-                                Click a thumbnail to edit it. Check two or more photos for multi-edit; “edited” marks
-                                unsaved parameters.
-                            </Typography>
-                        </Box>
+                                {candidateError && <Alert severity="error">{candidateError}</Alert>}
+                                {error && <Alert severity="error">{error}</Alert>}
+                                <Box sx={{ height: 220, overflowY: "auto" }}>
+                                    <ThumbnailGallery
+                                        photoIds={candidateIds}
+                                        selectedPhotoId={activePhoto.id ?? null}
+                                        referenceId={activePhoto.id ?? null}
+                                        checkedIds={checkedIds}
+                                        onToggleCheck={toggleCheck}
+                                        badges={badges}
+                                        editedIds={editedIds}
+                                        thumbSize={96}
+                                        onSelect={selectPhoto}
+                                    />
+                                </Box>
+                            </AccordionDetails>
+                        </Accordion>
                         <Box sx={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
                             <CorrectionAccordion
                                 title="Exposure"

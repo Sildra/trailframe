@@ -13,6 +13,8 @@ interface ThumbnailGalleryProps {
     badges?: Record<number, string>;
     /** Photos with unsaved local edits. */
     editedIds?: Set<number>;
+    /** Photo whose parameters are used as the normalization reference. */
+    referenceId?: number | null;
     onSelect: (photoId: number) => void;
 }
 
@@ -26,6 +28,7 @@ export default function ThumbnailGallery({
     onToggleCheck,
     badges,
     editedIds,
+    referenceId,
     onSelect,
 }: ThumbnailGalleryProps) {
     const checkable = onToggleCheck !== undefined;
@@ -51,6 +54,7 @@ export default function ThumbnailGallery({
                     onToggleCheck={onToggleCheck ? () => onToggleCheck(photoId) : undefined}
                     badge={badges?.[photoId]}
                     edited={editedIds?.has(photoId) ?? false}
+                    reference={referenceId === photoId}
                     onSelect={() => onSelect(photoId)}
                 />
             ))}

@@ -19,10 +19,12 @@ interface ThumbnailItemProps {
     badge?: string;
     /** Marks locally edited parameters that have not been saved yet. */
     edited?: boolean;
+    /** Outlines the normalization reference in a distinct colour. */
+    reference?: boolean;
     onSelect: () => void;
 }
 
-export default function ThumbnailItem({ photoId, selected = false, favorite = false, size = 160, version = 0, checkable = false, checked = false, onToggleCheck, badge, edited = false, onSelect }: ThumbnailItemProps) {
+export default function ThumbnailItem({ photoId, selected = false, favorite = false, size = 160, version = 0, checkable = false, checked = false, onToggleCheck, badge, edited = false, reference = false, onSelect }: ThumbnailItemProps) {
     const rootRef = useRef<HTMLDivElement | null>(null);
     const [visible, setVisible] = useState(false);
     const [src, setSrc] = useState<string | null>(null);
@@ -95,7 +97,11 @@ export default function ThumbnailItem({ photoId, selected = false, favorite = fa
                 overflow: "hidden",
                 bgcolor: "action.hover",
                 cursor: "pointer",
-                outline: selected ? `2px solid ${theme.palette.primary.main}` : "none",
+                outline: reference
+                    ? `2px solid ${theme.palette.secondary.main}`
+                    : selected
+                      ? `2px solid ${theme.palette.primary.main}`
+                      : "none",
                 outlineOffset: -2,
             })}
         >
