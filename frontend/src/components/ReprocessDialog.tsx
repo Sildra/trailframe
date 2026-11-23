@@ -105,8 +105,8 @@ function parseWindow(text: string): { seconds: number; value: number; unit: Wind
 }
 
 function formatWindow(value: number, unit: WindowUnit): string {
-    const label = unit === "minute" ? "minute" : unit === "hour" ? "hour" : "day";
-    return `${value} ${value === 1 ? label : `${label}s`}`;
+    const label = unit === "minute" ? "min" : unit === "hour" ? "h" : "d";
+    return `${value} ${label}`;
 }
 
 function omitIds<T>(record: Record<number, T>, ids: number[]): Record<number, T> {
@@ -242,7 +242,7 @@ export default function ReprocessDialog({ photo, onClose, onUpdated }: Reprocess
     const [preview, setPreview] = useState<PreviewImage | null>(null);
     const [previewError, setPreviewError] = useState<PreviewError | null>(null);
     const [activeId, setActiveId] = useState<number | null>(photo.id ?? null);
-    const [windowText, setWindowText] = useState(() => formatWindow(1, "hour"));
+    const [windowText, setWindowText] = useState(() => formatWindow(30, "minute"));
     const [candidates, setCandidates] = useState<SimilarCandidate[]>([]);
     const [checkedIds, setCheckedIds] = useState<Set<number>>(() =>
         new Set(photo.id == null ? [] : [photo.id]),
@@ -876,7 +876,7 @@ export default function ReprocessDialog({ photo, onClose, onUpdated }: Reprocess
                                             if (parsed) {
                                                 setWindowText(formatWindow(parsed.value, parsed.unit));
                                             } else {
-                                                setError("Enter a time window like “1 hour”.");
+                                                setError("Enter a time window like “30 min”.");
                                             }
                                         }}
                                         sx={{ width: 116 }}
