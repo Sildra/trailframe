@@ -17,10 +17,12 @@ interface ThumbnailItemProps {
     onToggleCheck?: () => void;
     /** Short overlay label, e.g. the similarity score. */
     badge?: string;
+    /** Marks locally edited parameters that have not been saved yet. */
+    edited?: boolean;
     onSelect: () => void;
 }
 
-export default function ThumbnailItem({ photoId, selected = false, favorite = false, size = 160, version = 0, checkable = false, checked = false, onToggleCheck, badge, onSelect }: ThumbnailItemProps) {
+export default function ThumbnailItem({ photoId, selected = false, favorite = false, size = 160, version = 0, checkable = false, checked = false, onToggleCheck, badge, edited = false, onSelect }: ThumbnailItemProps) {
     const rootRef = useRef<HTMLDivElement | null>(null);
     const [visible, setVisible] = useState(false);
     const [src, setSrc] = useState<string | null>(null);
@@ -124,10 +126,25 @@ export default function ThumbnailItem({ photoId, selected = false, favorite = fa
                     fontSize="small"
                     sx={{
                         position: "absolute",
-                        top: 2,
+                        top: edited ? 22 : 2,
                         right: 2,
                         color: "#ffb300",
                         filter: "drop-shadow(0 1px 1px rgba(0, 0, 0, 0.6))",
+                        pointerEvents: "none",
+                    }}
+                />
+            )}
+            {edited && (
+                <Chip
+                    size="small"
+                    label="edited"
+                    color="warning"
+                    sx={{
+                        position: "absolute",
+                        top: 2,
+                        right: 2,
+                        height: 18,
+                        "& .MuiChip-label": { px: 0.75, fontSize: 10 },
                         pointerEvents: "none",
                     }}
                 />

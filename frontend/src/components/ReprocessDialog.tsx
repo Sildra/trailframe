@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
     Accordion,
     AccordionDetails,
@@ -24,7 +24,13 @@ import RestartAltIcon from "@mui/icons-material/RestartAlt";
 import { api } from "../api/client";
 import type { components } from "../api/generated/schema";
 import { SIDE_PANEL_WIDTH } from "../lib/layout";
-import { normalizeReprocessOptions, type NormalizationMode } from "../lib/multiEdit";
+import {
+    cloneReprocessOptions,
+    isEdited,
+    normalizeReprocessOptions,
+    sortPhotosByTime,
+    type NormalizationMode,
+} from "../lib/multiEdit";
 import { normalizeProcessing, parseLine, parsePoint } from "../lib/processing";
 import { buildPreview, effectiveAngle } from "../lib/preview";
 import {
@@ -54,13 +60,39 @@ interface ReprocessDialogProps {
 }
 
 interface PreviewImage {
+    photoId: number;
     url: string;
     width: number;
     height: number;
 }
 
+interface PreviewError {
+    photoId: number;
+    message: string;
+}
+
+interface SaveItem {
+    photo: Photo;
+    options: ReprocessOptions;
+}
+
 function formatAngle(value: number): string {
     return String(Math.round(value * 100) / 100);
+}
+
+function errorMessage(error: unknown, fallback: string): string {
+    const detail = (error as { detail?: unknown } | undefined)?.detail;
+    return typeof detail === "string" ? detail : fallback;
+}
+
+function omitIds<T>(record: Record<number, T>, ids: number[]): Record<number, T> {
+    const next = { ...record };
+
+    for (const id of ids) {
+        delete next[id];
+    }
+
+    return next;
 }
 
 function DetailRows({ details }: { details: Record<string, string> }) {
@@ -174,14 +206,18 @@ type CorrectionKey =
     | "sharpening";
 
 export default function ReprocessDialog({ photo, onClose, onUpdated }: ReprocessDialogProps) {
-    const [options, setOptions] = useState<ReprocessOptions>(() => defaultReprocessOptions(photo));
-    const [angleText, setAngleText] = useState(() => formatAngle(defaultReprocessOptions(photo).angle));
+    const [optionsById, setOptionsById] = useState<Record<number, ReprocessOptions>>(() =>
+        photo.id == null ? {} : { [photo.id]: defaultReprocessOptions(photo) },
+    );
+    const [angleById, setAngleById] = useState<Record<number, string>>(() =>
+        photo.id == null ? {} : { [photo.id]: formatAngle(defaultReprocessOptions(photo).angle) },
+    );
     const [newSize, setNewSize] = useState("");
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [preview, setPreview] = useState<PreviewImage | null>(null);
-    const [previewError, setPreviewError] = useState<string | null>(null);
-    const [multiEdit, setMultiEdit] = useState(false);
+    const [previewError, setPreviewError] = useState<PreviewError | null>(null);
+    const [activeId, setActiveId] = useState<number | null>(photo.id ?? null);
     const [windowValue, setWindowValue] = useState("1");
     const [windowUnit, setWindowUnit] = useState<WindowUnit>("hour");
     const [candidates, setCandidates] = useState<SimilarCandidate[]>([]);
@@ -190,8 +226,13 @@ export default function ReprocessDialog({ photo, onClose, onUpdated }: Reprocess
     );
     const [normalizationMode, setNormalizationMode] = useState<NormalizationMode>("reference");
     const [referenceId, setReferenceId] = useState<number | null>(photo.id ?? null);
-    const [finding, setFinding] = useState(false);
+    const [finding, setFinding] = useState(photo.id != null);
     const [candidateError, setCandidateError] = useState<string | null>(null);
+    const [confirmOpen, setConfirmOpen] = useState(false);
+    const [pendingSave, setPendingSave] = useState<SaveItem[]>([]);
+
+    const optionsFor = (target: Photo): ReprocessOptions =>
+        target.id != null ? (optionsById[target.id] ?? defaultReprocessOptions(target)) : defaultReprocessOptions(target);
 
     const windowSeconds = useMemo(() => {
         const amount = Number(windowValue);
@@ -204,17 +245,47 @@ export default function ReprocessDialog({ photo, onClose, onUpdated }: Reprocess
         return Math.max(1, Math.min(30 * 24 * 3600, Math.round(amount * factor)));
     }, [windowValue, windowUnit]);
 
+    const seedCandidate = useMemo<SimilarCandidate>(
+        () => ({ photo, similar: true, score: 1, phash_distance: null, shared_objects: [] }),
+        [photo],
+    );
+    const galleryCandidates = useMemo(
+        () => (candidates.length > 0 ? candidates : [seedCandidate]),
+        [candidates, seedCandidate],
+    );
+    const galleryPhotos = useMemo(
+        () => sortPhotosByTime(galleryCandidates.map((candidate) => candidate.photo)),
+        [galleryCandidates],
+    );
+    const activePhoto = useMemo(
+        () => galleryPhotos.find((candidate) => candidate.id === activeId) ?? photo,
+        [galleryPhotos, activeId, photo],
+    );
+    const activeOptions = optionsFor(activePhoto);
+    const angleText =
+        activePhoto.id != null ? (angleById[activePhoto.id] ?? formatAngle(activeOptions.angle)) : formatAngle(activeOptions.angle);
+    const activePreview = preview?.photoId === activePhoto.id ? preview : null;
+    const activePreviewError = previewError?.photoId === activePhoto.id ? previewError : null;
+
     const checkedCandidates = useMemo(
-        () => candidates.filter((candidate) => candidate.photo.id != null && checkedIds.has(candidate.photo.id)),
-        [candidates, checkedIds],
+        () =>
+            galleryCandidates.filter(
+                (candidate) => candidate.photo.id != null && checkedIds.has(candidate.photo.id),
+            ),
+        [galleryCandidates, checkedIds],
     );
+    const checkedPhotos = useMemo(
+        () => sortPhotosByTime(checkedCandidates.map((candidate) => candidate.photo)),
+        [checkedCandidates],
+    );
+    const multiEdit = checkedPhotos.length >= 2;
     const candidateIds = useMemo(
-        () => candidates.map((candidate) => candidate.photo.id).filter((id): id is number => id != null),
-        [candidates],
+        () => galleryPhotos.map((candidate) => candidate.id).filter((id): id is number => id != null),
+        [galleryPhotos],
     );
-    const effectiveReferenceId = checkedCandidates.some((candidate) => candidate.photo.id === referenceId)
+    const effectiveReferenceId = checkedPhotos.some((candidate) => candidate.id === referenceId)
         ? referenceId
-        : (checkedCandidates[0]?.photo.id ?? null);
+        : (checkedPhotos[0]?.id ?? null);
     const badges = useMemo(
         () =>
             Object.fromEntries(
@@ -227,30 +298,58 @@ export default function ReprocessDialog({ photo, onClose, onUpdated }: Reprocess
             ),
         [candidates],
     );
+    const editedIds = useMemo(() => {
+        const ids = new Set<number>();
+
+        for (const [key, options] of Object.entries(optionsById)) {
+            const id = Number(key);
+            const source = galleryPhotos.find((candidate) => candidate.id === id) ?? photo;
+
+            if (source.id === id && isEdited(source, options)) {
+                ids.add(id);
+            }
+        }
+
+        return ids;
+    }, [optionsById, galleryPhotos, photo]);
+
+    // Keep edits on the displayed photo from being silently dropped when it is
+    // not part of the checkbox selection.
+    const savePhotos = useMemo(() => {
+        if (!multiEdit || activePhoto.id == null) {
+            return activePhoto.id == null ? [] : [activePhoto];
+        }
+
+        if (checkedPhotos.some((candidate) => candidate.id === activePhoto.id) || !editedIds.has(activePhoto.id)) {
+            return checkedPhotos;
+        }
+
+        return sortPhotosByTime([...checkedPhotos, activePhoto]);
+    }, [multiEdit, activePhoto, checkedPhotos, editedIds]);
 
     const corrections = useMemo<PreviewCorrections>(
         () => ({
-            exposure: options.exposure,
-            whiteBalance: options.whiteBalance,
-            contrast: options.contrast,
-            localContrast: options.localContrast,
-            vibrance: options.vibrance,
-            noiseReduction: options.noiseReduction,
-            sharpening: options.sharpening,
+            exposure: activeOptions.exposure,
+            whiteBalance: activeOptions.whiteBalance,
+            contrast: activeOptions.contrast,
+            localContrast: activeOptions.localContrast,
+            vibrance: activeOptions.vibrance,
+            noiseReduction: activeOptions.noiseReduction,
+            sharpening: activeOptions.sharpening,
         }),
         [
-            options.exposure,
-            options.whiteBalance,
-            options.contrast,
-            options.localContrast,
-            options.vibrance,
-            options.noiseReduction,
-            options.sharpening,
+            activeOptions.exposure,
+            activeOptions.whiteBalance,
+            activeOptions.contrast,
+            activeOptions.localContrast,
+            activeOptions.vibrance,
+            activeOptions.noiseReduction,
+            activeOptions.sharpening,
         ],
     );
 
     const tilt = useMemo(() => {
-        const step = normalizeProcessing(photo.processing).find((entry) => entry.step === "tilt") ?? null;
+        const step = normalizeProcessing(activePhoto.processing).find((entry) => entry.step === "tilt") ?? null;
 
         return {
             step,
@@ -259,17 +358,17 @@ export default function ReprocessDialog({ photo, onClose, onUpdated }: Reprocess
             detectedAngle: step ? parseAngle(step.summary) : null,
             applied: step?.meta.applied === true,
         };
-    }, [photo.processing]);
+    }, [activePhoto.processing]);
 
     useEffect(() => {
-        if (photo.id == null) {
+        if (activePhoto.id == null) {
             return;
         }
 
         const controller = new AbortController();
         let objectUrl: string | null = null;
 
-        fetch(`./api/photos/${photo.id}/preview?size=1200`, { signal: controller.signal })
+        fetch(`./api/photos/${activePhoto.id}/preview?size=1200`, { signal: controller.signal })
             .then(async (response) => {
                 if (!response.ok) {
                     throw new Error(`Preview unavailable (${response.status}).`);
@@ -289,11 +388,14 @@ export default function ReprocessDialog({ photo, onClose, onUpdated }: Reprocess
                 }
 
                 objectUrl = URL.createObjectURL(blob);
-                setPreview({ url: objectUrl, width, height });
+                setPreview({ photoId: activePhoto.id as number, url: objectUrl, width, height });
             })
             .catch((reason: unknown) => {
                 if (!controller.signal.aborted) {
-                    setPreviewError(reason instanceof Error ? reason.message : "Preview unavailable.");
+                    setPreviewError({
+                        photoId: activePhoto.id as number,
+                        message: reason instanceof Error ? reason.message : "Preview unavailable.",
+                    });
                 }
             });
 
@@ -304,73 +406,128 @@ export default function ReprocessDialog({ photo, onClose, onUpdated }: Reprocess
                 URL.revokeObjectURL(objectUrl);
             }
         };
-    }, [photo.id]);
+    }, [activePhoto.id]);
 
-    const correction = effectiveAngle(options.tiltMode, options.angle, tilt.detectedAngle, tilt.applied);
+    const correction = effectiveAngle(
+        activeOptions.tiltMode,
+        activeOptions.angle,
+        tilt.detectedAngle,
+        tilt.applied,
+    );
     const model = useMemo(() => {
-        if (!preview) {
+        if (!activePreview) {
             return null;
         }
 
         return buildPreview(
-            { width: preview.width, height: preview.height },
+            { width: activePreview.width, height: activePreview.height },
             { line: tilt.line, reference: tilt.reference, detectedAngle: tilt.detectedAngle },
-            { angle: correction, cropMode: options.cropMode, target: options.main },
+            { angle: correction, cropMode: activeOptions.cropMode, target: activeOptions.main },
         );
-    }, [preview, tilt, correction, options.cropMode, options.main]);
+    }, [activePreview, tilt, correction, activeOptions.cropMode, activeOptions.main]);
 
-    const update = (patch: Partial<ReprocessOptions>) =>
-        setOptions((current) => ({ ...current, ...patch }));
+    const loadCandidates = useCallback(
+        async (signal?: AbortSignal) => {
+            if (photo.id == null) {
+                return;
+            }
 
-    const patchCorrection = <K extends CorrectionKey>(key: K, patch: Partial<ReprocessOptions[K]>) =>
-        setOptions((current) => ({ ...current, [key]: { ...current[key], ...patch } }));
+            setFinding(true);
+            setCandidateError(null);
 
-    const setAngle = (value: number) => {
-        const rounded = Math.round(value * 100) / 100;
-        setAngleText(formatAngle(rounded));
-        update({ angle: rounded });
-    };
+            const { data, error: requestError } = await api.POST("/api/photos/similar-candidates", {
+                body: {
+                    photo_id: photo.id,
+                    window_seconds: windowSeconds,
+                    max_hamming: 12,
+                    min_object_overlap: 0.4,
+                },
+                signal,
+            });
 
-    const findSimilar = async () => {
+            if (signal?.aborted) {
+                return;
+            }
+
+            setFinding(false);
+
+            if (requestError || !data) {
+                setCandidateError(errorMessage(requestError, "Similarity search failed."));
+                return;
+            }
+
+            setCandidates(data);
+            const matched = data
+                .filter((candidate) => candidate.similar && candidate.photo.id != null)
+                .map((candidate) => candidate.photo.id as number);
+            setCheckedIds(new Set(matched.includes(photo.id) ? matched : [photo.id, ...matched]));
+            setReferenceId(photo.id);
+        },
+        [photo.id, windowSeconds],
+    );
+    const loadCandidatesRef = useRef(loadCandidates);
+
+    useEffect(() => {
+        loadCandidatesRef.current = loadCandidates;
+    }, [loadCandidates]);
+
+    useEffect(() => {
         if (photo.id == null) {
             return;
         }
 
-        setFinding(true);
-        setCandidateError(null);
-
-        const { data, error: requestError } = await api.POST("/api/photos/similar-candidates", {
-            body: {
-                photo_id: photo.id,
-                window_seconds: windowSeconds,
-                max_hamming: 12,
-                min_object_overlap: 0.4,
-            },
+        const controller = new AbortController();
+        queueMicrotask(() => {
+            void loadCandidatesRef.current(controller.signal);
         });
 
-        setFinding(false);
+        return () => controller.abort();
+    }, [photo.id]);
 
-        if (requestError || !data) {
-            const detail = (requestError as { detail?: unknown } | undefined)?.detail;
-            setCandidateError(typeof detail === "string" ? detail : "Similarity search failed.");
+    const update = (patch: Partial<ReprocessOptions>) => {
+        if (activePhoto.id == null) {
             return;
         }
 
-        setCandidates(data);
-        const matched = data
-            .filter((candidate) => candidate.similar && candidate.photo.id != null)
-            .map((candidate) => candidate.photo.id as number);
-        setCheckedIds(new Set(matched.includes(photo.id) ? matched : [photo.id, ...matched]));
-        setReferenceId(photo.id);
+        setOptionsById((current) => ({
+            ...current,
+            [activePhoto.id as number]: { ...(current[activePhoto.id as number] ?? defaultReprocessOptions(activePhoto)), ...patch },
+        }));
     };
 
-    const toggleMultiEdit = () => {
-        const next = !multiEdit;
-        setMultiEdit(next);
-
-        if (next && candidates.length === 0) {
-            void findSimilar();
+    const patchCorrection = <K extends CorrectionKey>(key: K, patch: Partial<ReprocessOptions[K]>) => {
+        if (activePhoto.id == null) {
+            return;
         }
+
+        const id = activePhoto.id;
+
+        setOptionsById((current) => {
+            const existing = current[id] ?? defaultReprocessOptions(activePhoto);
+
+            return {
+                ...current,
+                [id]: { ...existing, [key]: { ...existing[key], ...patch } },
+            };
+        });
+    };
+
+    const setAngle = (value: number) => {
+        const rounded = Math.round(value * 100) / 100;
+
+        setActiveAngleText(formatAngle(rounded));
+        update({ angle: rounded });
+    };
+
+    function setActiveAngleText(text: string) {
+        if (activePhoto.id != null) {
+            setAngleById((current) => ({ ...current, [activePhoto.id as number]: text }));
+        }
+    }
+
+    const selectPhoto = (id: number) => {
+        setActiveId(id);
+        setError(null);
     };
 
     const toggleCheck = (id: number) => {
@@ -388,133 +545,182 @@ export default function ReprocessDialog({ photo, onClose, onUpdated }: Reprocess
     };
 
     const normalizeSelection = () => {
-        if (checkedCandidates.length === 0) {
+        if (checkedPhotos.length === 0) {
             setError("Select at least one photo to normalize.");
             return;
         }
 
         const next = normalizeReprocessOptions(
-            checkedCandidates.map((candidate) => candidate.photo),
+            checkedPhotos,
             normalizationMode,
             effectiveReferenceId,
+            optionsById,
         );
 
         if (!next) {
             return;
         }
 
-        setOptions(next);
-        setAngleText(formatAngle(next.angle));
+        const ids = checkedPhotos.map((target) => target.id).filter((id): id is number => id != null);
+
+        setOptionsById((current) => {
+            const updated = { ...current };
+
+            for (const id of ids) {
+                updated[id] = cloneReprocessOptions(next);
+            }
+
+            return updated;
+        });
+        setAngleById((current) => {
+            const updated = { ...current };
+
+            for (const id of ids) {
+                updated[id] = formatAngle(next.angle);
+            }
+
+            return updated;
+        });
         setError(null);
     };
 
     const removeTarget = (size: number) => {
-        setOptions((current) => {
-            if (current.alternatives.length === 1) {
-                return current;
-            }
+        if (activeOptions.alternatives.length === 1) {
+            return;
+        }
 
-            const alternatives = current.alternatives.filter((entry) => entry !== size);
+        const alternatives = activeOptions.alternatives.filter((entry) => entry !== size);
 
-            return {
-                ...current,
-                alternatives,
-                main: alternatives.includes(current.main) ? current.main : alternatives[0],
-            };
+        update({
+            alternatives,
+            main: alternatives.includes(activeOptions.main) ? activeOptions.main : alternatives[0],
         });
     };
 
     const addTarget = () => {
         const size = Number.parseInt(newSize, 10);
 
-        if (!Number.isFinite(size) || options.alternatives.includes(size)) {
+        if (!Number.isFinite(size) || activeOptions.alternatives.includes(size)) {
             setNewSize("");
             return;
         }
 
-        if (options.alternatives.length >= MAX_TARGETS) {
+        if (activeOptions.alternatives.length >= MAX_TARGETS) {
             setError(`At most ${MAX_TARGETS} target sizes can be generated.`);
             return;
         }
 
         setError(null);
-        update({ alternatives: [...options.alternatives, size].sort((a, b) => a - b) });
+        update({ alternatives: [...activeOptions.alternatives, size].sort((a, b) => a - b) });
         setNewSize("");
     };
 
-    const reset = () => {
-        const next = defaultReprocessOptions(photo);
-        setOptions(next);
-        setAngleText(formatAngle(next.angle));
+    const resetActive = () => {
+        if (activePhoto.id != null) {
+            const id = activePhoto.id;
+
+            setOptionsById((current) => omitIds(current, [id]));
+            setAngleById((current) => omitIds(current, [id]));
+        }
+
         setNewSize("");
         setError(null);
     };
 
-    const save = async () => {
-        const invalid = validateOptions(options);
-
-        if (invalid) {
-            setError(invalid);
-            return;
-        }
-
-        if (photo.id == null) {
-            return;
-        }
-
+    const persist = async (items: SaveItem[]) => {
         setSaving(true);
         setError(null);
 
-        if (multiEdit) {
-            const ids = [...checkedIds];
+        const failed: string[] = [];
+        const savedById = new Map<number, Photo>();
 
-            if (ids.length === 0) {
-                setSaving(false);
-                setError("Select at least one photo to reprocess.");
-                return;
+        setConfirmOpen(false);
+
+        for (const item of items) {
+            if (item.photo.id == null) {
+                continue;
             }
 
-            const { data, error: requestError } = await api.POST("/api/photos/reprocess-batch", {
-                body: { photo_ids: ids, options: toReprocessPayload(options) },
-            });
+            const id = item.photo.id;
+            const name = item.photo.filename ?? item.photo.path;
 
-            setSaving(false);
+            try {
+                const { data, error: requestError } = await api.POST("/api/photos/{photo_id}/reprocess", {
+                    params: { path: { photo_id: id } },
+                    body: toReprocessPayload(item.options),
+                });
 
-            if (requestError || !data) {
-                const detail = (requestError as { detail?: unknown } | undefined)?.detail;
-                setError(typeof detail === "string" ? detail : "Batch reprocessing failed.");
-                return;
+                if (requestError || !data) {
+                    failed.push(`${name}: ${errorMessage(requestError, "Reprocessing failed.")}`);
+                    continue;
+                }
+
+                savedById.set(id, data);
+            } catch (reason) {
+                failed.push(`${name}: ${reason instanceof Error ? reason.message : "Reprocessing failed."}`);
             }
-
-            const failures = data.filter((result) => result.error);
-
-            if (failures.length > 0) {
-                setError(
-                    `${failures.length} photo(s) failed: ${failures[0].error ?? "unknown error"}. Successful photos were already updated.`,
-                );
-                return;
-            }
-
-            onUpdated(data.find((result) => result.photo_id === photo.id)?.photo ?? photo);
-            onClose();
-            return;
         }
-
-        const { data, error: requestError } = await api.POST("/api/photos/{photo_id}/reprocess", {
-            params: { path: { photo_id: photo.id } },
-            body: toReprocessPayload(options),
-        });
 
         setSaving(false);
 
-        if (requestError || !data) {
-            const detail = (requestError as { detail?: unknown } | undefined)?.detail;
-            setError(typeof detail === "string" ? detail : "Reprocessing failed.");
+        const savedIds = [...savedById.keys()];
+
+        if (savedIds.length > 0) {
+            setOptionsById((current) => omitIds(current, savedIds));
+            setAngleById((current) => omitIds(current, savedIds));
+            setCheckedIds((current) => {
+                const next = new Set(current);
+
+                for (const id of savedIds) {
+                    next.delete(id);
+                }
+
+                return next;
+            });
+        }
+
+        if (failed.length > 0) {
+            setError(failed.join(" · "));
             return;
         }
 
-        onUpdated(data);
+        onUpdated(photo.id != null ? (savedById.get(photo.id) ?? photo) : photo);
         onClose();
+    };
+
+    const requestSave = () => {
+        if (activePhoto.id == null) {
+            return;
+        }
+
+        const items: SaveItem[] = savePhotos
+            .filter((target) => target.id != null)
+            .map((target) => ({ photo: target, options: optionsFor(target) }));
+
+        if (items.length === 0) {
+            setError("Select at least one photo to reprocess.");
+            return;
+        }
+
+        const invalid = items
+            .map((item) => ({ item, problem: validateOptions(item.options) }))
+            .find((entry) => entry.problem !== null);
+
+        if (invalid?.problem) {
+            setActiveId(invalid.item.photo.id ?? null);
+            setError(`${invalid.item.photo.filename ?? invalid.item.photo.path}: ${invalid.problem}`);
+            return;
+        }
+
+        setError(null);
+
+        if (multiEdit) {
+            setPendingSave(items);
+            setConfirmOpen(true);
+            return;
+        }
+
+        void persist(items);
     };
 
     return (
@@ -541,20 +747,13 @@ export default function ReprocessDialog({ photo, onClose, onUpdated }: Reprocess
                             Adjust processing
                         </Typography>
                         <Typography variant="caption" color="text.secondary" noWrap sx={{ display: "block" }}>
-                            {photo.filename ?? photo.path}
-                            {multiEdit && ` · ${checkedIds.size} selected`}
+                            {activePhoto.filename ?? activePhoto.path}
+                            {multiEdit && ` · ${checkedPhotos.length} selected`}
                         </Typography>
                     </Box>
+                    {multiEdit && <Chip size="small" color="primary" label="Multi-edit" />}
                     <Box sx={{ flex: 1 }} />
-                    <Button
-                        variant={multiEdit ? "contained" : "outlined"}
-                        startIcon={<PhotoLibraryIcon />}
-                        onClick={toggleMultiEdit}
-                        disabled={saving}
-                    >
-                        Multi-edit
-                    </Button>
-                    <Button startIcon={<RestartAltIcon />} onClick={reset} disabled={saving}>
+                    <Button startIcon={<RestartAltIcon />} onClick={resetActive} disabled={saving}>
                         Reset
                     </Button>
                     <Button onClick={onClose} disabled={saving}>
@@ -562,132 +761,23 @@ export default function ReprocessDialog({ photo, onClose, onUpdated }: Reprocess
                     </Button>
                     <Button
                         variant="contained"
-                        onClick={save}
-                        disabled={saving || photo.id == null || (multiEdit && checkedIds.size === 0)}
+                        onClick={requestSave}
+                        disabled={saving || savePhotos.length === 0}
                         startIcon={saving ? <CircularProgress size={16} color="inherit" /> : undefined}
                     >
-                        {multiEdit ? `Apply to ${checkedIds.size}` : "Reprocess"}
+                        {multiEdit ? `Save ${savePhotos.length} photos` : "Reprocess"}
                     </Button>
                 </Box>
 
                 <Box sx={{ flex: 1, minHeight: 0, display: "flex" }}>
                     <Box sx={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column" }}>
-                        {multiEdit && (
-                            <Box
-                                sx={{
-                                    height: 340,
-                                    flexShrink: 0,
-                                    overflowY: "auto",
-                                    borderBottom: 1,
-                                    borderColor: "divider",
-                                    p: 1.5,
-                                    display: "flex",
-                                    flexDirection: "column",
-                                    gap: 1,
-                                }}
-                            >
-                                <Typography variant="subtitle2">Multi-edit selection</Typography>
-                                <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1, alignItems: "center" }}>
-                                    <TextField
-                                        select
-                                        size="small"
-                                        label="Normalization"
-                                        value={normalizationMode}
-                                        onChange={(event) => setNormalizationMode(event.target.value as NormalizationMode)}
-                                        sx={{ minWidth: 150 }}
-                                    >
-                                        <MenuItem value="reference">Reference photo</MenuItem>
-                                        <MenuItem value="barycentric">Barycentric</MenuItem>
-                                    </TextField>
-                                    <TextField
-                                        select
-                                        size="small"
-                                        label="Reference"
-                                        value={effectiveReferenceId ?? ""}
-                                        disabled={normalizationMode !== "reference" || checkedCandidates.length === 0}
-                                        onChange={(event) => setReferenceId(Number(event.target.value))}
-                                        sx={{ minWidth: 180 }}
-                                    >
-                                        {checkedCandidates.map((candidate) => (
-                                            <MenuItem key={candidate.photo.id ?? 0} value={candidate.photo.id ?? 0}>
-                                                {candidate.photo.filename ?? `Photo ${candidate.photo.id}`}
-                                            </MenuItem>
-                                        ))}
-                                    </TextField>
-                                    <TextField
-                                        size="small"
-                                        type="number"
-                                        label="Window ±"
-                                        value={windowValue}
-                                        onChange={(event) => setWindowValue(event.target.value)}
-                                        slotProps={{ htmlInput: { min: 1, step: 1 } }}
-                                        sx={{ width: 100 }}
-                                    />
-                                    <TextField
-                                        select
-                                        size="small"
-                                        label="Unit"
-                                        value={windowUnit}
-                                        onChange={(event) => setWindowUnit(event.target.value as WindowUnit)}
-                                        sx={{ width: 110 }}
-                                    >
-                                        <MenuItem value="minute">Minutes</MenuItem>
-                                        <MenuItem value="hour">Hours</MenuItem>
-                                        <MenuItem value="day">Days</MenuItem>
-                                    </TextField>
-                                    <Button
-                                        onClick={() => void findSimilar()}
-                                        disabled={finding || photo.id == null}
-                                        startIcon={finding ? <CircularProgress size={14} color="inherit" /> : undefined}
-                                    >
-                                        Auto-detect similar
-                                    </Button>
-                                    <Button onClick={normalizeSelection} disabled={checkedCandidates.length === 0}>
-                                        Apply normalization
-                                    </Button>
-                                    <Button
-                                        onClick={() => setCheckedIds(new Set(candidateIds))}
-                                        disabled={candidateIds.length === 0}
-                                    >
-                                        Select all
-                                    </Button>
-                                    <Button onClick={() => setCheckedIds(new Set())} disabled={checkedIds.size === 0}>
-                                        Clear
-                                    </Button>
-                                </Box>
-                                <Typography variant="caption" color="text.secondary">
-                                    Photos within ±{windowValue} {windowUnit}(s) of this photo are scored with object
-                                    signatures and perceptual hash. Checked thumbnails receive the shared settings.
-                                </Typography>
-                                {candidateError && <Alert severity="error">{candidateError}</Alert>}
-                                <Box sx={{ flex: 1, minHeight: 120, overflowY: "auto" }}>
-                                    {finding ? (
-                                        <CircularProgress size={24} />
-                                    ) : candidateIds.length > 0 ? (
-                                        <ThumbnailGallery
-                                            photoIds={candidateIds}
-                                            selectedPhotoId={photo.id ?? null}
-                                            checkedIds={checkedIds}
-                                            onToggleCheck={toggleCheck}
-                                            badges={badges}
-                                            thumbSize={96}
-                                            onSelect={toggleCheck}
-                                        />
-                                    ) : (
-                                        <Typography variant="body2" color="text.secondary">
-                                            Run auto-detect to load nearby photos, or turn on multi-edit to start again.
-                                        </Typography>
-                                    )}
-                                </Box>
-                            </Box>
-                        )}
                         <Box sx={{ flex: 1, minHeight: 0 }}>
                             <ProcessingPreview
-                                imageUrl={preview?.url ?? null}
+                                imageUrl={activePreview?.url ?? null}
                                 model={model}
                                 corrections={corrections}
-                                loading={!preview && !previewError}
-                                error={previewError}
+                                loading={!activePreview && !activePreviewError}
+                                error={activePreviewError?.message ?? null}
                             />
                         </Box>
                         <Box
@@ -715,9 +805,9 @@ export default function ReprocessDialog({ photo, onClose, onUpdated }: Reprocess
                                 </Typography>
                             </Box>
                             <Box sx={{ flex: 1 }} />
-                            {preview && (
+                            {activePreview && (
                                 <Typography variant="caption" color="text.secondary">
-                                    Source {preview.width} × {preview.height} px
+                                    Source {activePreview.width} × {activePreview.height} px
                                 </Typography>
                             )}
                             {model && (
@@ -744,15 +834,127 @@ export default function ReprocessDialog({ photo, onClose, onUpdated }: Reprocess
                             minHeight: 0,
                         }}
                     >
+                        <Box
+                            sx={{
+                                flexShrink: 0,
+                                borderBottom: 1,
+                                borderColor: "divider",
+                                p: 1.5,
+                                display: "flex",
+                                flexDirection: "column",
+                                gap: 1,
+                            }}
+                        >
+                            <Box sx={{ display: "flex", alignItems: "center", gap: 0.75 }}>
+                                <PhotoLibraryIcon fontSize="small" />
+                                <Typography variant="subtitle2">Nearby photos</Typography>
+                                <Box sx={{ flex: 1 }} />
+                                <Typography variant="caption" color="text.secondary">
+                                    ordered by time
+                                </Typography>
+                            </Box>
+                            <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1, alignItems: "center" }}>
+                                <TextField
+                                    size="small"
+                                    type="number"
+                                    label="Window ±"
+                                    value={windowValue}
+                                    onChange={(event) => setWindowValue(event.target.value)}
+                                    slotProps={{ htmlInput: { min: 1, step: 1 } }}
+                                    sx={{ width: 92 }}
+                                />
+                                <TextField
+                                    select
+                                    size="small"
+                                    label="Unit"
+                                    value={windowUnit}
+                                    onChange={(event) => setWindowUnit(event.target.value as WindowUnit)}
+                                    sx={{ width: 100 }}
+                                >
+                                    <MenuItem value="minute">Minutes</MenuItem>
+                                    <MenuItem value="hour">Hours</MenuItem>
+                                    <MenuItem value="day">Days</MenuItem>
+                                </TextField>
+                                <Button
+                                    size="small"
+                                    onClick={() => void loadCandidates()}
+                                    disabled={finding || photo.id == null}
+                                    startIcon={finding ? <CircularProgress size={14} color="inherit" /> : undefined}
+                                >
+                                    Auto-detect
+                                </Button>
+                                <Button
+                                    size="small"
+                                    onClick={() => setCheckedIds(new Set(candidateIds))}
+                                    disabled={candidateIds.length === 0}
+                                >
+                                    Select all
+                                </Button>
+                                <Button size="small" onClick={() => setCheckedIds(new Set())} disabled={checkedIds.size === 0}>
+                                    Clear
+                                </Button>
+                            </Box>
+                            {multiEdit && (
+                                <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1, alignItems: "center" }}>
+                                    <TextField
+                                        select
+                                        size="small"
+                                        label="Normalization"
+                                        value={normalizationMode}
+                                        onChange={(event) => setNormalizationMode(event.target.value as NormalizationMode)}
+                                        sx={{ minWidth: 145 }}
+                                    >
+                                        <MenuItem value="reference">Reference</MenuItem>
+                                        <MenuItem value="barycentric">Barycentric</MenuItem>
+                                    </TextField>
+                                    <TextField
+                                        select
+                                        size="small"
+                                        label="Reference photo"
+                                        value={effectiveReferenceId ?? ""}
+                                        disabled={normalizationMode !== "reference" || checkedPhotos.length === 0}
+                                        onChange={(event) => setReferenceId(Number(event.target.value))}
+                                        sx={{ minWidth: 150 }}
+                                    >
+                                        {checkedPhotos.map((target) => (
+                                            <MenuItem key={target.id ?? 0} value={target.id ?? 0}>
+                                                {target.filename ?? `Photo ${target.id}`}
+                                            </MenuItem>
+                                        ))}
+                                    </TextField>
+                                    <Button size="small" onClick={normalizeSelection} disabled={checkedPhotos.length === 0}>
+                                        Normalize
+                                    </Button>
+                                </Box>
+                            )}
+                            {candidateError && <Alert severity="error">{candidateError}</Alert>}
+                            {error && <Alert severity="error">{error}</Alert>}
+                            <Box sx={{ height: 220, overflowY: "auto" }}>
+                                <ThumbnailGallery
+                                    photoIds={candidateIds}
+                                    selectedPhotoId={activePhoto.id ?? null}
+                                    checkedIds={checkedIds}
+                                    onToggleCheck={toggleCheck}
+                                    badges={badges}
+                                    editedIds={editedIds}
+                                    thumbSize={96}
+                                    onSelect={selectPhoto}
+                                />
+                            </Box>
+                            <Typography variant="caption" color="text.secondary">
+                                Click a thumbnail to edit it. Check two or more photos for multi-edit; “edited” marks
+                                unsaved parameters.
+                            </Typography>
+                        </Box>
                         <Box sx={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
                             <CorrectionAccordion
                                 title="Exposure"
-                                enabled={options.exposure.enabled}
+                                enabled={activeOptions.exposure.enabled}
                                 onEnabled={(enabled) => patchCorrection("exposure", { enabled })}
                             >
                                 <SliderRow
                                     label="Exposure"
-                                    value={options.exposure.exposure}
+                                    value={activeOptions.exposure.exposure}
                                     min={-6}
                                     max={6}
                                     step={0.05}
@@ -761,7 +963,7 @@ export default function ReprocessDialog({ photo, onClose, onUpdated }: Reprocess
                                 />
                                 <SliderRow
                                     label="Gamma"
-                                    value={options.exposure.gamma}
+                                    value={activeOptions.exposure.gamma}
                                     min={0.2}
                                     max={5}
                                     step={0.05}
@@ -772,14 +974,14 @@ export default function ReprocessDialog({ photo, onClose, onUpdated }: Reprocess
 
                             <CorrectionAccordion
                                 title="White balance"
-                                enabled={options.whiteBalance.enabled}
+                                enabled={activeOptions.whiteBalance.enabled}
                                 onEnabled={(enabled) => patchCorrection("whiteBalance", { enabled })}
                             >
                                 <TextField
                                     select
                                     size="small"
                                     label="Method"
-                                    value={options.whiteBalance.method}
+                                    value={activeOptions.whiteBalance.method}
                                     onChange={(event) =>
                                         patchCorrection("whiteBalance", {
                                             method: event.target.value as "gray_world" | "manual",
@@ -791,18 +993,18 @@ export default function ReprocessDialog({ photo, onClose, onUpdated }: Reprocess
                                 </TextField>
                                 <SliderRow
                                     label="Strength"
-                                    value={options.whiteBalance.strength}
+                                    value={activeOptions.whiteBalance.strength}
                                     min={0}
                                     max={1}
                                     step={0.01}
                                     format={(value) => `${Math.round(value * 100)}%`}
                                     onChange={(strength) => patchCorrection("whiteBalance", { strength })}
                                 />
-                                {options.whiteBalance.method === "manual" && (
+                                {activeOptions.whiteBalance.method === "manual" && (
                                     <>
                                         <SliderRow
                                             label="Temperature"
-                                            value={options.whiteBalance.temperature}
+                                            value={activeOptions.whiteBalance.temperature}
                                             min={-1}
                                             max={1}
                                             step={0.01}
@@ -811,7 +1013,7 @@ export default function ReprocessDialog({ photo, onClose, onUpdated }: Reprocess
                                         />
                                         <SliderRow
                                             label="Tint"
-                                            value={options.whiteBalance.tint}
+                                            value={activeOptions.whiteBalance.tint}
                                             min={-1}
                                             max={1}
                                             step={0.01}
@@ -824,14 +1026,14 @@ export default function ReprocessDialog({ photo, onClose, onUpdated }: Reprocess
 
                             <CorrectionAccordion
                                 title="Contrast"
-                                enabled={options.contrast.enabled}
+                                enabled={activeOptions.contrast.enabled}
                                 onEnabled={(enabled) => patchCorrection("contrast", { enabled })}
                             >
                                 <TextField
                                     select
                                     size="small"
                                     label="Method"
-                                    value={options.contrast.method}
+                                    value={activeOptions.contrast.method}
                                     onChange={(event) =>
                                         patchCorrection("contrast", {
                                             method: event.target.value as "s_curve" | "adaptive",
@@ -843,18 +1045,18 @@ export default function ReprocessDialog({ photo, onClose, onUpdated }: Reprocess
                                 </TextField>
                                 <SliderRow
                                     label="Strength"
-                                    value={options.contrast.strength}
+                                    value={activeOptions.contrast.strength}
                                     min={0}
                                     max={1}
                                     step={0.01}
                                     format={(value) => `${Math.round(value * 100)}%`}
                                     onChange={(strength) => patchCorrection("contrast", { strength })}
                                 />
-                                {options.contrast.method === "adaptive" && (
+                                {activeOptions.contrast.method === "adaptive" && (
                                     <>
                                         <SliderRow
                                             label="Black point percentile"
-                                            value={options.contrast.low_percentile}
+                                            value={activeOptions.contrast.low_percentile}
                                             min={0}
                                             max={100}
                                             step={1}
@@ -862,7 +1064,7 @@ export default function ReprocessDialog({ photo, onClose, onUpdated }: Reprocess
                                         />
                                         <SliderRow
                                             label="White point percentile"
-                                            value={options.contrast.high_percentile}
+                                            value={activeOptions.contrast.high_percentile}
                                             min={0}
                                             max={100}
                                             step={1}
@@ -876,12 +1078,12 @@ export default function ReprocessDialog({ photo, onClose, onUpdated }: Reprocess
 
                             <CorrectionAccordion
                                 title="Local contrast"
-                                enabled={options.localContrast.enabled}
+                                enabled={activeOptions.localContrast.enabled}
                                 onEnabled={(enabled) => patchCorrection("localContrast", { enabled })}
                             >
                                 <SliderRow
                                     label="Clip limit"
-                                    value={options.localContrast.clip_limit}
+                                    value={activeOptions.localContrast.clip_limit}
                                     min={0.01}
                                     max={20}
                                     step={0.1}
@@ -890,7 +1092,7 @@ export default function ReprocessDialog({ photo, onClose, onUpdated }: Reprocess
                                 />
                                 <SliderRow
                                     label="Tile grid"
-                                    value={options.localContrast.tile_grid}
+                                    value={activeOptions.localContrast.tile_grid}
                                     min={1}
                                     max={64}
                                     step={1}
@@ -898,7 +1100,7 @@ export default function ReprocessDialog({ photo, onClose, onUpdated }: Reprocess
                                 />
                                 <SliderRow
                                     label="Strength"
-                                    value={options.localContrast.strength}
+                                    value={activeOptions.localContrast.strength}
                                     min={0}
                                     max={1}
                                     step={0.01}
@@ -909,12 +1111,12 @@ export default function ReprocessDialog({ photo, onClose, onUpdated }: Reprocess
 
                             <CorrectionAccordion
                                 title="Vibrance"
-                                enabled={options.vibrance.enabled}
+                                enabled={activeOptions.vibrance.enabled}
                                 onEnabled={(enabled) => patchCorrection("vibrance", { enabled })}
                             >
                                 <SliderRow
                                     label="Strength"
-                                    value={options.vibrance.strength}
+                                    value={activeOptions.vibrance.strength}
                                     min={0}
                                     max={1}
                                     step={0.01}
@@ -933,7 +1135,7 @@ export default function ReprocessDialog({ photo, onClose, onUpdated }: Reprocess
                                 <AccordionDetails sx={{ display: "flex", flexDirection: "column", gap: 1.5 }}>
                                     <RadioGroup
                                         row
-                                        value={options.tiltMode}
+                                        value={activeOptions.tiltMode}
                                         onChange={(event) => update({ tiltMode: event.target.value as TiltMode })}
                                     >
                                         <FormControlLabel value="auto" control={<Radio size="small" />} label="Auto" />
@@ -945,14 +1147,14 @@ export default function ReprocessDialog({ photo, onClose, onUpdated }: Reprocess
                                         />
                                     </RadioGroup>
 
-                                    {options.tiltMode === "manual" ? (
+                                    {activeOptions.tiltMode === "manual" ? (
                                         <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5 }}>
                                             <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
                                                 <Slider
                                                     min={-MAX_MANUAL_ANGLE}
                                                     max={MAX_MANUAL_ANGLE}
                                                     step={0.1}
-                                                    value={options.angle}
+                                                    value={activeOptions.angle}
                                                     onChange={(_, value) => setAngle(value as number)}
                                                     sx={{ flex: 1 }}
                                                 />
@@ -962,14 +1164,14 @@ export default function ReprocessDialog({ photo, onClose, onUpdated }: Reprocess
                                                     value={angleText}
                                                     onChange={(event) => {
                                                         const text = event.target.value;
-                                                        setAngleText(text);
+                                                        setActiveAngleText(text);
                                                         const parsed = Number(text);
 
                                                         if (text !== "" && Number.isFinite(parsed)) {
                                                             update({ angle: parsed });
                                                         }
                                                     }}
-                                                    onBlur={() => setAngleText(formatAngle(options.angle))}
+                                                    onBlur={() => setActiveAngleText(formatAngle(activeOptions.angle))}
                                                     slotProps={{
                                                         htmlInput: {
                                                             step: 0.1,
@@ -999,7 +1201,7 @@ export default function ReprocessDialog({ photo, onClose, onUpdated }: Reprocess
                                         </Box>
                                     ) : (
                                         <Typography variant="caption" color="text.secondary">
-                                            {options.tiltMode === "off"
+                                            {activeOptions.tiltMode === "off"
                                                 ? "The photo is not rotated."
                                                 : correction === 0
                                                   ? "No correction is applied."
@@ -1023,14 +1225,14 @@ export default function ReprocessDialog({ photo, onClose, onUpdated }: Reprocess
                                         select
                                         size="small"
                                         label="Crop mode"
-                                        value={options.cropMode}
+                                        value={activeOptions.cropMode}
                                         onChange={(event) => update({ cropMode: event.target.value as CropMode })}
                                     >
                                         <MenuItem value="maximum_valid_rectangle">Maximum valid rectangle</MenuItem>
                                         <MenuItem value="none">Keep expanded canvas</MenuItem>
                                     </TextField>
                                     <Typography variant="caption" color="text.secondary">
-                                        {options.cropMode === "none"
+                                        {activeOptions.cropMode === "none"
                                             ? "Keeps the rotated canvas, including the empty corners."
                                             : "Trims the borders the rotation introduces."}
                                     </Typography>
@@ -1053,14 +1255,14 @@ export default function ReprocessDialog({ photo, onClose, onUpdated }: Reprocess
                                 </AccordionSummary>
                                 <AccordionDetails sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
                                     <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
-                                        {options.alternatives.map((size) => (
+                                        {activeOptions.alternatives.map((size) => (
                                             <Chip
                                                 key={size}
                                                 size="small"
                                                 label={size}
-                                                color={size === options.main ? "primary" : "default"}
+                                                color={size === activeOptions.main ? "primary" : "default"}
                                                 onDelete={
-                                                    options.alternatives.length > 1
+                                                    activeOptions.alternatives.length > 1
                                                         ? () => removeTarget(size)
                                                         : undefined
                                                 }
@@ -1097,10 +1299,10 @@ export default function ReprocessDialog({ photo, onClose, onUpdated }: Reprocess
                                         select
                                         size="small"
                                         label="Main size"
-                                        value={options.main}
+                                        value={activeOptions.main}
                                         onChange={(event) => update({ main: Number(event.target.value) })}
                                     >
-                                        {options.alternatives.map((size) => (
+                                        {activeOptions.alternatives.map((size) => (
                                             <MenuItem key={size} value={size}>
                                                 {size} px
                                             </MenuItem>
@@ -1116,14 +1318,14 @@ export default function ReprocessDialog({ photo, onClose, onUpdated }: Reprocess
 
                             <CorrectionAccordion
                                 title="Noise reduction"
-                                enabled={options.noiseReduction.enabled}
+                                enabled={activeOptions.noiseReduction.enabled}
                                 onEnabled={(enabled) => patchCorrection("noiseReduction", { enabled })}
                             >
                                 <TextField
                                     select
                                     size="small"
                                     label="Method"
-                                    value={options.noiseReduction.method}
+                                    value={activeOptions.noiseReduction.method}
                                     onChange={(event) =>
                                         patchCorrection("noiseReduction", {
                                             method: event.target.value as "bilateral" | "nl_means",
@@ -1133,11 +1335,11 @@ export default function ReprocessDialog({ photo, onClose, onUpdated }: Reprocess
                                     <MenuItem value="bilateral">Bilateral</MenuItem>
                                     <MenuItem value="nl_means">Non-local means</MenuItem>
                                 </TextField>
-                                {options.noiseReduction.method === "bilateral" ? (
+                                {activeOptions.noiseReduction.method === "bilateral" ? (
                                     <>
                                         <SliderRow
                                             label="Radius"
-                                            value={options.noiseReduction.radius}
+                                            value={activeOptions.noiseReduction.radius}
                                             min={1}
                                             max={30}
                                             step={1}
@@ -1145,7 +1347,7 @@ export default function ReprocessDialog({ photo, onClose, onUpdated }: Reprocess
                                         />
                                         <SliderRow
                                             label="Colour sigma"
-                                            value={options.noiseReduction.sigma_color}
+                                            value={activeOptions.noiseReduction.sigma_color}
                                             min={1}
                                             max={200}
                                             step={1}
@@ -1153,7 +1355,7 @@ export default function ReprocessDialog({ photo, onClose, onUpdated }: Reprocess
                                         />
                                         <SliderRow
                                             label="Spatial sigma"
-                                            value={options.noiseReduction.sigma_space}
+                                            value={activeOptions.noiseReduction.sigma_space}
                                             min={1}
                                             max={200}
                                             step={1}
@@ -1163,7 +1365,7 @@ export default function ReprocessDialog({ photo, onClose, onUpdated }: Reprocess
                                 ) : (
                                     <SliderRow
                                         label="Strength"
-                                        value={options.noiseReduction.strength}
+                                        value={activeOptions.noiseReduction.strength}
                                         min={1}
                                         max={30}
                                         step={1}
@@ -1177,12 +1379,12 @@ export default function ReprocessDialog({ photo, onClose, onUpdated }: Reprocess
 
                             <CorrectionAccordion
                                 title="Sharpening"
-                                enabled={options.sharpening.enabled}
+                                enabled={activeOptions.sharpening.enabled}
                                 onEnabled={(enabled) => patchCorrection("sharpening", { enabled })}
                             >
                                 <SliderRow
                                     label="Radius"
-                                    value={options.sharpening.radius}
+                                    value={activeOptions.sharpening.radius}
                                     min={0.1}
                                     max={10}
                                     step={0.1}
@@ -1191,7 +1393,7 @@ export default function ReprocessDialog({ photo, onClose, onUpdated }: Reprocess
                                 />
                                 <SliderRow
                                     label="Amount"
-                                    value={options.sharpening.amount}
+                                    value={activeOptions.sharpening.amount}
                                     min={0}
                                     max={3}
                                     step={0.05}
@@ -1200,7 +1402,7 @@ export default function ReprocessDialog({ photo, onClose, onUpdated }: Reprocess
                                 />
                                 <SliderRow
                                     label="Threshold"
-                                    value={options.sharpening.threshold}
+                                    value={activeOptions.sharpening.threshold}
                                     min={0}
                                     max={50}
                                     step={1}
@@ -1219,7 +1421,7 @@ export default function ReprocessDialog({ photo, onClose, onUpdated }: Reprocess
                                     <FormControlLabel
                                         control={
                                             <Switch
-                                                checked={options.rescan}
+                                                checked={activeOptions.rescan}
                                                 onChange={(event) => update({ rescan: event.target.checked })}
                                             />
                                         }
@@ -1232,15 +1434,58 @@ export default function ReprocessDialog({ photo, onClose, onUpdated }: Reprocess
                                 </AccordionDetails>
                             </Accordion>
 
-                            {error && (
-                                <Box sx={{ p: 1.5 }}>
-                                    <Alert severity="error">{error}</Alert>
-                                </Box>
-                            )}
                         </Box>
                     </Box>
                 </Box>
             </Box>
+
+            <Dialog
+                open={confirmOpen}
+                onClose={saving ? undefined : () => setConfirmOpen(false)}
+                maxWidth="sm"
+                fullWidth
+            >
+                <Box sx={{ p: 3 }}>
+                    <Typography variant="h6">Save changes to {pendingSave.length} photos?</Typography>
+                    <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                        Each photo keeps its own parameters. They will be re-encoded one after another.
+                    </Typography>
+                    <Box
+                        sx={{
+                            mt: 2,
+                            maxHeight: 220,
+                            overflowY: "auto",
+                            border: 1,
+                            borderColor: "divider",
+                            borderRadius: 1,
+                        }}
+                    >
+                        {pendingSave.map((item) => (
+                            <Box
+                                key={item.photo.id}
+                                sx={{ px: 1.5, py: 0.75, borderBottom: 1, borderColor: "divider" }}
+                            >
+                                <Typography variant="body2" noWrap>
+                                    {item.photo.filename ?? item.photo.path}
+                                </Typography>
+                            </Box>
+                        ))}
+                    </Box>
+                    <Box sx={{ display: "flex", justifyContent: "flex-end", gap: 1, mt: 3 }}>
+                        <Button onClick={() => setConfirmOpen(false)} disabled={saving}>
+                            Cancel
+                        </Button>
+                        <Button
+                            variant="contained"
+                            onClick={() => void persist(pendingSave)}
+                            disabled={saving || pendingSave.length === 0}
+                            startIcon={saving ? <CircularProgress size={16} color="inherit" /> : undefined}
+                        >
+                            Save {pendingSave.length}
+                        </Button>
+                    </Box>
+                </Box>
+            </Dialog>
         </Dialog>
     );
 }

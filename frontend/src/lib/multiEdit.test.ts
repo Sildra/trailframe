@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { normalizeReprocessOptions, type NormalizablePhoto } from "./multiEdit";
+import { defaultReprocessOptions } from "./reprocess";
+import {
+    isEdited,
+    normalizeReprocessOptions,
+    sortPhotosByTime,
+    type NormalizablePhoto,
+} from "./multiEdit";
 
 function photo(id: number, processing: NormalizablePhoto["processing"]): NormalizablePhoto {
     return {
@@ -73,7 +79,42 @@ describe("normalizeReprocessOptions", () => {
         expect(options?.vibrance.strength).toBe(0.8);
     });
 
+    it("uses local edits for reference and barycentric normalization", () => {
+        const photos = [photo(1, []), photo(2, [])];
+        const edited = defaultReprocessOptions(photos[0]);
+        edited.exposure = { enabled: true, exposure: 2, gamma: 1.5 };
+        const optionsById = { 1: edited };
+
+        const reference = normalizeReprocessOptions(photos, "reference", 1, optionsById);
+        expect(reference?.exposure).toEqual({ enabled: true, exposure: 2, gamma: 1.5 });
+
+        const barycentre = normalizeReprocessOptions(photos, "barycentric", undefined, optionsById);
+        expect(barycentre?.exposure.enabled).toBe(false);
+        expect(barycentre?.exposure.exposure).toBe(2);
+    });
+
     it("returns null for an empty selection", () => {
         expect(normalizeReprocessOptions([], "barycentric")).toBeNull();
+    });
+});
+
+describe("editor helpers", () => {
+    it("sorts photos by capture time", () => {
+        const photos = [
+            photo(1, []),
+            { ...photo(2, []), date: "2024-05-01T10:00:00" },
+            { ...photo(3, []), date: "2024-05-01T09:00:00" },
+        ];
+
+        expect(sortPhotosByTime(photos).map((entry) => entry.id)).toEqual([3, 2, 1]);
+    });
+
+    it("detects unsaved edits", () => {
+        const selected = photo(1, []);
+        const original = defaultReprocessOptions(selected);
+        const edited = { ...original, vibrance: { ...original.vibrance, enabled: true } };
+
+        expect(isEdited(selected, original)).toBe(false);
+        expect(isEdited(selected, edited)).toBe(true);
     });
 });

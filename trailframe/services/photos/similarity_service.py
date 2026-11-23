@@ -181,13 +181,9 @@ class SimilarityService(Service):
                 )
             )
 
-        seed_time = seed.date
-
         def _order(item: tuple[SimilarPhoto, datetime | None]):
             candidate, date = item
-            is_seed = candidate.photo.id == photo_id
-            distance = abs((date - seed_time).total_seconds()) if date is not None else float("inf")
-            return (0 if is_seed else 1, 0 if is_seed else -candidate.score, distance, candidate.photo.id or 0)
+            return (date or datetime.max, candidate.photo.id or 0)
 
         results.sort(key=_order)
         return [candidate for candidate, _ in results]

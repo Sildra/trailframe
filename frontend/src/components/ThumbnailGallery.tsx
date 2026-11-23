@@ -11,6 +11,8 @@ interface ThumbnailGalleryProps {
     checkedIds?: Set<number>;
     onToggleCheck?: (photoId: number) => void;
     badges?: Record<number, string>;
+    /** Photos with unsaved local edits. */
+    editedIds?: Set<number>;
     onSelect: (photoId: number) => void;
 }
 
@@ -23,6 +25,7 @@ export default function ThumbnailGallery({
     checkedIds,
     onToggleCheck,
     badges,
+    editedIds,
     onSelect,
 }: ThumbnailGalleryProps) {
     const checkable = onToggleCheck !== undefined;
@@ -47,7 +50,8 @@ export default function ThumbnailGallery({
                     checked={checkedIds?.has(photoId) ?? false}
                     onToggleCheck={onToggleCheck ? () => onToggleCheck(photoId) : undefined}
                     badge={badges?.[photoId]}
-                    onSelect={() => (checkable && onToggleCheck ? onToggleCheck(photoId) : onSelect(photoId))}
+                    edited={editedIds?.has(photoId) ?? false}
+                    onSelect={() => onSelect(photoId)}
                 />
             ))}
         </Box>

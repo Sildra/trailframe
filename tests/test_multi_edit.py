@@ -88,14 +88,14 @@ class TestSimilarCandidates:
                 Photo(
                     path="near.jpg",
                     filename="near.jpg",
-                    date=datetime(2024, 5, 1, 12, 20, 0),
+                    date=datetime(2024, 5, 1, 11, 50, 0),
                     phash=(1 ^ 0b1100).to_bytes(8, "big"),
                     objects=_objects("dog"),
                 ),
                 Photo(
                     path="different.jpg",
                     filename="different.jpg",
-                    date=datetime(2024, 5, 1, 12, 30, 0),
+                    date=datetime(2024, 5, 1, 12, 10, 0),
                     phash=(0xFFFF_FFFF_FFFF_FFFF).to_bytes(8, "big"),
                     objects=_objects("airplane"),
                 ),
@@ -116,11 +116,11 @@ class TestSimilarCandidates:
 
         assert response.status_code == 200
         body = response.json()
-        assert [entry["photo"]["id"] for entry in body] == ids[:3]
-        assert body[0]["photo"]["id"] == ids[0]
-        assert body[1]["similar"] is True
-        assert body[1]["phash_distance"] == 2
-        assert body[1]["shared_objects"] == ["dog"]
+        assert [entry["photo"]["id"] for entry in body] == [ids[1], ids[0], ids[2]]
+        assert body[0]["similar"] is True
+        assert body[0]["phash_distance"] == 2
+        assert body[0]["shared_objects"] == ["dog"]
+        assert body[1]["photo"]["id"] == ids[0]
         assert body[2]["similar"] is False
 
     @allure.title("Similarity rejects a seed without a capture date")
