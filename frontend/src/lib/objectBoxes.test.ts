@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { objectRect } from "./objectBoxes";
+import {
+    confidenceOpacity,
+    confidenceRegions,
+    dedupeObjectBoxes,
+    objectRect,
+    type ObjectDetectionBox,
+} from "./objectBoxes";
 
 describe("objectRect", () => {
     it("matches the old behaviour when the served image has the reference size", () => {
@@ -37,5 +43,59 @@ describe("objectRect", () => {
                 { nw: 100, nh: 100, scale: 1, ox: 0, oy: 0 },
             ),
         ).toBeNull();
+    });
+});
+
+describe("dedupeObjectBoxes", () => {
+    it("keeps only the most confident near-identical box", () => {
+        const boxes: ObjectDetectionBox[] = [
+            { label: "dog", box: [0, 0, 100, 100], confidence: 0.55 },
+            { label: "dog", box: [2, 1, 100, 100], confidence: 0.91 },
+            { label: "dog", box: [0, 0, 100, 100], confidence: 0.7 },
+        ];
+
+        expect(dedupeObjectBoxes(boxes)).toEqual([
+            { label: "dog", box: [2, 1, 100, 100], confidence: 0.91 },
+        ]);
+    });
+
+    it("keeps boxes that only partially overlap", () => {
+        const boxes: ObjectDetectionBox[] = [
+            { label: "dog", box: [0, 0, 80, 80], confidence: 0.9 },
+            { label: "cat", box: [60, 0, 100, 80], confidence: 0.5 },
+        ];
+
+        expect(dedupeObjectBoxes(boxes)).toHaveLength(2);
+    });
+
+    it("ignores boxes without four usable coordinates", () => {
+        const boxes: ObjectDetectionBox[] = [
+            { box: [0, 0, 10], confidence: 0.8 },
+            { box: [0, 0, 0, 10], confidence: 0.8 },
+            { box: [0, 0, 10, 10], confidence: 0.8 },
+        ];
+
+        expect(dedupeObjectBoxes(boxes)).toEqual([{ box: [0, 0, 10, 10], confidence: 0.8 }]);
+    });
+});
+
+describe("confidenceRegions", () => {
+    it("uses the highest confidence in a partially overlapping area", () => {
+        const regions = confidenceRegions([
+            { label: "dog", box: [0, 0, 80, 80], confidence: 0.9 },
+            { label: "cat", box: [60, 0, 100, 80], confidence: 0.5 },
+        ]);
+
+        const at = (x: number) =>
+            regions.find((region) => region.box[0] <= x && x < region.box[2])?.confidence;
+
+        expect(at(30)).toBe(0.9);
+        expect(at(70)).toBe(0.9);
+        expect(at(90)).toBe(0.5);
+    });
+
+    it("makes a single confidence fade with its percentage", () => {
+        expect(confidenceOpacity(1)).toBeGreaterThan(confidenceOpacity(0.5));
+        expect(confidenceOpacity(0.5)).toBeGreaterThan(confidenceOpacity(0));
     });
 });

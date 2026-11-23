@@ -24,7 +24,7 @@ import ThumbnailGallery from "../components/ThumbnailGallery";
 import UploadButton from "../components/UploadButton";
 import { duplicateKey, groupKey, locationIssueKey } from "../lib/groups";
 import { SIDE_PANEL_WIDTH } from "../lib/layout";
-import type { HoveredObject } from "../lib/objectBoxes";
+import type { ObjectHover } from "../lib/objectBoxes";
 import type { TiltOverlay } from "../lib/processing";
 import type { TagNode } from "../lib/tags";
 
@@ -46,7 +46,7 @@ export default function GalleryPage() {
     const [locationIssuesCollapsed, setLocationIssuesCollapsed] = useState<Set<string>>(new Set());
     const [leftCollapsed, setLeftCollapsed] = useState(false);
     const [rightCollapsed, setRightCollapsed] = useState(false);
-    const [hoveredObject, setHoveredObject] = useState<HoveredObject | null>(null);
+    const [hoveredObject, setHoveredObject] = useState<ObjectHover | null>(null);
     const [hoveredTilt, setHoveredTilt] = useState<{ photoId: number; overlay: TiltOverlay } | null>(null);
     const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
     const [favoriteIds, setFavoriteIds] = useState<Set<number>>(new Set());

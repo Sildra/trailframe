@@ -18,7 +18,7 @@ import TuneIcon from "@mui/icons-material/Tune";
 import { api } from "../api/client";
 import type { components } from "../api/generated/schema";
 import { formatDateTime } from "../lib/format";
-import type { HoveredObject, ObjectReference } from "../lib/objectBoxes";
+import type { ObjectHover, ObjectReference } from "../lib/objectBoxes";
 import type { TiltOverlay } from "../lib/processing";
 import MetadataList from "./MetadataList";
 import PhotoLocationMap from "./PhotoLocationMap";
@@ -45,7 +45,7 @@ interface PhotoMetadataProps {
     photoId: number;
     favorite?: boolean;
     onToggleFavorite?: () => void;
-    onHoverObject?: (object: HoveredObject | null) => void;
+    onHoverObject?: (object: ObjectHover | null) => void;
     onHoverTilt?: (tilt: TiltOverlay | null) => void;
     onSelectPhoto?: (photoId: number) => void;
     onPhotoUpdated?: (photo: Photo) => void;
@@ -163,6 +163,17 @@ export default function PhotoMetadata({ photoId, favorite = false, onToggleFavor
     const photoObjects = (photo.objects ?? {}) as unknown as PhotoObjects;
     const objectReference = photoObjects.reference;
     const objects = (photoObjects.detections ?? []).filter((obj) => obj && typeof obj.label === "string");
+    const objectBoxes = objects.flatMap((obj) =>
+        obj.box && objectReference
+            ? [{ box: obj.box, confidence: obj.confidence ?? 0, label: obj.label }]
+            : [],
+    );
+
+    const showAllObjects = () => {
+        if (objectReference && objectBoxes.length > 0) {
+            onHoverObject?.({ reference: objectReference, boxes: objectBoxes });
+        }
+    };
 
     const exifEntries = Object.entries(photo.exif ?? {}).filter(
         ([, value]) => formatValue(value) !== "",
@@ -283,41 +294,45 @@ export default function PhotoMetadata({ photoId, favorite = false, onToggleFavor
                 </AccordionDetails>
             </Accordion>
             {objects.length > 0 && (
-                <Accordion disableGutters>
-                    <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={{ fontWeight: 600, fontSize: 14 }}>
-                        Objects
-                    </AccordionSummary>
-                    <AccordionDetails>
-                        <Box
-                            sx={{ display: "flex", flexDirection: "column", gap: "2px" }}
-                            onMouseLeave={() => onHoverObject?.(null)}
-                        >
-                            {objects.map((obj, i) => (
-                                <Box
-                                    key={i}
-                                    sx={{
-                                        display: "flex",
-                                        justifyContent: "space-between",
-                                        fontSize: 13,
-                                        px: 0.5,
-                                        borderRadius: 1,
-                                        cursor: "default",
-                                        "&:hover": { bgcolor: "action.hover" },
-                                    }}
-                                    onMouseEnter={() =>
-                                        obj.box && objectReference && onHoverObject?.({ box: obj.box, reference: objectReference })
-                                    }
-                                >
-                                    <span>{obj.label}</span>
-                                    <span style={{ opacity: 0.6 }}>
-                                        p: {Math.round((obj.confidence ?? 0) * 100)}% . s:{" "}
-                                        {Math.round((obj.surface ?? 0) * 1000) / 10}%
-                                    </span>
-                                </Box>
-                            ))}
-                        </Box>
-                    </AccordionDetails>
-                </Accordion>
+                <Box onMouseEnter={showAllObjects} onMouseLeave={() => onHoverObject?.(null)}>
+                    <Accordion disableGutters>
+                        <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={{ fontWeight: 600, fontSize: 14 }}>
+                            Objects
+                        </AccordionSummary>
+                        <AccordionDetails>
+                            <Box sx={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                                {objects.map((obj, i) => (
+                                    <Box
+                                        key={i}
+                                        sx={{
+                                            display: "flex",
+                                            justifyContent: "space-between",
+                                            fontSize: 13,
+                                            px: 0.5,
+                                            borderRadius: 1,
+                                            cursor: "default",
+                                            "&:hover": { bgcolor: "action.hover" },
+                                        }}
+                                        onMouseEnter={() => {
+                                            if (obj.box && objectReference) {
+                                                onHoverObject?.({ box: obj.box, reference: objectReference });
+                                            } else {
+                                                showAllObjects();
+                                            }
+                                        }}
+                                        onMouseLeave={showAllObjects}
+                                    >
+                                        <span>{obj.label}</span>
+                                        <span style={{ opacity: 0.6 }}>
+                                            p: {Math.round((obj.confidence ?? 0) * 100)}% . s:{" "}
+                                            {Math.round((obj.surface ?? 0) * 1000) / 10}%
+                                        </span>
+                                    </Box>
+                                ))}
+                            </Box>
+                        </AccordionDetails>
+                    </Accordion>
+                </Box>
             )}
             {groups.map((group) => (
                 <Accordion key={group.name} disableGutters>

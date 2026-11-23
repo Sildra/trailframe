@@ -1,14 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Box, Typography } from "@mui/material";
 
-import { objectRect, type HoveredObject } from "../lib/objectBoxes";
+import {
+    confidenceOpacity,
+    confidenceRegions,
+    dedupeObjectBoxes,
+    objectRect,
+    type ObjectHover,
+} from "../lib/objectBoxes";
 import type { TiltOverlay } from "../lib/processing";
 
 interface ImageViewerProps {
     photoId: number | null;
     /** Bumped when the photo's files change, so the image is fetched again. */
     version?: number;
-    hoveredObject?: HoveredObject | null;
+    hoveredObject?: ObjectHover | null;
     hoveredTilt?: TiltOverlay | null;
 }
 
@@ -66,9 +72,22 @@ export default function ImageViewer({ photoId, version = 0, hoveredObject, hover
                     {hoveredObject &&
                         dims &&
                         (() => {
-                            const rect = objectRect(hoveredObject, dims);
+                            const showAll = "boxes" in hoveredObject;
+                            const { reference } = hoveredObject;
+                            const boxes = showAll
+                                ? dedupeObjectBoxes(hoveredObject.boxes)
+                                : [{ box: hoveredObject.box, confidence: 1 }];
+                            const regions = showAll ? confidenceRegions(boxes) : [];
+                            const mappedBoxes = boxes.flatMap((entry) => {
+                                const rect = objectRect({ box: entry.box, reference }, dims);
+                                return rect ? [{ ...entry, rect }] : [];
+                            });
+                            const mappedRegions = regions.flatMap((region) => {
+                                const rect = objectRect({ box: region.box, reference }, dims);
+                                return rect ? [{ ...region, rect }] : [];
+                            });
 
-                            if (!rect) {
+                            if (mappedBoxes.length === 0) {
                                 return null;
                             }
 
@@ -83,15 +102,29 @@ export default function ImageViewer({ photoId, version = 0, hoveredObject, hover
                                         pointerEvents: "none",
                                     }}
                                 >
-                                    <rect
-                                        x={rect.x}
-                                        y={rect.y}
-                                        width={rect.width}
-                                        height={rect.height}
-                                        fill="rgba(255,0,0,0.15)"
-                                        stroke="red"
-                                        strokeWidth={2}
-                                    />
+                                    {mappedRegions.map((region, index) => (
+                                        <rect
+                                            key={`confidence-${index}`}
+                                            x={region.rect.x}
+                                            y={region.rect.y}
+                                            width={region.rect.width}
+                                            height={region.rect.height}
+                                            fill="red"
+                                            fillOpacity={confidenceOpacity(region.confidence)}
+                                        />
+                                    ))}
+                                    {mappedBoxes.map((entry, index) => (
+                                        <rect
+                                            key={`box-${index}`}
+                                            x={entry.rect.x}
+                                            y={entry.rect.y}
+                                            width={entry.rect.width}
+                                            height={entry.rect.height}
+                                            fill={showAll ? "none" : "rgba(255,0,0,0.15)"}
+                                            stroke="red"
+                                            strokeWidth={2}
+                                        />
+                                    ))}
                                 </svg>
                             );
                         })()}
