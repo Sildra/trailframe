@@ -7,10 +7,26 @@ interface ThumbnailGalleryProps {
     favorites?: Set<number>;
     thumbSize?: number;
     version?: number;
+    /** Turns the thumbnails into a checkbox selection. */
+    checkedIds?: Set<number>;
+    onToggleCheck?: (photoId: number) => void;
+    badges?: Record<number, string>;
     onSelect: (photoId: number) => void;
 }
 
-export default function ThumbnailGallery({ photoIds, selectedPhotoId, favorites, thumbSize, version, onSelect }: ThumbnailGalleryProps) {
+export default function ThumbnailGallery({
+    photoIds,
+    selectedPhotoId,
+    favorites,
+    thumbSize,
+    version,
+    checkedIds,
+    onToggleCheck,
+    badges,
+    onSelect,
+}: ThumbnailGalleryProps) {
+    const checkable = onToggleCheck !== undefined;
+
     return (
         <Box
             sx={{
@@ -27,7 +43,11 @@ export default function ThumbnailGallery({ photoIds, selectedPhotoId, favorites,
                     favorite={favorites?.has(photoId) ?? false}
                     size={thumbSize}
                     version={version}
-                    onSelect={() => onSelect(photoId)}
+                    checkable={checkable}
+                    checked={checkedIds?.has(photoId) ?? false}
+                    onToggleCheck={onToggleCheck ? () => onToggleCheck(photoId) : undefined}
+                    badge={badges?.[photoId]}
+                    onSelect={() => (checkable && onToggleCheck ? onToggleCheck(photoId) : onSelect(photoId))}
                 />
             ))}
         </Box>

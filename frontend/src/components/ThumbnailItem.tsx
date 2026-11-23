@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Box } from "@mui/material";
+import { Box, Checkbox, Chip } from "@mui/material";
 import StarIcon from "@mui/icons-material/Star";
 import { api } from "../api/client";
 
@@ -11,10 +11,16 @@ interface ThumbnailItemProps {
     size?: number;
     /** Bumped when the photo's files change, so the thumbnail is fetched again. */
     version?: number;
+    /** Show a selection checkbox on the thumbnail. */
+    checkable?: boolean;
+    checked?: boolean;
+    onToggleCheck?: () => void;
+    /** Short overlay label, e.g. the similarity score. */
+    badge?: string;
     onSelect: () => void;
 }
 
-export default function ThumbnailItem({ photoId, selected = false, favorite = false, size = 160, version = 0, onSelect }: ThumbnailItemProps) {
+export default function ThumbnailItem({ photoId, selected = false, favorite = false, size = 160, version = 0, checkable = false, checked = false, onToggleCheck, badge, onSelect }: ThumbnailItemProps) {
     const rootRef = useRef<HTMLDivElement | null>(null);
     const [visible, setVisible] = useState(false);
     const [src, setSrc] = useState<string | null>(null);
@@ -103,6 +109,16 @@ export default function ThumbnailItem({ photoId, selected = false, favorite = fa
                     }}
                 />
             )}
+            {checkable && (
+                <Checkbox
+                    size="small"
+                    checked={checked}
+                    onChange={() => onToggleCheck?.()}
+                    onClick={(event) => event.stopPropagation()}
+                    slotProps={{ input: { "aria-label": `Select photo ${photoId}` } }}
+                    sx={{ position: "absolute", top: 0, left: 0, p: 0.5, bgcolor: "background.paper" }}
+                />
+            )}
             {favorite && (
                 <StarIcon
                     fontSize="small"
@@ -112,6 +128,21 @@ export default function ThumbnailItem({ photoId, selected = false, favorite = fa
                         right: 2,
                         color: "#ffb300",
                         filter: "drop-shadow(0 1px 1px rgba(0, 0, 0, 0.6))",
+                        pointerEvents: "none",
+                    }}
+                />
+            )}
+            {badge && (
+                <Chip
+                    size="small"
+                    label={badge}
+                    color={checked ? "primary" : "default"}
+                    sx={{
+                        position: "absolute",
+                        bottom: 2,
+                        right: 2,
+                        height: 20,
+                        "& .MuiChip-label": { px: 0.75, fontSize: 11 },
                         pointerEvents: "none",
                     }}
                 />

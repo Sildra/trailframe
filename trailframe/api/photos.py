@@ -6,11 +6,12 @@ from io import BytesIO
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, Response
 from PIL import Image, ImageOps
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import func, select, text
 
 from trailframe.models.group import PhotoGroup, PhotoGroupSummary
 from trailframe.models.photo import Photo, PhotoDetail, RelatedPhotoGroup
+from trailframe.models.similarity import SimilarPhoto
 from trailframe.services.core.database_service import DatabaseService
 from trailframe.services.core.thread_pool_service import ThreadPoolService
 from trailframe.services.map.location_service import LocationService
@@ -18,6 +19,7 @@ from trailframe.services.photos.duplicates_service import DuplicatesService
 from trailframe.services.photos.folder_service import FolderService
 from trailframe.services.photos.photo_service import PhotoService
 from trailframe.services.photos.processing_service import ProcessingService, ReprocessError
+from trailframe.services.photos.similarity_service import SimilarityError, SimilarityService
 from trailframe.services.photos.tag_service import TagService
 from trailframe.services.photos.thumbnail_service import ThumbnailService
 from trailframe.services.processors import PROCESSOR_OVERRIDES
@@ -117,6 +119,28 @@ class ReprocessRequest(BaseModel):
     rescan: bool = True
 
 
+class SimilarCandidatesRequest(BaseModel):
+    """A relative capture-time window around one seed photo."""
+
+    photo_id: int
+    window_seconds: int = Field(default=3600, ge=1, le=30 * 24 * 3600)
+    max_hamming: int = Field(default=12, ge=0, le=64)
+    min_object_overlap: float = Field(default=0.4, ge=0, le=1)
+
+
+class BatchReprocessRequest(BaseModel):
+    """Apply one set of overrides to several photos."""
+
+    photo_ids: list[int] = Field(min_length=1, max_length=100)
+    options: ReprocessRequest
+
+
+class BatchReprocessResult(BaseModel):
+    photo_id: int
+    photo: PhotoDetail | None = None
+    error: str | None = None
+
+
 def _group_date_bounds(start_date: date, end_date: date) -> tuple[datetime, datetime]:
     return (datetime.combine(start_date, time.min), datetime.combine(end_date + timedelta(days=1), time.min))
 
@@ -132,6 +156,43 @@ def _tag_paths(tags: list[str] | None) -> list[str]:
             paths.append(value)
 
     return paths
+
+
+def _build_reprocess_overrides(payload: ReprocessRequest) -> dict:
+    """Translate a reprocess payload into typed processor overrides."""
+
+    overrides = {}
+
+    if payload.tilt is not None:
+        mode = payload.tilt.mode.lower()
+
+        if mode not in {"auto", "off", "manual"}:
+            raise HTTPException(400, f"Unknown tilt mode '{payload.tilt.mode}'")
+
+        if mode == "manual" and payload.tilt.angle is None:
+            raise HTTPException(400, "A manual angle is required")
+
+        overrides["Tilt"] = TiltOverride(
+            enabled=mode != "off",
+            angle=payload.tilt.angle if mode == "manual" else None,
+            crop_mode=payload.tilt.crop_mode,
+        )
+
+    corrections = {
+        "Exposure": payload.exposure,
+        "White balance": payload.white_balance,
+        "Contrast": payload.contrast,
+        "Local contrast": payload.local_contrast,
+        "Vibrance": payload.vibrance,
+        "Noise reduction": payload.noise_reduction,
+        "Sharpening": payload.sharpening,
+    }
+
+    for name, model in corrections.items():
+        if model is not None:
+            overrides[name] = PROCESSOR_OVERRIDES[name](**model.model_dump(exclude_none=True))
+
+    return overrides
 
 
 @router.get("", response_model=list[PhotoDetail])
@@ -386,6 +447,43 @@ async def delete_group(group_id: int):
     return await DatabaseService.execute(_delete)
 
 
+@router.post("/similar-candidates", response_model=list[SimilarPhoto])
+async def similar_candidates(payload: SimilarCandidatesRequest) -> list[SimilarPhoto]:
+    """List photos in a relative time window, flagging object/phash matches."""
+
+    try:
+        return await SimilarityService.candidates(
+            payload.photo_id, payload.window_seconds, payload.max_hamming, payload.min_object_overlap
+        )
+    except SimilarityError as error:
+        raise HTTPException(error.status_code, str(error)) from error
+
+
+@router.post("/reprocess-batch", response_model=list[BatchReprocessResult])
+async def reprocess_batch(payload: BatchReprocessRequest) -> list[BatchReprocessResult]:
+    """Apply one set of processing overrides to a selection of photos."""
+
+    overrides = _build_reprocess_overrides(payload.options)
+    results: list[BatchReprocessResult] = []
+
+    for photo_id in payload.photo_ids:
+        try:
+            await ProcessingService.reprocess(
+                photo_id,
+                alternatives=payload.options.alternatives,
+                main_target=payload.options.main,
+                overrides=overrides,
+                rescan=payload.options.rescan,
+            )
+            results.append(BatchReprocessResult(photo_id=photo_id, photo=await get_photo(photo_id)))
+        except ReprocessError as error:
+            results.append(BatchReprocessResult(photo_id=photo_id, error=str(error)))
+        except HTTPException as error:
+            results.append(BatchReprocessResult(photo_id=photo_id, error=str(error.detail)))
+
+    return results
+
+
 @router.delete("/{photo_id}")
 async def delete_photo(photo_id: int):
     async def _fetch(session) -> Photo | None:
@@ -503,36 +601,7 @@ async def get_photo(photo_id: int) -> PhotoDetail:
 @router.post("/{photo_id}/reprocess", response_model=PhotoDetail)
 async def reprocess_photo(photo_id: int, payload: ReprocessRequest) -> PhotoDetail:
     """Regenerate the alternatives of a photo from its original."""
-    overrides = {}
-
-    if payload.tilt is not None:
-        mode = payload.tilt.mode.lower()
-
-        if mode not in {"auto", "off", "manual"}:
-            raise HTTPException(400, f"Unknown tilt mode '{payload.tilt.mode}'")
-
-        if mode == "manual" and payload.tilt.angle is None:
-            raise HTTPException(400, "A manual angle is required")
-
-        overrides["Tilt"] = TiltOverride(
-            enabled=mode != "off",
-            angle=payload.tilt.angle if mode == "manual" else None,
-            crop_mode=payload.tilt.crop_mode,
-        )
-
-    corrections = {
-        "Exposure": payload.exposure,
-        "White balance": payload.white_balance,
-        "Contrast": payload.contrast,
-        "Local contrast": payload.local_contrast,
-        "Vibrance": payload.vibrance,
-        "Noise reduction": payload.noise_reduction,
-        "Sharpening": payload.sharpening,
-    }
-
-    for name, model in corrections.items():
-        if model is not None:
-            overrides[name] = PROCESSOR_OVERRIDES[name](**model.model_dump(exclude_none=True))
+    overrides = _build_reprocess_overrides(payload)
 
     try:
         await ProcessingService.reprocess(

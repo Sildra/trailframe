@@ -229,6 +229,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/photos/similar-candidates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Similar Candidates
+         * @description List photos in a relative time window, flagging object/phash matches.
+         */
+        post: operations["similar_candidates_api_photos_similar_candidates_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/photos/reprocess-batch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reprocess Batch
+         * @description Apply one set of processing overrides to a selection of photos.
+         */
+        post: operations["reprocess_batch_api_photos_reprocess_batch_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/photos/{photo_id}": {
         parameters: {
             query?: never;
@@ -1154,6 +1194,23 @@ export interface components {
             /** Duration */
             duration?: number | null;
         };
+        /**
+         * BatchReprocessRequest
+         * @description Apply one set of overrides to several photos.
+         */
+        BatchReprocessRequest: {
+            /** Photo Ids */
+            photo_ids: number[];
+            options: components["schemas"]["ReprocessRequest"];
+        };
+        /** BatchReprocessResult */
+        BatchReprocessResult: {
+            /** Photo Id */
+            photo_id: number;
+            photo?: components["schemas"]["PhotoDetail"] | null;
+            /** Error */
+            error?: string | null;
+        };
         /** Body_activity_zip_with_overlay_api_activities__activity_id__zip_post */
         Body_activity_zip_with_overlay_api_activities__activity_id__zip_post: {
             /** Overlay */
@@ -1937,6 +1994,47 @@ export interface components {
             /** Value */
             value: number;
         };
+        /**
+         * SimilarCandidatesRequest
+         * @description A relative capture-time window around one seed photo.
+         */
+        SimilarCandidatesRequest: {
+            /** Photo Id */
+            photo_id: number;
+            /**
+             * Window Seconds
+             * @default 3600
+             */
+            window_seconds: number;
+            /**
+             * Max Hamming
+             * @default 12
+             */
+            max_hamming: number;
+            /**
+             * Min Object Overlap
+             * @default 0.4
+             */
+            min_object_overlap: number;
+        };
+        /**
+         * SimilarPhoto
+         * @description A photo in the relative time window, scored against the seed photo.
+         */
+        SimilarPhoto: {
+            photo: components["schemas"]["PhotoDetail"];
+            /** Similar */
+            similar: boolean;
+            /** Score */
+            score: number;
+            /** Phash Distance */
+            phash_distance?: number | null;
+            /**
+             * Shared Objects
+             * @default []
+             */
+            shared_objects: string[];
+        };
         /** StorageStats */
         StorageStats: {
             /** Database Size */
@@ -2386,6 +2484,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    similar_candidates_api_photos_similar_candidates_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SimilarCandidatesRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SimilarPhoto"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reprocess_batch_api_photos_reprocess_batch_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BatchReprocessRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BatchReprocessResult"][];
                 };
             };
             /** @description Validation Error */

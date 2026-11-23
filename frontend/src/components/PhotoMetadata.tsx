@@ -360,6 +360,7 @@ export default function PhotoMetadata({ photoId, favorite = false, onToggleFavor
             />
             {reprocessOpen && photo.id === photoId && (
                 <ReprocessDialog
+                    key={photo.id}
                     photo={photo}
                     onClose={() => setReprocessOpen(false)}
                     onUpdated={(updated) => {

@@ -15,6 +15,7 @@ from trailframe.services.photos.duplicates_service import DuplicatesService
 from trailframe.services.photos.folder_service import FolderService
 from trailframe.services.photos.photo_service import PhotoService
 from trailframe.services.photos.processing_service import ProcessingService
+from trailframe.services.photos.similarity_service import SimilarityService
 from trailframe.services.photos.tag_service import TagService
 from trailframe.services.photos.thumbnail_service import ThumbnailService
 from trailframe.services.pipelines.pipeline_service import PipelineService
@@ -52,6 +53,7 @@ class ServiceRegistry(Service):
         TileService,
         StatisticsService,
         DuplicatesService,
+        SimilarityService,
     ]
 
     @classmethod

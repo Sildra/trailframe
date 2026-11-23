@@ -19,10 +19,12 @@ import {
     Typography,
 } from "@mui/material";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
+import PhotoLibraryIcon from "@mui/icons-material/PhotoLibrary";
 import RestartAltIcon from "@mui/icons-material/RestartAlt";
 import { api } from "../api/client";
 import type { components } from "../api/generated/schema";
 import { SIDE_PANEL_WIDTH } from "../lib/layout";
+import { normalizeReprocessOptions, type NormalizationMode } from "../lib/multiEdit";
 import { normalizeProcessing, parseLine, parsePoint } from "../lib/processing";
 import { buildPreview, effectiveAngle } from "../lib/preview";
 import {
@@ -39,8 +41,11 @@ import {
     type TiltMode,
 } from "../lib/reprocess";
 import ProcessingPreview, { type PreviewCorrections } from "./ProcessingPreview";
+import ThumbnailGallery from "./ThumbnailGallery";
 
 type Photo = components["schemas"]["PhotoDetail"];
+type SimilarCandidate = components["schemas"]["SimilarPhoto"];
+type WindowUnit = "minute" | "hour" | "day";
 
 interface ReprocessDialogProps {
     photo: Photo;
@@ -176,6 +181,52 @@ export default function ReprocessDialog({ photo, onClose, onUpdated }: Reprocess
     const [error, setError] = useState<string | null>(null);
     const [preview, setPreview] = useState<PreviewImage | null>(null);
     const [previewError, setPreviewError] = useState<string | null>(null);
+    const [multiEdit, setMultiEdit] = useState(false);
+    const [windowValue, setWindowValue] = useState("1");
+    const [windowUnit, setWindowUnit] = useState<WindowUnit>("hour");
+    const [candidates, setCandidates] = useState<SimilarCandidate[]>([]);
+    const [checkedIds, setCheckedIds] = useState<Set<number>>(() =>
+        new Set(photo.id == null ? [] : [photo.id]),
+    );
+    const [normalizationMode, setNormalizationMode] = useState<NormalizationMode>("reference");
+    const [referenceId, setReferenceId] = useState<number | null>(photo.id ?? null);
+    const [finding, setFinding] = useState(false);
+    const [candidateError, setCandidateError] = useState<string | null>(null);
+
+    const windowSeconds = useMemo(() => {
+        const amount = Number(windowValue);
+
+        if (!Number.isFinite(amount) || amount <= 0) {
+            return 3600;
+        }
+
+        const factor = windowUnit === "minute" ? 60 : windowUnit === "hour" ? 3600 : 86400;
+        return Math.max(1, Math.min(30 * 24 * 3600, Math.round(amount * factor)));
+    }, [windowValue, windowUnit]);
+
+    const checkedCandidates = useMemo(
+        () => candidates.filter((candidate) => candidate.photo.id != null && checkedIds.has(candidate.photo.id)),
+        [candidates, checkedIds],
+    );
+    const candidateIds = useMemo(
+        () => candidates.map((candidate) => candidate.photo.id).filter((id): id is number => id != null),
+        [candidates],
+    );
+    const effectiveReferenceId = checkedCandidates.some((candidate) => candidate.photo.id === referenceId)
+        ? referenceId
+        : (checkedCandidates[0]?.photo.id ?? null);
+    const badges = useMemo(
+        () =>
+            Object.fromEntries(
+                candidates
+                    .filter((candidate) => candidate.photo.id != null)
+                    .map((candidate) => [
+                        candidate.photo.id as number,
+                        candidate.similar ? `${Math.round(candidate.score * 100)}%` : "—",
+                    ]),
+            ),
+        [candidates],
+    );
 
     const corrections = useMemo<PreviewCorrections>(
         () => ({
@@ -280,6 +331,83 @@ export default function ReprocessDialog({ photo, onClose, onUpdated }: Reprocess
         update({ angle: rounded });
     };
 
+    const findSimilar = async () => {
+        if (photo.id == null) {
+            return;
+        }
+
+        setFinding(true);
+        setCandidateError(null);
+
+        const { data, error: requestError } = await api.POST("/api/photos/similar-candidates", {
+            body: {
+                photo_id: photo.id,
+                window_seconds: windowSeconds,
+                max_hamming: 12,
+                min_object_overlap: 0.4,
+            },
+        });
+
+        setFinding(false);
+
+        if (requestError || !data) {
+            const detail = (requestError as { detail?: unknown } | undefined)?.detail;
+            setCandidateError(typeof detail === "string" ? detail : "Similarity search failed.");
+            return;
+        }
+
+        setCandidates(data);
+        const matched = data
+            .filter((candidate) => candidate.similar && candidate.photo.id != null)
+            .map((candidate) => candidate.photo.id as number);
+        setCheckedIds(new Set(matched.includes(photo.id) ? matched : [photo.id, ...matched]));
+        setReferenceId(photo.id);
+    };
+
+    const toggleMultiEdit = () => {
+        const next = !multiEdit;
+        setMultiEdit(next);
+
+        if (next && candidates.length === 0) {
+            void findSimilar();
+        }
+    };
+
+    const toggleCheck = (id: number) => {
+        setCheckedIds((current) => {
+            const next = new Set(current);
+
+            if (next.has(id)) {
+                next.delete(id);
+            } else {
+                next.add(id);
+            }
+
+            return next;
+        });
+    };
+
+    const normalizeSelection = () => {
+        if (checkedCandidates.length === 0) {
+            setError("Select at least one photo to normalize.");
+            return;
+        }
+
+        const next = normalizeReprocessOptions(
+            checkedCandidates.map((candidate) => candidate.photo),
+            normalizationMode,
+            effectiveReferenceId,
+        );
+
+        if (!next) {
+            return;
+        }
+
+        setOptions(next);
+        setAngleText(formatAngle(next.angle));
+        setError(null);
+    };
+
     const removeTarget = (size: number) => {
         setOptions((current) => {
             if (current.alternatives.length === 1) {
@@ -337,6 +465,41 @@ export default function ReprocessDialog({ photo, onClose, onUpdated }: Reprocess
         setSaving(true);
         setError(null);
 
+        if (multiEdit) {
+            const ids = [...checkedIds];
+
+            if (ids.length === 0) {
+                setSaving(false);
+                setError("Select at least one photo to reprocess.");
+                return;
+            }
+
+            const { data, error: requestError } = await api.POST("/api/photos/reprocess-batch", {
+                body: { photo_ids: ids, options: toReprocessPayload(options) },
+            });
+
+            setSaving(false);
+
+            if (requestError || !data) {
+                const detail = (requestError as { detail?: unknown } | undefined)?.detail;
+                setError(typeof detail === "string" ? detail : "Batch reprocessing failed.");
+                return;
+            }
+
+            const failures = data.filter((result) => result.error);
+
+            if (failures.length > 0) {
+                setError(
+                    `${failures.length} photo(s) failed: ${failures[0].error ?? "unknown error"}. Successful photos were already updated.`,
+                );
+                return;
+            }
+
+            onUpdated(data.find((result) => result.photo_id === photo.id)?.photo ?? photo);
+            onClose();
+            return;
+        }
+
         const { data, error: requestError } = await api.POST("/api/photos/{photo_id}/reprocess", {
             params: { path: { photo_id: photo.id } },
             body: toReprocessPayload(options),
@@ -379,9 +542,18 @@ export default function ReprocessDialog({ photo, onClose, onUpdated }: Reprocess
                         </Typography>
                         <Typography variant="caption" color="text.secondary" noWrap sx={{ display: "block" }}>
                             {photo.filename ?? photo.path}
+                            {multiEdit && ` · ${checkedIds.size} selected`}
                         </Typography>
                     </Box>
                     <Box sx={{ flex: 1 }} />
+                    <Button
+                        variant={multiEdit ? "contained" : "outlined"}
+                        startIcon={<PhotoLibraryIcon />}
+                        onClick={toggleMultiEdit}
+                        disabled={saving}
+                    >
+                        Multi-edit
+                    </Button>
                     <Button startIcon={<RestartAltIcon />} onClick={reset} disabled={saving}>
                         Reset
                     </Button>
@@ -391,15 +563,124 @@ export default function ReprocessDialog({ photo, onClose, onUpdated }: Reprocess
                     <Button
                         variant="contained"
                         onClick={save}
-                        disabled={saving || photo.id == null}
+                        disabled={saving || photo.id == null || (multiEdit && checkedIds.size === 0)}
                         startIcon={saving ? <CircularProgress size={16} color="inherit" /> : undefined}
                     >
-                        Reprocess
+                        {multiEdit ? `Apply to ${checkedIds.size}` : "Reprocess"}
                     </Button>
                 </Box>
 
                 <Box sx={{ flex: 1, minHeight: 0, display: "flex" }}>
                     <Box sx={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column" }}>
+                        {multiEdit && (
+                            <Box
+                                sx={{
+                                    height: 340,
+                                    flexShrink: 0,
+                                    overflowY: "auto",
+                                    borderBottom: 1,
+                                    borderColor: "divider",
+                                    p: 1.5,
+                                    display: "flex",
+                                    flexDirection: "column",
+                                    gap: 1,
+                                }}
+                            >
+                                <Typography variant="subtitle2">Multi-edit selection</Typography>
+                                <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1, alignItems: "center" }}>
+                                    <TextField
+                                        select
+                                        size="small"
+                                        label="Normalization"
+                                        value={normalizationMode}
+                                        onChange={(event) => setNormalizationMode(event.target.value as NormalizationMode)}
+                                        sx={{ minWidth: 150 }}
+                                    >
+                                        <MenuItem value="reference">Reference photo</MenuItem>
+                                        <MenuItem value="barycentric">Barycentric</MenuItem>
+                                    </TextField>
+                                    <TextField
+                                        select
+                                        size="small"
+                                        label="Reference"
+                                        value={effectiveReferenceId ?? ""}
+                                        disabled={normalizationMode !== "reference" || checkedCandidates.length === 0}
+                                        onChange={(event) => setReferenceId(Number(event.target.value))}
+                                        sx={{ minWidth: 180 }}
+                                    >
+                                        {checkedCandidates.map((candidate) => (
+                                            <MenuItem key={candidate.photo.id ?? 0} value={candidate.photo.id ?? 0}>
+                                                {candidate.photo.filename ?? `Photo ${candidate.photo.id}`}
+                                            </MenuItem>
+                                        ))}
+                                    </TextField>
+                                    <TextField
+                                        size="small"
+                                        type="number"
+                                        label="Window ±"
+                                        value={windowValue}
+                                        onChange={(event) => setWindowValue(event.target.value)}
+                                        slotProps={{ htmlInput: { min: 1, step: 1 } }}
+                                        sx={{ width: 100 }}
+                                    />
+                                    <TextField
+                                        select
+                                        size="small"
+                                        label="Unit"
+                                        value={windowUnit}
+                                        onChange={(event) => setWindowUnit(event.target.value as WindowUnit)}
+                                        sx={{ width: 110 }}
+                                    >
+                                        <MenuItem value="minute">Minutes</MenuItem>
+                                        <MenuItem value="hour">Hours</MenuItem>
+                                        <MenuItem value="day">Days</MenuItem>
+                                    </TextField>
+                                    <Button
+                                        onClick={() => void findSimilar()}
+                                        disabled={finding || photo.id == null}
+                                        startIcon={finding ? <CircularProgress size={14} color="inherit" /> : undefined}
+                                    >
+                                        Auto-detect similar
+                                    </Button>
+                                    <Button onClick={normalizeSelection} disabled={checkedCandidates.length === 0}>
+                                        Apply normalization
+                                    </Button>
+                                    <Button
+                                        onClick={() => setCheckedIds(new Set(candidateIds))}
+                                        disabled={candidateIds.length === 0}
+                                    >
+                                        Select all
+                                    </Button>
+                                    <Button onClick={() => setCheckedIds(new Set())} disabled={checkedIds.size === 0}>
+                                        Clear
+                                    </Button>
+                                </Box>
+                                <Typography variant="caption" color="text.secondary">
+                                    Photos within ±{windowValue} {windowUnit}(s) of this photo are scored with object
+                                    signatures and perceptual hash. Checked thumbnails receive the shared settings.
+                                </Typography>
+                                {candidateError && <Alert severity="error">{candidateError}</Alert>}
+                                <Box sx={{ flex: 1, minHeight: 120, overflowY: "auto" }}>
+                                    {finding ? (
+                                        <CircularProgress size={24} />
+                                    ) : candidateIds.length > 0 ? (
+                                        <ThumbnailGallery
+                                            photoIds={candidateIds}
+                                            selectedPhotoId={photo.id ?? null}
+                                            checkedIds={checkedIds}
+                                            onToggleCheck={toggleCheck}
+                                            badges={badges}
+                                            thumbSize={96}
+                                            onSelect={toggleCheck}
+                                        />
+                                    ) : (
+                                        <Typography variant="body2" color="text.secondary">
+                                            Run auto-detect to load nearby photos, or turn on multi-edit to start again.
+                                        </Typography>
+                                    )}
+                                </Box>
+                            </Box>
+                        )}
                         <Box sx={{ flex: 1, minHeight: 0 }}>
                             <ProcessingPreview
                                 imageUrl={preview?.url ?? null}
