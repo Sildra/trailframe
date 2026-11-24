@@ -31,7 +31,7 @@ import {
     sortPhotosByTime,
     type NormalizationMode,
 } from "../lib/multiEdit";
-import { normalizeProcessing, parseLine, parsePoint } from "../lib/processing";
+import { normalizeProcessing, tiltOverlay } from "../lib/processing";
 import { buildPreview, effectiveAngle } from "../lib/preview";
 import {
     MAX_MANUAL_ANGLE,
@@ -371,11 +371,13 @@ export default function ReprocessDialog({ photo, onClose, onUpdated }: Reprocess
 
     const tilt = useMemo(() => {
         const step = normalizeProcessing(activePhoto.processing).find((entry) => entry.step === "tilt") ?? null;
+        const overlay = step ? tiltOverlay(step) : null;
 
         return {
             step,
-            line: step ? parseLine(step.meta.line) : null,
-            reference: step ? parsePoint(step.meta.reference_point) : null,
+            line: overlay?.line ?? null,
+            reference: overlay?.reference ?? null,
+            segments: overlay?.segments ?? [],
             detectedAngle: step ? parseAngle(step.summary) : null,
             applied: step?.meta.applied === true,
         };
@@ -442,7 +444,12 @@ export default function ReprocessDialog({ photo, onClose, onUpdated }: Reprocess
 
         return buildPreview(
             { width: activePreview.width, height: activePreview.height },
-            { line: tilt.line, reference: tilt.reference, detectedAngle: tilt.detectedAngle },
+            {
+                line: tilt.line,
+                reference: tilt.reference,
+                segments: tilt.segments,
+                detectedAngle: tilt.detectedAngle,
+            },
             { angle: correction, cropMode: activeOptions.cropMode, target: activeOptions.main },
         );
     }, [activePreview, tilt, correction, activeOptions.cropMode, activeOptions.main]);

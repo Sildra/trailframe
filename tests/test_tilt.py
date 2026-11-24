@@ -35,6 +35,16 @@ def _tilted_line(angle: float, size: tuple[int, int] = (900, 600)) -> Image.Imag
     return image
 
 
+def _two_line_image() -> Image.Image:
+    """A strong tilted line at the top edge and a weaker central one."""
+    image = Image.new("RGB", (900, 600), (245, 245, 245))
+    draw = ImageDraw.Draw(image)
+    draw.line((0, 20, 900, 20 + 900 * math.tan(math.radians(6.0))), fill=(10, 10, 10), width=5)
+    draw.line((200, 300, 700, 300 - 500 * math.tan(math.radians(2.0))), fill=(10, 10, 10), width=4)
+
+    return image
+
+
 def _estimate(angle: float, confidence: float) -> TiltEstimate:
     return TiltEstimate(angle=angle, confidence=confidence, method="hough")
 
@@ -77,6 +87,44 @@ class TestTilt:
         assert reference is not None
         assert reference[0] == pytest.approx((estimate.line[0] + estimate.line[2]) / 2)
         assert reference[1] == pytest.approx((estimate.line[1] + estimate.line[3]) / 2)
+
+    @allure.title("The detector stores its supporting segments")
+    def test_supporting_segments(self):
+        estimate = detect_tilt(_tilted_line(2.0), TiltSettings())
+
+        assert estimate is not None
+        assert estimate.segments
+        assert max(segment.weight for segment in estimate.segments) == pytest.approx(1.0)
+        assert all(0 < segment.weight <= 1 for segment in estimate.segments)
+        assert all(
+            abs(segment.angle - estimate.angle) <= TiltSettings().inlier_tolerance for segment in estimate.segments
+        )
+
+        for segment in estimate.segments:
+            x1, y1, x2, y2 = segment.line
+            assert 0 <= x1 < x2 <= 1
+            assert 0 <= y1 <= 1
+            assert 0 <= y2 <= 1
+
+        assert any(segment.line == estimate.line for segment in estimate.segments)
+
+    @allure.title("Only lines near the image centre contribute to the estimate")
+    def test_center_filter(self):
+        image = _two_line_image()
+        central = detect_tilt(image, TiltSettings())
+
+        assert central is not None
+        assert central.angle == pytest.approx(-2.0, abs=0.7)
+        assert central.segments
+
+        for segment in central.segments:
+            x1, y1, x2, y2 = segment.line
+            assert math.hypot((x1 + x2) / 2 - 0.5, (y1 + y2) / 2 - 0.5) <= 0.35 + 1e-6
+
+        unrestricted = detect_tilt(image, TiltSettings(max_center_offset=1.0))
+
+        assert unrestricted is not None
+        assert unrestricted.angle == pytest.approx(6.0, abs=1.0)
 
     @allure.title("Correcting the estimate removes the tilt")
     def test_correction_removes_tilt(self):
@@ -166,14 +214,17 @@ class TestTilt:
         assert defaults == TiltSettings()
         assert node.children["method"].has_value
         assert node.children["min_angle"].value == 0.3
+        assert node.children["max_center_offset"].has_value
 
         node.get_node("enabled").set_value(False)
         node.get_node("min_confidence").set_value(0.75)
+        node.get_node("max_center_offset").set_value(0.2)
 
         loaded = TiltSettings.from_node(node)
 
         assert loaded.enabled is False
         assert loaded.min_confidence == 0.75
+        assert loaded.max_center_offset == 0.2
         assert loaded.crop_mode == CROP_MODE_MAXIMUM_RECTANGLE
 
 

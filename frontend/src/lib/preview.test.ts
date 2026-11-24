@@ -179,6 +179,18 @@ describe("buildPreview", () => {
         expect((model.horizon!.y1 + model.horizon!.y2) / 2).toBeCloseTo(25);
     });
 
+    it("maps supporting segments into centered image coordinates", () => {
+        const model = buildPreview(
+            { width: 100, height: 100 },
+            tilt({
+                segments: [{ x1: 0, y1: 0, x2: 1, y2: 1, angle: 0, weight: 0.5 }],
+            }),
+            { angle: 0, cropMode: "maximum_valid_rectangle", target: 100 },
+        );
+
+        expect(model.supportLines).toEqual([{ x1: -50, y1: -50, x2: 50, y2: 50, weight: 0.5 }]);
+    });
+
     it("rotates the reference marker with the photo", () => {
         const model = buildPreview(
             { width: 100, height: 100 },

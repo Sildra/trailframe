@@ -203,11 +203,14 @@ class TestProcessingService:
         assert details["Confidence"].endswith("%")
         assert "Reference point" in details
         assert "Reason" not in details
+        assert int(details["Supporting lines"]) == len(meta["segments"])
         assert tilt["summary"].endswith("°")
         assert float(tilt["summary"].rstrip("°")) == pytest.approx(-2.0, abs=0.5)
         assert 0 <= meta["reference_point"]["x"] <= 1
         assert 0 <= meta["reference_point"]["y"] <= 1
         assert meta["line"]["x1"] < meta["line"]["x2"]
+        assert meta["segments"]
+        assert all(0 < segment["weight"] <= 1 for segment in meta["segments"])
 
         transcode = next(step for step in photo.processing if step["step"] == "rescale")
         assert transcode["details"]["Target size"] == "1080 px"

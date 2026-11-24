@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { normalizeProcessing, stepLabel, tiltOverlay } from "./processing";
+import { normalizeProcessing, stepLabel, tiltOverlay, tiltSegmentOpacity } from "./processing";
 
 describe("normalizeProcessing", () => {
     it("keeps the details and meta blocks verbatim", () => {
@@ -55,7 +55,29 @@ describe("tiltOverlay", () => {
         expect(tiltOverlay(step)).toEqual({
             line: { x1: 0.1, y1: 0.4, x2: 0.9, y2: 0.6 },
             reference: { x: 0.5, y: 0.5 },
+            segments: [],
         });
+    });
+
+    it("parses the recorded supporting segments", () => {
+        const [step] = normalizeProcessing([
+            {
+                step: "tilt",
+                meta: {
+                    line: { x1: 0.1, y1: 0.4, x2: 0.9, y2: 0.6 },
+                    segments: [
+                        { x1: 0.1, y1: 0.4, x2: 0.9, y2: 0.6, angle: -2.1, weight: 1 },
+                        { x1: 0, y1: 0, x2: 1, y2: 0, weight: 0.4 },
+                    ],
+                },
+            },
+        ]);
+
+        expect(tiltOverlay(step)?.segments).toEqual([
+            { x1: 0.1, y1: 0.4, x2: 0.9, y2: 0.6, angle: -2.1, weight: 1 },
+        ]);
+        expect(tiltSegmentOpacity(0)).toBeCloseTo(0.25);
+        expect(tiltSegmentOpacity(1)).toBeCloseTo(0.6);
     });
 
     it("falls back to the line midpoint", () => {

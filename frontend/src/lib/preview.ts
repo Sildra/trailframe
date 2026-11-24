@@ -1,4 +1,4 @@
-import type { ProcessingLine, ProcessingPoint } from "./processing";
+import type { ProcessingLine, ProcessingPoint, ProcessingSegment } from "./processing";
 import type { CropMode } from "./reprocess";
 
 export interface Size {
@@ -20,10 +20,17 @@ export interface Segment {
     y2: number;
 }
 
+export interface SupportLine extends Segment {
+    /** Strength relative to the strongest supporting segment, in 0..1. */
+    weight: number;
+}
+
 /** The detected horizon and reference point, in normalized (0..1) original coordinates. */
 export interface PreviewTilt {
     line: ProcessingLine | null;
     reference: ProcessingPoint | null;
+    /** Supporting inliers recorded by the detector. Empty on older records. */
+    segments?: readonly ProcessingSegment[];
     /** The estimate recorded on the tilt step, in degrees, when there is no line. */
     detectedAngle: number | null;
 }
@@ -54,6 +61,8 @@ export interface PreviewModel {
     output: Size;
     /** Detected horizon, in centered image coordinates (draw inside the rotating group). */
     horizon: Segment | null;
+    /** Supporting inliers, in centered image coordinates (draw inside the rotating group). */
+    supportLines: SupportLine[];
     /** Level target line, in canvas coordinates. */
     level: Segment;
     /** Reference marker, in canvas coordinates. */
@@ -183,6 +192,13 @@ function centered(point: ProcessingPoint, image: Size): { x: number; y: number }
     return { x: point.x * image.width - image.width / 2, y: point.y * image.height - image.height / 2 };
 }
 
+function centeredSegment(line: ProcessingLine, image: Size): Segment {
+    const start = centered({ x: line.x1, y: line.y1 }, image);
+    const end = centered({ x: line.x2, y: line.y2 }, image);
+
+    return { x1: start.x, y1: start.y, x2: end.x, y2: end.y };
+}
+
 /** Rotates a centered point by the same visual rotation the SVG group applies (`-angle`). */
 function toCanvas(point: { x: number; y: number }, angle: number, canvas: Size): { x: number; y: number } {
     const theta = radians(angle);
@@ -263,6 +279,10 @@ export function buildPreview(image: Size, tilt: PreviewTilt, options: PreviewOpt
         cropSize: cropSizeInPixels,
         output,
         horizon,
+        supportLines: (tilt.segments ?? []).map((segment) => ({
+            ...centeredSegment(segment, image),
+            weight: segment.weight,
+        })),
         level: {
             x1: referenceOnCanvas.x - diagonal / 2,
             y1: referenceOnCanvas.y,

@@ -1,6 +1,7 @@
 import { useEffect, useId, useState } from "react";
 import { Box, CircularProgress, Typography } from "@mui/material";
 import { applyColorPreview } from "../lib/colorPreview";
+import { tiltSegmentOpacity } from "../lib/processing";
 import type { PreviewModel } from "../lib/preview";
 import type { CorrectionSettings } from "../lib/reprocess";
 
@@ -100,7 +101,7 @@ export default function ProcessingPreview({
         );
     }
 
-    const { image, canvas, padding, crop, trims, horizon, level, marker, angle } = model;
+    const { image, canvas, padding, crop, trims, horizon, supportLines, level, marker, angle } = model;
     const viewX = -padding;
     const viewY = -padding;
     const viewWidth = canvas.width + padding * 2;
@@ -140,6 +141,19 @@ export default function ProcessingPreview({
                             height={image.height}
                             preserveAspectRatio="none"
                         />
+                        {supportLines.map((segment, index) => (
+                            <line
+                                key={`support-${index}`}
+                                x1={segment.x1}
+                                y1={segment.y1}
+                                x2={segment.x2}
+                                y2={segment.y2}
+                                stroke="#ff5252"
+                                strokeOpacity={tiltSegmentOpacity(segment.weight)}
+                                strokeWidth={1}
+                                vectorEffect="non-scaling-stroke"
+                            />
+                        ))}
                         {horizon && (
                             <line
                                 x1={horizon.x1}

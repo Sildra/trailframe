@@ -10,7 +10,7 @@ import {
     OBJECT_OVERLAY_ALPHA,
     type ObjectHover,
 } from "../lib/objectBoxes";
-import type { TiltOverlay } from "../lib/processing";
+import { tiltSegmentOpacity, type TiltOverlay } from "../lib/processing";
 
 interface ImageViewerProps {
     photoId: number | null;
@@ -134,7 +134,7 @@ export default function ImageViewer({ photoId, version = 0, hoveredObject, hover
                     {hoveredTilt &&
                         dims &&
                         (() => {
-                            const { line, reference } = hoveredTilt;
+                            const { line, reference, segments } = hoveredTilt;
                             const toX = (x: number) => dims.ox + x * dims.nw * dims.scale;
                             const toY = (y: number) => dims.oy + y * dims.nh * dims.scale;
                             const x1 = toX(line.x1);
@@ -167,6 +167,18 @@ export default function ImageViewer({ photoId, version = 0, hoveredObject, hover
                                         </clipPath>
                                     </defs>
                                     <g clipPath="url(#tilt-clip)">
+                                        {segments.map((segment, index) => (
+                                            <line
+                                                key={`support-${index}`}
+                                                x1={toX(segment.x1)}
+                                                y1={toY(segment.y1)}
+                                                x2={toX(segment.x2)}
+                                                y2={toY(segment.y2)}
+                                                stroke="red"
+                                                strokeOpacity={tiltSegmentOpacity(segment.weight)}
+                                                strokeWidth={1}
+                                            />
+                                        ))}
                                         <line x1={x1} y1={y1} x2={x2} y2={y2} stroke="red" strokeWidth={2} />
                                         <line
                                             x1={rx - half}

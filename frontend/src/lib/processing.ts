@@ -10,6 +10,13 @@ export interface ProcessingPoint {
     y: number;
 }
 
+/** A supporting line recorded by the tilt detector. */
+export interface ProcessingSegment extends ProcessingLine {
+    angle: number;
+    /** Strength relative to the strongest segment, in 0..1. */
+    weight: number;
+}
+
 /**
  * A processing step in the two-stage layout.
  *
@@ -28,6 +35,14 @@ export interface ProcessingStep {
 export interface TiltOverlay {
     line: ProcessingLine;
     reference: ProcessingPoint;
+    segments: ProcessingSegment[];
+}
+
+/** Subtle opacity for a supporting line, stronger for well-supported ones. */
+export function tiltSegmentOpacity(weight: number): number {
+    const bounded = Math.max(0, Math.min(1, weight));
+
+    return 0.25 + 0.35 * bounded;
 }
 
 function isNumber(value: unknown): value is number {
@@ -98,6 +113,16 @@ export function parseLine(value: unknown): ProcessingLine | null {
     return { x1: value.x1, y1: value.y1, x2: value.x2, y2: value.y2 };
 }
 
+export function parseSegment(value: unknown): ProcessingSegment | null {
+    const line = parseLine(value);
+
+    if (!line || !isRecord(value) || !isNumber(value.angle) || !isNumber(value.weight)) {
+        return null;
+    }
+
+    return { ...line, angle: value.angle, weight: value.weight };
+}
+
 export function parsePoint(value: unknown): ProcessingPoint | null {
     if (!isRecord(value) || !isNumber(value.x) || !isNumber(value.y)) {
         return null;
@@ -121,6 +146,12 @@ export function tiltOverlay(entry: ProcessingStep): TiltOverlay | null {
         x: (line.x1 + line.x2) / 2,
         y: (line.y1 + line.y2) / 2,
     };
+    const segments = Array.isArray(entry.meta.segments)
+        ? entry.meta.segments.flatMap((value) => {
+              const segment = parseSegment(value);
+              return segment ? [segment] : [];
+          })
+        : [];
 
-    return { line, reference };
+    return { line, reference, segments };
 }

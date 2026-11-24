@@ -31,6 +31,7 @@ from trailframe.services.processors.processor import (
 )
 
 MAX_MANUAL_ANGLE = 45.0
+MAX_STORED_SEGMENTS = 64
 
 DEFAULT_METHOD = "hough"
 MANUAL_METHOD = "manual"
@@ -61,6 +62,7 @@ class TiltSettings:
     max_detection_angle: float = 12.0
     min_line_length_ratio: float = 0.08
     inlier_tolerance: float = 1.5
+    max_center_offset: float = 0.35
     auto_apply: bool = True
     crop_mode: str = CROP_MODE_MAXIMUM_RECTANGLE
 
@@ -111,6 +113,13 @@ class TiltSettings:
                     "inlier_tolerance", "Angle tolerance for inlier lines (degrees)", cls.inlier_tolerance
                 )
             ),
+            max_center_offset=float(
+                node.get_path_value(
+                    "max_center_offset",
+                    "Maximum normalized distance of a detected line midpoint from the image centre (1 disables)",
+                    cls.max_center_offset,
+                )
+            ),
             auto_apply=as_bool(
                 node.get_path_value(
                     "auto_apply", "Rotate the alternatives when the estimate is trusted", cls.auto_apply
@@ -118,6 +127,19 @@ class TiltSettings:
             ),
             crop_mode=str(node.get_path_value("crop_mode", "maximum_valid_rectangle or none", cls.crop_mode)),
         )
+
+
+@dataclass(frozen=True)
+class TiltSegment:
+    """A supporting Hough segment in normalized image coordinates.
+
+    ``weight`` is relative to the strongest supporting segment (0..1), so the
+    frontend can render faint lines for weak support and a strong primary line.
+    """
+
+    line: tuple[float, float, float, float]
+    angle: float
+    weight: float
 
 
 @dataclass(frozen=True)
@@ -131,7 +153,8 @@ class TiltEstimate:
 
     ``line`` is the best supporting segment as normalized coordinates
     (``x1, y1, x2, y2`` in ``0..1`` of the analysis image), so the UI can draw
-    the detected horizon. :attr:`reference_point` is its midpoint.
+    the detected horizon. :attr:`reference_point` is its midpoint. ``segments``
+    keeps the other inliers so the provenance can show what the estimate used.
     """
 
     angle: float
@@ -139,6 +162,7 @@ class TiltEstimate:
     method: str
     support: float = 0.0
     line: tuple[float, float, float, float] | None = None
+    segments: tuple[TiltSegment, ...] = ()
 
     @property
     def reference_point(self) -> tuple[float, float] | None:
@@ -242,7 +266,9 @@ class HoughTiltDetector:
     Near-horizontal segments are weighted by length, the dominant angle is the
     weighted median, and the estimate is refined on the inliers. Confidence
     combines the share of line length supporting the angle with the absolute
-    line support, so a single short edge cannot trigger a correction.
+    line support, so a single short edge cannot trigger a correction. Segments
+    whose midpoint is too far from the image centre are ignored, keeping edges
+    at the frame border from dominating the estimate.
     """
 
     name: ClassVar[str] = "hough"
@@ -255,6 +281,7 @@ class HoughTiltDetector:
             return None
 
         width = gray.shape[1]
+        height = gray.shape[0]
         short_edge = min(gray.shape[:2])
         min_line_length = max(8, int(short_edge * max(0.0, settings.min_line_length_ratio)))
 
@@ -278,6 +305,7 @@ class HoughTiltDetector:
         angles: list[float] = []
         weights: list[float] = []
         segments: list[tuple[float, float, float, float, float, float]] = []
+        max_center_offset = max(0.0, float(settings.max_center_offset))
 
         for x1, y1, x2, y2 in lines.reshape(-1, 4):
             length = math.hypot(float(x2 - x1), float(y2 - y1))
@@ -288,6 +316,12 @@ class HoughTiltDetector:
             angle = _slope_angle(float(x1), float(y1), float(x2), float(y2))
 
             if abs(angle) > settings.max_detection_angle:
+                continue
+
+            midpoint_x = (float(x1) + float(x2)) / (2.0 * width)
+            midpoint_y = (float(y1) + float(y2)) / (2.0 * height)
+
+            if math.hypot(midpoint_x - 0.5, midpoint_y - 0.5) > max_center_offset:
                 continue
 
             angles.append(angle)
@@ -316,7 +350,19 @@ class HoughTiltDetector:
         agreement = inlier_weight / total_weight if total_weight > 0 else 0.0
         support = 1.0 - math.exp(-inlier_weight / max(1.0, 0.20 * width))
         confidence = max(0.0, min(1.0, agreement * support))
-        height = gray.shape[0]
+        strongest = max((inlier[1] for inlier in inliers), default=1.0)
+        supporting = sorted(
+            (
+                TiltSegment(
+                    line=_normalized_line((x1, y1, x2, y2), width, height),
+                    angle=angle,
+                    weight=min(1.0, weight / strongest),
+                )
+                for angle, weight, x1, y1, x2, y2 in inliers
+            ),
+            key=lambda item: item.weight,
+            reverse=True,
+        )[:MAX_STORED_SEGMENTS]
 
         return TiltEstimate(
             angle=angle,
@@ -324,6 +370,7 @@ class HoughTiltDetector:
             method=self.name,
             support=inlier_weight,
             line=_normalized_line(best[2:], width, height),
+            segments=tuple(supporting),
         )
 
 
@@ -450,6 +497,20 @@ class TiltProcessor(Processor):
                     "x2": round(estimate.line[2], 4),
                     "y2": round(estimate.line[3], 4),
                 }
+
+            if estimate.segments:
+                details["Supporting lines"] = str(len(estimate.segments))
+                meta["segments"] = [
+                    {
+                        "x1": round(segment.line[0], 4),
+                        "y1": round(segment.line[1], 4),
+                        "x2": round(segment.line[2], 4),
+                        "y2": round(segment.line[3], 4),
+                        "angle": round(segment.angle, 2),
+                        "weight": round(segment.weight, 3),
+                    }
+                    for segment in estimate.segments
+                ]
 
         return {"step": self.step, "summary": summary, "details": details, "meta": meta}
 
