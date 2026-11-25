@@ -172,7 +172,7 @@ export function lineAngle(line: ProcessingLine, image: Size): number {
  * manual mode uses the entered angle; off applies nothing.
  */
 export function effectiveAngle(
-    mode: "auto" | "off" | "manual",
+    mode: "auto" | "automatic" | "off" | "manual",
     manualAngle: number,
     detectedAngle: number | null,
     applied: boolean,

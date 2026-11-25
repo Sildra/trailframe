@@ -41,6 +41,8 @@ class VibranceOverride:
     """Per-photo override of the vibrance step."""
 
     enabled: bool | None = None
+    mode: str | None = None
+    preset: str | None = None
     strength: float | None = None
 
 

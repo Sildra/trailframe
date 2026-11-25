@@ -638,8 +638,103 @@ class TestReprocessAPI:
         steps = {step["step"]: step for step in response.json()["processing"]}
         assert steps["exposure"]["meta"]["exposure"] == 1
         assert steps["exposure"]["meta"]["gamma"] == 1.2
+        assert steps["exposure"]["meta"]["mode"] == "manual"
+        assert steps["exposure"]["meta"]["preset"] == "custom"
         assert steps["vibrance"]["meta"]["strength"] == 0.8
         assert steps["sharpening"]["meta"]["amount"] == 0.7
+
+    @allure.title("Automatic corrections use the server-side preset, not the submitted settings")
+    def test_reprocess_endpoint_automatic_presets(self, app, tmp_path):
+        photo = _seed_photo(app, tmp_path)
+
+        response = app.post(
+            f"/api/photos/{photo.id}/reprocess",
+            json={
+                "alternatives": [1080],
+                "main": 1080,
+                "rescan": False,
+                "exposure": {"mode": "automatic", "preset": "strong", "exposure": 99, "gamma": 5},
+                "white_balance": {
+                    "mode": "automatic",
+                    "preset": "warm",
+                    "method": "manual",
+                    "strength": 0,
+                    "temperature": -1,
+                    "tint": -1,
+                },
+            },
+        )
+
+        assert response.status_code == 200
+        steps = {step["step"]: step for step in response.json()["processing"]}
+        exposure = steps["exposure"]
+        white_balance = steps["white_balance"]
+
+        assert exposure["meta"]["exposure"] == 0.6
+        assert exposure["meta"]["gamma"] == 0.9
+        assert exposure["meta"]["mode"] == "automatic"
+        assert exposure["meta"]["preset"] == "strong"
+        assert exposure["details"]["Mode"] == "Automatic"
+        assert exposure["details"]["Preset"] == "Strong"
+        assert white_balance["meta"]["method"] == "gray_world"
+        assert white_balance["meta"]["strength"] == 0.45
+        assert white_balance["meta"]["temperature"] == 0.15
+        assert white_balance["meta"]["tint"] == 0.05
+        assert white_balance["meta"]["preset"] == "warm"
+
+    @allure.title("Off corrections record their mode without keeping editable settings")
+    def test_reprocess_endpoint_off_correction(self, app, tmp_path):
+        photo = _seed_photo(app, tmp_path)
+        processor = next(item for item in ProcessingService._processors if item.name == "Vibrance")
+        previously_enabled = processor._enabled
+        processor._enabled = True
+
+        try:
+            response = app.post(
+                f"/api/photos/{photo.id}/reprocess",
+                json={
+                    "alternatives": [1080],
+                    "main": 1080,
+                    "rescan": False,
+                    "vibrance": {"mode": "off", "preset": "natural", "strength": 0.9},
+                },
+            )
+        finally:
+            processor._enabled = previously_enabled
+
+        assert response.status_code == 200
+        vibrance = next(step for step in response.json()["processing"] if step["step"] == "vibrance")
+
+        assert vibrance["summary"] == "Not applied"
+        assert vibrance["details"]["Mode"] == "Off"
+        assert vibrance["details"]["Reason"] == "disabled"
+        assert vibrance["meta"]["applied"] is False
+        assert vibrance["meta"]["mode"] == "off"
+        assert "preset" not in vibrance["meta"]
+        assert "strength" not in vibrance["meta"]
+
+    @allure.title("A manual tilt preset keeps the submitted angle and crop mode")
+    def test_reprocess_endpoint_manual_tilt_preset(self, app, tmp_path):
+        photo = _seed_photo(app, tmp_path)
+
+        response = app.post(
+            f"/api/photos/{photo.id}/reprocess",
+            json={
+                "alternatives": [1080],
+                "main": 1080,
+                "rescan": False,
+                "tilt": {"mode": "manual", "preset": "standard", "angle": 5, "crop_mode": "none"},
+            },
+        )
+
+        assert response.status_code == 200
+        tilt = next(step for step in response.json()["processing"] if step["step"] == "tilt")
+
+        assert tilt["details"]["Detection method"] == "manual"
+        assert tilt["summary"] == "+5.00°"
+        assert tilt["meta"]["mode"] == "manual"
+        assert tilt["meta"]["preset"] == "standard"
+        assert tilt["meta"]["crop_mode"] == "none"
 
     @allure.title("The reprocess endpoint rejects unknown photos and malformed options")
     def test_reprocess_endpoint_errors(self, app, tmp_path):
@@ -659,6 +754,14 @@ class TestReprocessAPI:
             f"/api/photos/{photo.id}/reprocess",
             json={"tilt": {"mode": "auto", "crop_mode": "sideways"}, "rescan": False},
         )
+        unknown_preset = app.post(
+            f"/api/photos/{photo.id}/reprocess",
+            json={"exposure": {"mode": "manual", "preset": "nope"}, "rescan": False},
+        )
+        custom_automatic = app.post(
+            f"/api/photos/{photo.id}/reprocess",
+            json={"exposure": {"mode": "automatic", "preset": "custom"}, "rescan": False},
+        )
         bad_exposure = app.post(
             f"/api/photos/{photo.id}/reprocess", json={"exposure": {"enabled": True, "exposure": 99}, "rescan": False}
         )
@@ -668,4 +771,6 @@ class TestReprocessAPI:
         assert manual_without_angle.status_code == 400
         assert unknown_mode.status_code == 400
         assert unknown_crop.status_code == 400
+        assert unknown_preset.status_code == 400
+        assert custom_automatic.status_code == 400
         assert bad_exposure.status_code == 400

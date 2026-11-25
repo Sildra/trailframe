@@ -38,11 +38,21 @@ import {
     MAX_TARGETS,
     MAX_TARGET_SIZE,
     MIN_TARGET_SIZE,
+    applyCorrectionMode,
+    applyCorrectionPreset,
+    applyTiltMode,
+    applyTiltPreset,
     defaultReprocessOptions,
     parseAngle,
+    presetKeys,
+    presetLabel,
+    presetValues,
     toReprocessPayload,
     validateOptions,
+    type CorrectionKey,
+    type CorrectionMode,
     type CropMode,
+    type PresetTarget,
     type ReprocessOptions,
     type TiltMode,
 } from "../lib/reprocess";
@@ -136,6 +146,128 @@ function DetailRows({ details }: { details: Record<string, string> }) {
     );
 }
 
+const PRESET_VALUE_LABELS: Record<string, string> = {
+    exposure: "Exposure",
+    gamma: "Gamma",
+    method: "Method",
+    strength: "Strength",
+    temperature: "Temperature",
+    tint: "Tint",
+    low_percentile: "Black point",
+    high_percentile: "White point",
+    clip_limit: "Clip limit",
+    tile_grid: "Tile grid",
+    min_confidence: "Minimum confidence",
+    max_angle: "Maximum angle",
+    crop_mode: "Crop mode",
+    radius: "Radius",
+    sigma_color: "Colour sigma",
+    sigma_space: "Spatial sigma",
+    amount: "Amount",
+    threshold: "Threshold",
+};
+
+function presetValueText(key: string, value: unknown): string {
+    if (typeof value !== "number" && typeof value !== "string") {
+        return String(value);
+    }
+
+    if (key === "method") {
+        const methods: Record<string, string> = {
+            gray_world: "Gray World",
+            manual: "Manual",
+            s_curve: "S-curve",
+            adaptive: "Adaptive",
+            bilateral: "Bilateral",
+            nl_means: "Non-local means",
+        };
+        return methods[String(value)] ?? String(value);
+    }
+
+    if (key === "crop_mode") {
+        return value === "none" ? "Keep expanded canvas" : "Maximum valid rectangle";
+    }
+
+    if (key === "strength" || key === "min_confidence") {
+        return `${Math.round(Number(value) * 100)}%`;
+    }
+
+    if (key === "exposure") {
+        return `${Number(value) > 0 ? "+" : ""}${Number(value).toFixed(2)} EV`;
+    }
+
+    if (key === "gamma") {
+        return Number(value).toFixed(2);
+    }
+
+    if (key === "max_angle") {
+        return `${Number(value).toFixed(1)}°`;
+    }
+
+    return String(value);
+}
+
+function ModeSelector({ mode, onChange }: { mode: CorrectionMode; onChange: (mode: CorrectionMode) => void }) {
+    return (
+        <RadioGroup row value={mode} onChange={(event) => onChange(event.target.value as CorrectionMode)}>
+            <FormControlLabel value="off" control={<Radio size="small" />} label="Off" />
+            <FormControlLabel value="automatic" control={<Radio size="small" />} label="Automatic" />
+            <FormControlLabel value="manual" control={<Radio size="small" />} label="Manual" />
+        </RadioGroup>
+    );
+}
+
+function PresetSelect({
+    target,
+    value,
+    onChange,
+}: {
+    target: PresetTarget;
+    value: string;
+    onChange: (preset: string) => void;
+}) {
+    const names = presetKeys(target);
+
+    if (value === "custom" && !names.includes("custom")) {
+        names.push("custom");
+    }
+
+    return (
+        <TextField
+            select
+            size="small"
+            label="Preset"
+            value={value}
+            onChange={(event) => onChange(event.target.value)}
+        >
+            {names.map((name) => (
+                <MenuItem key={name} value={name}>
+                    {presetLabel(target, name)}
+                </MenuItem>
+            ))}
+        </TextField>
+    );
+}
+
+function AutomaticSummary({ target, preset }: { target: PresetTarget; preset: string }) {
+    const values = presetValues(target, preset, "automatic");
+    const details = Object.fromEntries(
+        Object.entries(values).map(([key, value]) => [
+            PRESET_VALUE_LABELS[key] ?? key,
+            presetValueText(key, value),
+        ]),
+    );
+
+    return (
+        <Box sx={{ display: "flex", flexDirection: "column", gap: 0.75 }}>
+            <Typography variant="caption" color="text.secondary">
+                Applied automatically from the {presetLabel(target, preset)} preset. Settings are locked.
+            </Typography>
+            <DetailRows details={details} />
+        </Box>
+    );
+}
+
 function SizeRow({ label, width, height }: { label: string; width: number; height: number }) {
     return (
         <Box sx={{ display: "flex", justifyContent: "space-between", gap: 1 }}>
@@ -186,48 +318,19 @@ function SliderRow({
     );
 }
 
-function CorrectionAccordion({
-    title,
-    enabled,
-    onEnabled,
-    children,
-}: {
-    title: string;
-    enabled: boolean;
-    onEnabled: (value: boolean) => void;
-    children: ReactNode;
-}) {
+function CorrectionAccordion({ title, children }: { title: string; children: ReactNode }) {
     return (
         <Accordion disableGutters>
             <AccordionSummary
                 expandIcon={<ExpandMoreIcon />}
                 sx={{ fontWeight: 600, fontSize: 14, minHeight: 40 }}
             >
-                <Box sx={{ display: "flex", alignItems: "center", gap: 1, width: "100%" }}>
-                    <span>{title}</span>
-                    <Box sx={{ flex: 1 }} />
-                    <Switch
-                        size="small"
-                        checked={enabled}
-                        onChange={(event) => onEnabled(event.target.checked)}
-                        onClick={(event) => event.stopPropagation()}
-                        slotProps={{ input: { "aria-label": `Enable ${title}` } }}
-                    />
-                </Box>
+                <span>{title}</span>
             </AccordionSummary>
             <AccordionDetails sx={{ display: "flex", flexDirection: "column", gap: 1.5 }}>{children}</AccordionDetails>
         </Accordion>
     );
 }
-
-type CorrectionKey =
-    | "exposure"
-    | "whiteBalance"
-    | "contrast"
-    | "localContrast"
-    | "vibrance"
-    | "noiseReduction"
-    | "sharpening";
 
 export default function ReprocessDialog({ photo, onClose, onUpdated }: ReprocessDialogProps) {
     const [optionsById, setOptionsById] = useState<Record<number, ReprocessOptions>>(() =>
@@ -527,22 +630,84 @@ export default function ReprocessDialog({ photo, onClose, onUpdated }: Reprocess
         }
 
         const id = activePhoto.id;
+        const transportKeys = new Set(["mode", "preset", "enabled"]);
+        const edited = Object.keys(patch).some((field) => !transportKeys.has(field));
 
         setOptionsById((current) => {
             const existing = current[id] ?? defaultReprocessOptions(activePhoto);
+            const correction = { ...existing[key], ...patch } as ReprocessOptions[K];
+
+            // Editing any value leaves the named preset behind.
+            if (edited) {
+                correction.mode = "manual";
+                correction.preset = "custom";
+                correction.enabled = true;
+            }
 
             return {
                 ...current,
-                [id]: { ...existing, [key]: { ...existing[key], ...patch } },
+                [id]: { ...existing, [key]: correction },
             };
         });
+    };
+
+    const changeCorrectionMode = (key: CorrectionKey, mode: CorrectionMode) => {
+        if (activePhoto.id == null) {
+            return;
+        }
+
+        const id = activePhoto.id;
+
+        setOptionsById((current) => ({
+            ...current,
+            [id]: applyCorrectionMode(current[id] ?? defaultReprocessOptions(activePhoto), key, mode),
+        }));
+    };
+
+    const changeCorrectionPreset = (key: CorrectionKey, name: string) => {
+        if (activePhoto.id == null) {
+            return;
+        }
+
+        const id = activePhoto.id;
+
+        setOptionsById((current) => ({
+            ...current,
+            [id]: applyCorrectionPreset(current[id] ?? defaultReprocessOptions(activePhoto), key, name),
+        }));
+    };
+
+    const changeTiltMode = (mode: TiltMode) => {
+        if (activePhoto.id == null) {
+            return;
+        }
+
+        const id = activePhoto.id;
+
+        setOptionsById((current) => ({
+            ...current,
+            [id]: applyTiltMode(current[id] ?? defaultReprocessOptions(activePhoto), mode),
+        }));
+    };
+
+    const changeTiltPreset = (name: string) => {
+        if (activePhoto.id == null) {
+            return;
+        }
+
+        const id = activePhoto.id;
+
+        setOptionsById((current) => ({
+            ...current,
+            [id]: applyTiltPreset(current[id] ?? defaultReprocessOptions(activePhoto), name),
+        }));
     };
 
     const setAngle = (value: number) => {
         const rounded = Math.round(value * 100) / 100;
 
         setActiveAngleText(formatAngle(rounded));
-        update({ angle: rounded });
+        update({ angle: rounded, tiltPreset: "custom" });
     };
 
     function setActiveAngleText(text: string) {
@@ -954,182 +1119,272 @@ export default function ReprocessDialog({ photo, onClose, onUpdated }: Reprocess
                             </AccordionDetails>
                         </Accordion>
                         <Box sx={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
-                            <CorrectionAccordion
-                                title="Exposure"
-                                enabled={activeOptions.exposure.enabled}
-                                onEnabled={(enabled) => patchCorrection("exposure", { enabled })}
-                            >
-                                <SliderRow
-                                    label="Exposure"
-                                    value={activeOptions.exposure.exposure}
-                                    min={-6}
-                                    max={6}
-                                    step={0.05}
-                                    format={(value) => `${value > 0 ? "+" : ""}${value.toFixed(2)} EV`}
-                                    onChange={(exposure) => patchCorrection("exposure", { exposure })}
+                            <CorrectionAccordion title="Exposure">
+                                <ModeSelector
+                                    mode={activeOptions.exposure.mode}
+                                    onChange={(mode) => changeCorrectionMode("exposure", mode)}
                                 />
-                                <SliderRow
-                                    label="Gamma"
-                                    value={activeOptions.exposure.gamma}
-                                    min={0.2}
-                                    max={5}
-                                    step={0.05}
-                                    format={(value) => value.toFixed(2)}
-                                    onChange={(gamma) => patchCorrection("exposure", { gamma })}
-                                />
-                            </CorrectionAccordion>
-
-                            <CorrectionAccordion
-                                title="White balance"
-                                enabled={activeOptions.whiteBalance.enabled}
-                                onEnabled={(enabled) => patchCorrection("whiteBalance", { enabled })}
-                            >
-                                <TextField
-                                    select
-                                    size="small"
-                                    label="Method"
-                                    value={activeOptions.whiteBalance.method}
-                                    onChange={(event) =>
-                                        patchCorrection("whiteBalance", {
-                                            method: event.target.value as "gray_world" | "manual",
-                                        })
-                                    }
-                                >
-                                    <MenuItem value="gray_world">Gray World</MenuItem>
-                                    <MenuItem value="manual">Manual</MenuItem>
-                                </TextField>
-                                <SliderRow
-                                    label="Strength"
-                                    value={activeOptions.whiteBalance.strength}
-                                    min={0}
-                                    max={1}
-                                    step={0.01}
-                                    format={(value) => `${Math.round(value * 100)}%`}
-                                    onChange={(strength) => patchCorrection("whiteBalance", { strength })}
-                                />
-                                {activeOptions.whiteBalance.method === "manual" && (
+                                {activeOptions.exposure.mode !== "off" && (
+                                    <PresetSelect
+                                        target="exposure"
+                                        value={activeOptions.exposure.preset}
+                                        onChange={(name) => changeCorrectionPreset("exposure", name)}
+                                    />
+                                )}
+                                {activeOptions.exposure.mode === "automatic" ? (
+                                    <AutomaticSummary target="exposure" preset={activeOptions.exposure.preset} />
+                                ) : activeOptions.exposure.mode === "manual" ? (
                                     <>
                                         <SliderRow
-                                            label="Temperature"
-                                            value={activeOptions.whiteBalance.temperature}
-                                            min={-1}
-                                            max={1}
-                                            step={0.01}
-                                            format={(value) => value.toFixed(2)}
-                                            onChange={(temperature) => patchCorrection("whiteBalance", { temperature })}
+                                            label="Exposure"
+                                            value={activeOptions.exposure.exposure}
+                                            min={-6}
+                                            max={6}
+                                            step={0.05}
+                                            format={(value) => `${value > 0 ? "+" : ""}${value.toFixed(2)} EV`}
+                                            onChange={(exposure) => patchCorrection("exposure", { exposure })}
                                         />
                                         <SliderRow
-                                            label="Tint"
-                                            value={activeOptions.whiteBalance.tint}
-                                            min={-1}
-                                            max={1}
-                                            step={0.01}
+                                            label="Gamma"
+                                            value={activeOptions.exposure.gamma}
+                                            min={0.2}
+                                            max={5}
+                                            step={0.05}
                                             format={(value) => value.toFixed(2)}
-                                            onChange={(tint) => patchCorrection("whiteBalance", { tint })}
+                                            onChange={(gamma) => patchCorrection("exposure", { gamma })}
                                         />
                                     </>
+                                ) : (
+                                    <Typography variant="caption" color="text.secondary">
+                                        The correction is disabled.
+                                    </Typography>
                                 )}
                             </CorrectionAccordion>
 
-                            <CorrectionAccordion
-                                title="Contrast"
-                                enabled={activeOptions.contrast.enabled}
-                                onEnabled={(enabled) => patchCorrection("contrast", { enabled })}
-                            >
-                                <TextField
-                                    select
-                                    size="small"
-                                    label="Method"
-                                    value={activeOptions.contrast.method}
-                                    onChange={(event) =>
-                                        patchCorrection("contrast", {
-                                            method: event.target.value as "s_curve" | "adaptive",
-                                        })
-                                    }
-                                >
-                                    <MenuItem value="s_curve">S-curve</MenuItem>
-                                    <MenuItem value="adaptive">Adaptive</MenuItem>
-                                </TextField>
-                                <SliderRow
-                                    label="Strength"
-                                    value={activeOptions.contrast.strength}
-                                    min={0}
-                                    max={1}
-                                    step={0.01}
-                                    format={(value) => `${Math.round(value * 100)}%`}
-                                    onChange={(strength) => patchCorrection("contrast", { strength })}
+                            <CorrectionAccordion title="White balance">
+                                <ModeSelector
+                                    mode={activeOptions.whiteBalance.mode}
+                                    onChange={(mode) => changeCorrectionMode("whiteBalance", mode)}
                                 />
-                                {activeOptions.contrast.method === "adaptive" && (
+                                {activeOptions.whiteBalance.mode !== "off" && (
+                                    <PresetSelect
+                                        target="whiteBalance"
+                                        value={activeOptions.whiteBalance.preset}
+                                        onChange={(name) => changeCorrectionPreset("whiteBalance", name)}
+                                    />
+                                )}
+                                {activeOptions.whiteBalance.mode === "automatic" ? (
+                                    <AutomaticSummary target="whiteBalance" preset={activeOptions.whiteBalance.preset} />
+                                ) : activeOptions.whiteBalance.mode === "manual" ? (
                                     <>
-                                        <SliderRow
-                                            label="Black point percentile"
-                                            value={activeOptions.contrast.low_percentile}
-                                            min={0}
-                                            max={100}
-                                            step={1}
-                                            onChange={(low_percentile) => patchCorrection("contrast", { low_percentile })}
-                                        />
-                                        <SliderRow
-                                            label="White point percentile"
-                                            value={activeOptions.contrast.high_percentile}
-                                            min={0}
-                                            max={100}
-                                            step={1}
-                                            onChange={(high_percentile) =>
-                                                patchCorrection("contrast", { high_percentile })
+                                        <TextField
+                                            select
+                                            size="small"
+                                            label="Method"
+                                            value={activeOptions.whiteBalance.method}
+                                            onChange={(event) =>
+                                                patchCorrection("whiteBalance", {
+                                                    method: event.target.value as "gray_world" | "manual",
+                                                })
                                             }
+                                        >
+                                            <MenuItem value="gray_world">Gray World</MenuItem>
+                                            <MenuItem value="manual">Manual</MenuItem>
+                                        </TextField>
+                                        <SliderRow
+                                            label="Strength"
+                                            value={activeOptions.whiteBalance.strength}
+                                            min={0}
+                                            max={1}
+                                            step={0.01}
+                                            format={(value) => `${Math.round(value * 100)}%`}
+                                            onChange={(strength) => patchCorrection("whiteBalance", { strength })}
                                         />
+                                        {activeOptions.whiteBalance.method === "manual" && (
+                                            <>
+                                                <SliderRow
+                                                    label="Temperature"
+                                                    value={activeOptions.whiteBalance.temperature}
+                                                    min={-1}
+                                                    max={1}
+                                                    step={0.01}
+                                                    format={(value) => value.toFixed(2)}
+                                                    onChange={(temperature) =>
+                                                        patchCorrection("whiteBalance", { temperature })
+                                                    }
+                                                />
+                                                <SliderRow
+                                                    label="Tint"
+                                                    value={activeOptions.whiteBalance.tint}
+                                                    min={-1}
+                                                    max={1}
+                                                    step={0.01}
+                                                    format={(value) => value.toFixed(2)}
+                                                    onChange={(tint) => patchCorrection("whiteBalance", { tint })}
+                                                />
+                                            </>
+                                        )}
                                     </>
+                                ) : (
+                                    <Typography variant="caption" color="text.secondary">
+                                        The correction is disabled.
+                                    </Typography>
                                 )}
                             </CorrectionAccordion>
 
-                            <CorrectionAccordion
-                                title="Local contrast"
-                                enabled={activeOptions.localContrast.enabled}
-                                onEnabled={(enabled) => patchCorrection("localContrast", { enabled })}
-                            >
-                                <SliderRow
-                                    label="Clip limit"
-                                    value={activeOptions.localContrast.clip_limit}
-                                    min={0.01}
-                                    max={20}
-                                    step={0.1}
-                                    format={(value) => value.toFixed(2)}
-                                    onChange={(clip_limit) => patchCorrection("localContrast", { clip_limit })}
+                            <CorrectionAccordion title="Contrast">
+                                <ModeSelector
+                                    mode={activeOptions.contrast.mode}
+                                    onChange={(mode) => changeCorrectionMode("contrast", mode)}
                                 />
-                                <SliderRow
-                                    label="Tile grid"
-                                    value={activeOptions.localContrast.tile_grid}
-                                    min={1}
-                                    max={64}
-                                    step={1}
-                                    onChange={(tile_grid) => patchCorrection("localContrast", { tile_grid })}
-                                />
-                                <SliderRow
-                                    label="Strength"
-                                    value={activeOptions.localContrast.strength}
-                                    min={0}
-                                    max={1}
-                                    step={0.01}
-                                    format={(value) => `${Math.round(value * 100)}%`}
-                                    onChange={(strength) => patchCorrection("localContrast", { strength })}
-                                />
+                                {activeOptions.contrast.mode !== "off" && (
+                                    <PresetSelect
+                                        target="contrast"
+                                        value={activeOptions.contrast.preset}
+                                        onChange={(name) => changeCorrectionPreset("contrast", name)}
+                                    />
+                                )}
+                                {activeOptions.contrast.mode === "automatic" ? (
+                                    <AutomaticSummary target="contrast" preset={activeOptions.contrast.preset} />
+                                ) : activeOptions.contrast.mode === "manual" ? (
+                                    <>
+                                        <TextField
+                                            select
+                                            size="small"
+                                            label="Method"
+                                            value={activeOptions.contrast.method}
+                                            onChange={(event) =>
+                                                patchCorrection("contrast", {
+                                                    method: event.target.value as "s_curve" | "adaptive",
+                                                })
+                                            }
+                                        >
+                                            <MenuItem value="s_curve">S-curve</MenuItem>
+                                            <MenuItem value="adaptive">Adaptive</MenuItem>
+                                        </TextField>
+                                        <SliderRow
+                                            label="Strength"
+                                            value={activeOptions.contrast.strength}
+                                            min={0}
+                                            max={1}
+                                            step={0.01}
+                                            format={(value) => `${Math.round(value * 100)}%`}
+                                            onChange={(strength) => patchCorrection("contrast", { strength })}
+                                        />
+                                        {activeOptions.contrast.method === "adaptive" && (
+                                            <>
+                                                <SliderRow
+                                                    label="Black point percentile"
+                                                    value={activeOptions.contrast.low_percentile}
+                                                    min={0}
+                                                    max={100}
+                                                    step={1}
+                                                    onChange={(low_percentile) =>
+                                                        patchCorrection("contrast", { low_percentile })
+                                                    }
+                                                />
+                                                <SliderRow
+                                                    label="White point percentile"
+                                                    value={activeOptions.contrast.high_percentile}
+                                                    min={0}
+                                                    max={100}
+                                                    step={1}
+                                                    onChange={(high_percentile) =>
+                                                        patchCorrection("contrast", { high_percentile })
+                                                    }
+                                                />
+                                            </>
+                                        )}
+                                    </>
+                                ) : (
+                                    <Typography variant="caption" color="text.secondary">
+                                        The correction is disabled.
+                                    </Typography>
+                                )}
                             </CorrectionAccordion>
 
-                            <CorrectionAccordion
-                                title="Vibrance"
-                                enabled={activeOptions.vibrance.enabled}
-                                onEnabled={(enabled) => patchCorrection("vibrance", { enabled })}
-                            >
-                                <SliderRow
-                                    label="Strength"
-                                    value={activeOptions.vibrance.strength}
-                                    min={0}
-                                    max={1}
-                                    step={0.01}
-                                    format={(value) => `${Math.round(value * 100)}%`}
-                                    onChange={(strength) => patchCorrection("vibrance", { strength })}
+                            <CorrectionAccordion title="Local contrast">
+                                <ModeSelector
+                                    mode={activeOptions.localContrast.mode}
+                                    onChange={(mode) => changeCorrectionMode("localContrast", mode)}
                                 />
+                                {activeOptions.localContrast.mode !== "off" && (
+                                    <PresetSelect
+                                        target="localContrast"
+                                        value={activeOptions.localContrast.preset}
+                                        onChange={(name) => changeCorrectionPreset("localContrast", name)}
+                                    />
+                                )}
+                                {activeOptions.localContrast.mode === "automatic" ? (
+                                    <AutomaticSummary
+                                        target="localContrast"
+                                        preset={activeOptions.localContrast.preset}
+                                    />
+                                ) : activeOptions.localContrast.mode === "manual" ? (
+                                    <>
+                                        <SliderRow
+                                            label="Clip limit"
+                                            value={activeOptions.localContrast.clip_limit}
+                                            min={0.01}
+                                            max={20}
+                                            step={0.1}
+                                            format={(value) => value.toFixed(2)}
+                                            onChange={(clip_limit) => patchCorrection("localContrast", { clip_limit })}
+                                        />
+                                        <SliderRow
+                                            label="Tile grid"
+                                            value={activeOptions.localContrast.tile_grid}
+                                            min={1}
+                                            max={64}
+                                            step={1}
+                                            onChange={(tile_grid) => patchCorrection("localContrast", { tile_grid })}
+                                        />
+                                        <SliderRow
+                                            label="Strength"
+                                            value={activeOptions.localContrast.strength}
+                                            min={0}
+                                            max={1}
+                                            step={0.01}
+                                            format={(value) => `${Math.round(value * 100)}%`}
+                                            onChange={(strength) => patchCorrection("localContrast", { strength })}
+                                        />
+                                    </>
+                                ) : (
+                                    <Typography variant="caption" color="text.secondary">
+                                        The correction is disabled.
+                                    </Typography>
+                                )}
+                            </CorrectionAccordion>
+
+                            <CorrectionAccordion title="Vibrance">
+                                <ModeSelector
+                                    mode={activeOptions.vibrance.mode}
+                                    onChange={(mode) => changeCorrectionMode("vibrance", mode)}
+                                />
+                                {activeOptions.vibrance.mode !== "off" && (
+                                    <PresetSelect
+                                        target="vibrance"
+                                        value={activeOptions.vibrance.preset}
+                                        onChange={(name) => changeCorrectionPreset("vibrance", name)}
+                                    />
+                                )}
+                                {activeOptions.vibrance.mode === "automatic" ? (
+                                    <AutomaticSummary target="vibrance" preset={activeOptions.vibrance.preset} />
+                                ) : activeOptions.vibrance.mode === "manual" ? (
+                                    <SliderRow
+                                        label="Strength"
+                                        value={activeOptions.vibrance.strength}
+                                        min={0}
+                                        max={1}
+                                        step={0.01}
+                                        format={(value) => `${Math.round(value * 100)}%`}
+                                        onChange={(strength) => patchCorrection("vibrance", { strength })}
+                                    />
+                                ) : (
+                                    <Typography variant="caption" color="text.secondary">
+                                        The correction is disabled.
+                                    </Typography>
+                                )}
                             </CorrectionAccordion>
 
                             <Accordion disableGutters defaultExpanded>
@@ -1140,19 +1395,14 @@ export default function ReprocessDialog({ photo, onClose, onUpdated }: Reprocess
                                     Tilt
                                 </AccordionSummary>
                                 <AccordionDetails sx={{ display: "flex", flexDirection: "column", gap: 1.5 }}>
-                                    <RadioGroup
-                                        row
-                                        value={activeOptions.tiltMode}
-                                        onChange={(event) => update({ tiltMode: event.target.value as TiltMode })}
-                                    >
-                                        <FormControlLabel value="auto" control={<Radio size="small" />} label="Auto" />
-                                        <FormControlLabel value="off" control={<Radio size="small" />} label="Off" />
-                                        <FormControlLabel
-                                            value="manual"
-                                            control={<Radio size="small" />}
-                                            label="Manual"
+                                    <ModeSelector mode={activeOptions.tiltMode} onChange={changeTiltMode} />
+                                    {activeOptions.tiltMode !== "off" && (
+                                        <PresetSelect
+                                            target="tilt"
+                                            value={activeOptions.tiltPreset}
+                                            onChange={changeTiltPreset}
                                         />
-                                    </RadioGroup>
+                                    )}
 
                                     {activeOptions.tiltMode === "manual" ? (
                                         <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5 }}>
@@ -1175,7 +1425,7 @@ export default function ReprocessDialog({ photo, onClose, onUpdated }: Reprocess
                                                         const parsed = Number(text);
 
                                                         if (text !== "" && Number.isFinite(parsed)) {
-                                                            update({ angle: parsed });
+                                                            update({ angle: parsed, tiltPreset: "custom" });
                                                         }
                                                     }}
                                                     onBlur={() => setActiveAngleText(formatAngle(activeOptions.angle))}
@@ -1197,7 +1447,7 @@ export default function ReprocessDialog({ photo, onClose, onUpdated }: Reprocess
                                                     <Button
                                                         size="small"
                                                         onClick={() => {
-                                                            update({ tiltMode: "manual" });
+                                                            update({ tiltMode: "manual", tiltPreset: "custom" });
                                                             setAngle(tilt.detectedAngle as number);
                                                         }}
                                                     >
@@ -1206,13 +1456,18 @@ export default function ReprocessDialog({ photo, onClose, onUpdated }: Reprocess
                                                 )}
                                             </Box>
                                         </Box>
+                                    ) : activeOptions.tiltMode === "automatic" ? (
+                                        <Box sx={{ display: "flex", flexDirection: "column", gap: 0.75 }}>
+                                            <AutomaticSummary target="tilt" preset={activeOptions.tiltPreset} />
+                                            <Typography variant="caption" color="text.secondary">
+                                                {correction === 0
+                                                    ? "No correction is applied."
+                                                    : `Corrects the horizon by ${correction.toFixed(2)}°.`}
+                                            </Typography>
+                                        </Box>
                                     ) : (
                                         <Typography variant="caption" color="text.secondary">
-                                            {activeOptions.tiltMode === "off"
-                                                ? "The photo is not rotated."
-                                                : correction === 0
-                                                  ? "No correction is applied."
-                                                  : `Corrects the horizon by ${correction.toFixed(2)}°.`}
+                                            The photo is not rotated.
                                         </Typography>
                                     )}
 
@@ -1323,98 +1578,139 @@ export default function ReprocessDialog({ photo, onClose, onUpdated }: Reprocess
                                 </AccordionDetails>
                             </Accordion>
 
-                            <CorrectionAccordion
-                                title="Noise reduction"
-                                enabled={activeOptions.noiseReduction.enabled}
-                                onEnabled={(enabled) => patchCorrection("noiseReduction", { enabled })}
-                            >
-                                <TextField
-                                    select
-                                    size="small"
-                                    label="Method"
-                                    value={activeOptions.noiseReduction.method}
-                                    onChange={(event) =>
-                                        patchCorrection("noiseReduction", {
-                                            method: event.target.value as "bilateral" | "nl_means",
-                                        })
-                                    }
-                                >
-                                    <MenuItem value="bilateral">Bilateral</MenuItem>
-                                    <MenuItem value="nl_means">Non-local means</MenuItem>
-                                </TextField>
-                                {activeOptions.noiseReduction.method === "bilateral" ? (
+                            <CorrectionAccordion title="Noise reduction">
+                                <ModeSelector
+                                    mode={activeOptions.noiseReduction.mode}
+                                    onChange={(mode) => changeCorrectionMode("noiseReduction", mode)}
+                                />
+                                {activeOptions.noiseReduction.mode !== "off" && (
+                                    <PresetSelect
+                                        target="noiseReduction"
+                                        value={activeOptions.noiseReduction.preset}
+                                        onChange={(name) => changeCorrectionPreset("noiseReduction", name)}
+                                    />
+                                )}
+                                {activeOptions.noiseReduction.mode === "automatic" ? (
+                                    <AutomaticSummary
+                                        target="noiseReduction"
+                                        preset={activeOptions.noiseReduction.preset}
+                                    />
+                                ) : activeOptions.noiseReduction.mode === "manual" ? (
+                                    <>
+                                        <TextField
+                                            select
+                                            size="small"
+                                            label="Method"
+                                            value={activeOptions.noiseReduction.method}
+                                            onChange={(event) =>
+                                                patchCorrection("noiseReduction", {
+                                                    method: event.target.value as "bilateral" | "nl_means",
+                                                })
+                                            }
+                                        >
+                                            <MenuItem value="bilateral">Bilateral</MenuItem>
+                                            <MenuItem value="nl_means">Non-local means</MenuItem>
+                                        </TextField>
+                                        {activeOptions.noiseReduction.method === "bilateral" ? (
+                                            <>
+                                                <SliderRow
+                                                    label="Radius"
+                                                    value={activeOptions.noiseReduction.radius}
+                                                    min={1}
+                                                    max={30}
+                                                    step={1}
+                                                    onChange={(radius) => patchCorrection("noiseReduction", { radius })}
+                                                />
+                                                <SliderRow
+                                                    label="Colour sigma"
+                                                    value={activeOptions.noiseReduction.sigma_color}
+                                                    min={1}
+                                                    max={200}
+                                                    step={1}
+                                                    onChange={(sigma_color) =>
+                                                        patchCorrection("noiseReduction", { sigma_color })
+                                                    }
+                                                />
+                                                <SliderRow
+                                                    label="Spatial sigma"
+                                                    value={activeOptions.noiseReduction.sigma_space}
+                                                    min={1}
+                                                    max={200}
+                                                    step={1}
+                                                    onChange={(sigma_space) =>
+                                                        patchCorrection("noiseReduction", { sigma_space })
+                                                    }
+                                                />
+                                            </>
+                                        ) : (
+                                            <SliderRow
+                                                label="Strength"
+                                                value={activeOptions.noiseReduction.strength}
+                                                min={1}
+                                                max={30}
+                                                step={1}
+                                                onChange={(strength) => patchCorrection("noiseReduction", { strength })}
+                                            />
+                                        )}
+                                        <Typography variant="caption" color="text.secondary">
+                                            Preview uses a fast blur approximation; the saved file uses the selected algorithm.
+                                        </Typography>
+                                    </>
+                                ) : (
+                                    <Typography variant="caption" color="text.secondary">
+                                        The correction is disabled.
+                                    </Typography>
+                                )}
+                            </CorrectionAccordion>
+
+                            <CorrectionAccordion title="Sharpening">
+                                <ModeSelector
+                                    mode={activeOptions.sharpening.mode}
+                                    onChange={(mode) => changeCorrectionMode("sharpening", mode)}
+                                />
+                                {activeOptions.sharpening.mode !== "off" && (
+                                    <PresetSelect
+                                        target="sharpening"
+                                        value={activeOptions.sharpening.preset}
+                                        onChange={(name) => changeCorrectionPreset("sharpening", name)}
+                                    />
+                                )}
+                                {activeOptions.sharpening.mode === "automatic" ? (
+                                    <AutomaticSummary target="sharpening" preset={activeOptions.sharpening.preset} />
+                                ) : activeOptions.sharpening.mode === "manual" ? (
                                     <>
                                         <SliderRow
                                             label="Radius"
-                                            value={activeOptions.noiseReduction.radius}
-                                            min={1}
-                                            max={30}
-                                            step={1}
-                                            onChange={(radius) => patchCorrection("noiseReduction", { radius })}
+                                            value={activeOptions.sharpening.radius}
+                                            min={0.1}
+                                            max={10}
+                                            step={0.1}
+                                            format={(value) => value.toFixed(1)}
+                                            onChange={(radius) => patchCorrection("sharpening", { radius })}
                                         />
                                         <SliderRow
-                                            label="Colour sigma"
-                                            value={activeOptions.noiseReduction.sigma_color}
-                                            min={1}
-                                            max={200}
-                                            step={1}
-                                            onChange={(sigma_color) => patchCorrection("noiseReduction", { sigma_color })}
+                                            label="Amount"
+                                            value={activeOptions.sharpening.amount}
+                                            min={0}
+                                            max={3}
+                                            step={0.05}
+                                            format={(value) => value.toFixed(2)}
+                                            onChange={(amount) => patchCorrection("sharpening", { amount })}
                                         />
                                         <SliderRow
-                                            label="Spatial sigma"
-                                            value={activeOptions.noiseReduction.sigma_space}
-                                            min={1}
-                                            max={200}
+                                            label="Threshold"
+                                            value={activeOptions.sharpening.threshold}
+                                            min={0}
+                                            max={50}
                                             step={1}
-                                            onChange={(sigma_space) => patchCorrection("noiseReduction", { sigma_space })}
+                                            onChange={(threshold) => patchCorrection("sharpening", { threshold })}
                                         />
                                     </>
                                 ) : (
-                                    <SliderRow
-                                        label="Strength"
-                                        value={activeOptions.noiseReduction.strength}
-                                        min={1}
-                                        max={30}
-                                        step={1}
-                                        onChange={(strength) => patchCorrection("noiseReduction", { strength })}
-                                    />
+                                    <Typography variant="caption" color="text.secondary">
+                                        The correction is disabled.
+                                    </Typography>
                                 )}
-                                <Typography variant="caption" color="text.secondary">
-                                    Preview uses a fast blur approximation; the saved file uses the selected algorithm.
-                                </Typography>
-                            </CorrectionAccordion>
-
-                            <CorrectionAccordion
-                                title="Sharpening"
-                                enabled={activeOptions.sharpening.enabled}
-                                onEnabled={(enabled) => patchCorrection("sharpening", { enabled })}
-                            >
-                                <SliderRow
-                                    label="Radius"
-                                    value={activeOptions.sharpening.radius}
-                                    min={0.1}
-                                    max={10}
-                                    step={0.1}
-                                    format={(value) => value.toFixed(1)}
-                                    onChange={(radius) => patchCorrection("sharpening", { radius })}
-                                />
-                                <SliderRow
-                                    label="Amount"
-                                    value={activeOptions.sharpening.amount}
-                                    min={0}
-                                    max={3}
-                                    step={0.05}
-                                    format={(value) => value.toFixed(2)}
-                                    onChange={(amount) => patchCorrection("sharpening", { amount })}
-                                />
-                                <SliderRow
-                                    label="Threshold"
-                                    value={activeOptions.sharpening.threshold}
-                                    min={0}
-                                    max={50}
-                                    step={1}
-                                    onChange={(threshold) => patchCorrection("sharpening", { threshold })}
-                                />
                             </CorrectionAccordion>
 
                             <Accordion disableGutters>

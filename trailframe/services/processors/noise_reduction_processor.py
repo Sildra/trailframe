@@ -57,6 +57,8 @@ class NoiseReductionOverride:
     """Per-photo override of the noise reduction step."""
 
     enabled: bool | None = None
+    mode: str | None = None
+    preset: str | None = None
     method: str | None = None
     radius: int | None = None
     sigma_color: float | None = None

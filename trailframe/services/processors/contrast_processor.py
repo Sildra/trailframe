@@ -71,6 +71,8 @@ class ContrastOverride:
     """Per-photo override of the contrast step."""
 
     enabled: bool | None = None
+    mode: str | None = None
+    preset: str | None = None
     method: str | None = None
     strength: float | None = None
     low_percentile: float | None = None

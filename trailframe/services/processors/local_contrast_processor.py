@@ -44,6 +44,8 @@ class LocalContrastOverride:
     """Per-photo override of the local contrast step."""
 
     enabled: bool | None = None
+    mode: str | None = None
+    preset: str | None = None
     clip_limit: float | None = None
     tile_grid: int | None = None
     strength: float | None = None

@@ -45,6 +45,8 @@ class SharpeningOverride:
     """Per-photo override of the sharpening step."""
 
     enabled: bool | None = None
+    mode: str | None = None
+    preset: str | None = None
     radius: float | None = None
     amount: float | None = None
     threshold: float | None = None

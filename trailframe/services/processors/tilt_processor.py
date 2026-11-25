@@ -28,6 +28,7 @@ from trailframe.services.processors.processor import (
     Processor,
     ProcessorResult,
     as_bool,
+    with_overrides,
 )
 
 MAX_MANUAL_ANGLE = 45.0
@@ -193,8 +194,12 @@ class TiltOverride:
     """
 
     enabled: bool | None = None
+    mode: str | None = None
+    preset: str | None = None
     angle: float | None = None
     crop_mode: str | None = None
+    min_confidence: float | None = None
+    max_angle: float | None = None
 
 
 class TiltDetector(Protocol):
@@ -400,14 +405,11 @@ class TiltProcessor(Processor):
 
     def prepare(self, image: Image.Image, context: ProcessingContext) -> None:
         override = context.overrides.get(self.name)
-        decision = self._decision(image, override)
+        settings = with_overrides(self._settings, override)
+        decision = self._decision(image, override, settings)
 
         context.angle = decision.estimate.angle if decision.applied and decision.estimate is not None else 0.0
-        context.crop_mode = (
-            override.crop_mode
-            if isinstance(override, TiltOverride) and override.crop_mode
-            else self._settings.crop_mode
-        )
+        context.crop_mode = settings.crop_mode
         context.data[self.name] = decision
 
     def scale(self, context: ProcessingContext) -> float:
@@ -442,9 +444,19 @@ class TiltProcessor(Processor):
         if override.crop_mode is not None and override.crop_mode not in CROP_MODES:
             return f"Unknown crop mode '{override.crop_mode}'"
 
+        if override.min_confidence is not None and (
+            not math.isfinite(override.min_confidence) or not 0.0 <= override.min_confidence <= 1.0
+        ):
+            return "Minimum confidence must be between 0 and 1."
+
+        if override.max_angle is not None and (
+            not math.isfinite(override.max_angle) or not 0.0 <= override.max_angle <= MAX_MANUAL_ANGLE
+        ):
+            return f"Maximum angle must be between 0 and {MAX_MANUAL_ANGLE:g}°."
+
         return None
 
-    def _decision(self, image: Image.Image, override) -> TiltDecision:
+    def _decision(self, image: Image.Image, override, settings: TiltSettings) -> TiltDecision:
         if isinstance(override, TiltOverride):
             if override.angle is not None:
                 estimate = TiltEstimate(angle=override.angle, confidence=1.0, method=MANUAL_METHOD)
@@ -455,13 +467,13 @@ class TiltProcessor(Processor):
                 return TiltDecision(None, False, "disabled")
 
         try:
-            estimate = detect_tilt(image, self._settings)
+            estimate = detect_tilt(image, settings)
         except Exception as exception:  # noqa: BLE001
             self._log(f"tilt detection failed: {exception}", logging.WARNING)
 
             return TiltDecision(None, False, "failed")
 
-        return decide(estimate, self._settings)
+        return decide(estimate, settings)
 
     def _record(self, decision, context: ProcessingContext) -> dict:
         details = {

@@ -502,7 +502,36 @@ class ProcessingService(Service):
 
             raise
 
+        cls._record_override_modes(steps, overrides)
         order = {processor.step: index for index, processor in enumerate(cls._processors)}
         steps.sort(key=lambda step: order.get(step.get("step"), len(order)))
 
         return entries, steps
+
+    @classmethod
+    def _record_override_modes(cls, steps: list[dict], overrides: dict[str, Any] | None) -> None:
+        """Copy the editor's mode/preset choice into the provenance metadata."""
+
+        if not overrides:
+            return
+
+        names = {processor.step: processor.name for processor in cls._processors}
+
+        for step in steps:
+            override = overrides.get(names.get(step.get("step"), ""))
+
+            if override is None:
+                continue
+
+            meta = step.setdefault("meta", {})
+            details = step.setdefault("details", {})
+            mode = getattr(override, "mode", None)
+            preset = getattr(override, "preset", None)
+
+            if mode:
+                meta["mode"] = mode
+                details["Mode"] = mode.replace("_", " ").title()
+
+                if preset and mode != "off":
+                    meta["preset"] = preset
+                    details["Preset"] = preset.replace("_", " ").title()

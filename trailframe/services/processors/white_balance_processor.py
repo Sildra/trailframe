@@ -62,6 +62,8 @@ class WhiteBalanceOverride:
     """Per-photo override of the white balance step."""
 
     enabled: bool | None = None
+    mode: str | None = None
+    preset: str | None = None
     method: str | None = None
     strength: float | None = None
     temperature: float | None = None

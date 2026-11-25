@@ -23,6 +23,7 @@ from trailframe.services.photos.similarity_service import SimilarityError, Simil
 from trailframe.services.photos.tag_service import TagService
 from trailframe.services.photos.thumbnail_service import ThumbnailService
 from trailframe.services.processors import PROCESSOR_OVERRIDES
+from trailframe.services.processors.presets import PresetError, resolve
 from trailframe.services.processors.tilt_processor import TiltOverride
 
 router = APIRouter(prefix="/api/photos", tags=["photos"])
@@ -48,47 +49,50 @@ class PhotoTagsResponse(BaseModel):
 
 
 class ReprocessTilt(BaseModel):
-    mode: str = "auto"
+    mode: str | None = None
+    preset: str | None = None
     angle: float | None = None
     crop_mode: str | None = None
 
 
-class ReprocessExposure(BaseModel):
+class ReprocessCorrection(BaseModel):
+    """Common mode/preset fields shared by every colour correction."""
+
     enabled: bool | None = None
+    mode: str | None = None
+    preset: str | None = None
+
+
+class ReprocessExposure(ReprocessCorrection):
     exposure: float | None = None
     gamma: float | None = None
 
 
-class ReprocessWhiteBalance(BaseModel):
-    enabled: bool | None = None
+class ReprocessWhiteBalance(ReprocessCorrection):
     method: str | None = None
     strength: float | None = None
     temperature: float | None = None
     tint: float | None = None
 
 
-class ReprocessContrast(BaseModel):
-    enabled: bool | None = None
+class ReprocessContrast(ReprocessCorrection):
     method: str | None = None
     strength: float | None = None
     low_percentile: float | None = None
     high_percentile: float | None = None
 
 
-class ReprocessLocalContrast(BaseModel):
-    enabled: bool | None = None
+class ReprocessLocalContrast(ReprocessCorrection):
     clip_limit: float | None = None
     tile_grid: int | None = None
     strength: float | None = None
 
 
-class ReprocessVibrance(BaseModel):
-    enabled: bool | None = None
+class ReprocessVibrance(ReprocessCorrection):
     strength: float | None = None
 
 
-class ReprocessNoiseReduction(BaseModel):
-    enabled: bool | None = None
+class ReprocessNoiseReduction(ReprocessCorrection):
     method: str | None = None
     radius: int | None = None
     sigma_color: float | None = None
@@ -96,8 +100,7 @@ class ReprocessNoiseReduction(BaseModel):
     strength: float | None = None
 
 
-class ReprocessSharpening(BaseModel):
-    enabled: bool | None = None
+class ReprocessSharpening(ReprocessCorrection):
     radius: float | None = None
     amount: float | None = None
     threshold: float | None = None
@@ -163,19 +166,24 @@ def _build_reprocess_overrides(payload: ReprocessRequest) -> dict:
     overrides = {}
 
     if payload.tilt is not None:
-        mode = payload.tilt.mode.lower()
+        values = payload.tilt.model_dump(exclude_none=True)
+        mode = values.pop("mode", None)
+        preset = values.pop("preset", None)
 
-        if mode not in {"auto", "off", "manual"}:
-            raise HTTPException(400, f"Unknown tilt mode '{payload.tilt.mode}'")
+        # Older clients sent only `angle` (or only `crop_mode`) with the old
+        # implicit "auto" default. An angle made that request a manual override.
+        if mode is None:
+            mode = "manual" if "angle" in values else "automatic"
 
-        if mode == "manual" and payload.tilt.angle is None:
+        try:
+            enabled, resolved = resolve("Tilt", mode, preset, values)
+        except PresetError as error:
+            raise HTTPException(400, str(error)) from None
+
+        if resolved["mode"] == "manual" and values.get("angle") is None:
             raise HTTPException(400, "A manual angle is required")
 
-        overrides["Tilt"] = TiltOverride(
-            enabled=mode != "off",
-            angle=payload.tilt.angle if mode == "manual" else None,
-            crop_mode=payload.tilt.crop_mode,
-        )
+        overrides["Tilt"] = TiltOverride(enabled=enabled, **resolved)
 
     corrections = {
         "Exposure": payload.exposure,
@@ -188,8 +196,19 @@ def _build_reprocess_overrides(payload: ReprocessRequest) -> dict:
     }
 
     for name, model in corrections.items():
-        if model is not None:
-            overrides[name] = PROCESSOR_OVERRIDES[name](**model.model_dump(exclude_none=True))
+        if model is None:
+            continue
+
+        values = model.model_dump(exclude_none=True)
+        mode = values.pop("mode", None)
+        preset = values.pop("preset", None)
+
+        try:
+            enabled, resolved = resolve(name, mode, preset, values)
+        except PresetError as error:
+            raise HTTPException(400, str(error)) from None
+
+        overrides[name] = PROCESSOR_OVERRIDES[name](enabled=enabled, **resolved)
 
     return overrides
 

@@ -45,7 +45,32 @@ describe("applyColorPreview", () => {
     it("brightens with positive exposure", () => {
         const pixels = image(8, 8, [100, 100, 100]);
         const options = optionsWith((value) => {
-            value.exposure = { enabled: true, exposure: 1, gamma: 1 };
+            value.exposure = {
+                ...value.exposure,
+                enabled: true,
+                mode: "manual",
+                preset: "custom",
+                exposure: 1,
+                gamma: 1,
+            };
+        });
+
+        applyColorPreview(pixels, options);
+
+        expect(average(pixels, 0)).toBeGreaterThan(100);
+    });
+
+    it("uses the preset's effective values in automatic mode", () => {
+        const pixels = image(8, 8, [100, 100, 100]);
+        const options = optionsWith((value) => {
+            value.exposure = {
+                ...value.exposure,
+                enabled: true,
+                mode: "automatic",
+                preset: "strong",
+                exposure: 0,
+                gamma: 1,
+            };
         });
 
         applyColorPreview(pixels, options);
@@ -57,7 +82,10 @@ describe("applyColorPreview", () => {
         const pixels = image(8, 8, [100, 100, 100]);
         const options = optionsWith((value) => {
             value.whiteBalance = {
+                ...value.whiteBalance,
                 enabled: true,
+                mode: "manual",
+                preset: "custom",
                 method: "manual",
                 strength: 1,
                 temperature: 1,
@@ -73,7 +101,13 @@ describe("applyColorPreview", () => {
     it("boosts saturation of muted colours with vibrance", () => {
         const pixels = image(8, 8, [120, 100, 100]);
         const options = optionsWith((value) => {
-            value.vibrance = { enabled: true, strength: 1 };
+            value.vibrance = {
+                ...value.vibrance,
+                enabled: true,
+                mode: "manual",
+                preset: "custom",
+                strength: 1,
+            };
         });
 
         applyColorPreview(pixels, options);
@@ -94,7 +128,15 @@ describe("applyColorPreview", () => {
         }
 
         const options = optionsWith((value) => {
-            value.sharpening = { enabled: true, radius: 1, amount: 1, threshold: 0 };
+            value.sharpening = {
+                ...value.sharpening,
+                enabled: true,
+                mode: "manual",
+                preset: "custom",
+                radius: 1,
+                amount: 1,
+                threshold: 0,
+            };
         });
 
         applyColorPreview(pixels, options);

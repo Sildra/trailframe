@@ -1,6 +1,12 @@
 import {
+    CORRECTION_KEYS,
+    DEFAULT_PRESETS,
     MAX_MANUAL_ANGLE,
+    PRESETS,
     defaultReprocessOptions,
+    presetValues,
+    type CorrectionKey,
+    type CorrectionMode,
     type CropMode,
     type ReprocessOptions,
     type ReprocessPhoto,
@@ -19,6 +25,24 @@ interface Timestamped {
     date?: string | null;
     id?: number | null;
 }
+
+const NUMERIC_FIELDS: Record<CorrectionKey, string[]> = {
+    exposure: ["exposure", "gamma"],
+    whiteBalance: ["strength", "temperature", "tint"],
+    contrast: ["strength", "low_percentile", "high_percentile"],
+    localContrast: ["clip_limit", "tile_grid", "strength"],
+    vibrance: ["strength"],
+    noiseReduction: ["radius", "sigma_color", "sigma_space", "strength"],
+    sharpening: ["radius", "amount", "threshold"],
+};
+
+const STRING_FIELDS: Partial<Record<CorrectionKey, string[]>> = {
+    whiteBalance: ["method"],
+    contrast: ["method"],
+    noiseReduction: ["method"],
+};
+
+const INTEGER_FIELDS = new Set(["localContrast.tile_grid", "noiseReduction.radius"]);
 
 /** Chronological order, independent of similarity score. */
 export function sortPhotosByTime<T extends Timestamped>(photos: T[]): T[] {
@@ -49,10 +73,6 @@ function average(values: number[], fallback: number): number {
     return finite.length > 0 ? rounded(finite.reduce((sum, value) => sum + value, 0) / finite.length) : fallback;
 }
 
-function roundedInteger(values: number[], fallback: number): number {
-    return Math.round(average(values, fallback));
-}
-
 function majorityEnabled(values: boolean[]): boolean {
     return values.length > 0 && values.filter(Boolean).length * 2 > values.length;
 }
@@ -77,84 +97,91 @@ function modeValue<T extends string>(values: T[], fallback: T): T {
     return best;
 }
 
-function barycentricOptions(options: ReprocessOptions[]): ReprocessOptions {
-    const base = options[0];
-    const exposure = options.filter((entry) => entry.exposure.enabled).map((entry) => entry.exposure);
-    const whiteBalance = options.filter((entry) => entry.whiteBalance.enabled).map((entry) => entry.whiteBalance);
-    const contrast = options.filter((entry) => entry.contrast.enabled).map((entry) => entry.contrast);
-    const localContrast = options.filter((entry) => entry.localContrast.enabled).map((entry) => entry.localContrast);
-    const vibrance = options.filter((entry) => entry.vibrance.enabled).map((entry) => entry.vibrance);
-    const noiseReduction = options.filter((entry) => entry.noiseReduction.enabled).map((entry) => entry.noiseReduction);
-    const sharpening = options.filter((entry) => entry.sharpening.enabled).map((entry) => entry.sharpening);
+function correctionOptions<K extends CorrectionKey>(key: K, entries: ReprocessOptions[]): ReprocessOptions[K] {
+    const base = entries[0][key] as unknown as Record<string, unknown>;
+    const active = entries.filter((entry) => entry[key].mode !== "off");
+    const mode: CorrectionMode = majorityEnabled(entries.map((entry) => entry[key].mode !== "off"))
+        ? modeValue(
+              active.map((entry) => entry[key].mode),
+              base.mode === "off" ? "manual" : (base.mode as CorrectionMode),
+          )
+        : "off";
+    const named = entries
+        .filter((entry) => entry[key].mode === mode && entry[key].preset !== "custom" && PRESETS[key][entry[key].preset])
+        .map((entry) => entry[key].preset);
+    const preset = modeValue(named, DEFAULT_PRESETS[key]);
+    const manual = entries.filter((entry) => entry[key].mode === "manual");
+    const values: Record<string, unknown> = mode === "automatic" ? { ...presetValues(key, preset, "automatic") } : {};
 
-    const angles = options
-        .filter((entry) => entry.tiltMode === "manual" || entry.angle !== 0)
-        .map((entry) => entry.angle);
-    const tiltMode: TiltMode = angles.length > 0 ? "manual" : base.tiltMode;
-    const angle = angles.length > 0
-        ? Math.max(-MAX_MANUAL_ANGLE, Math.min(MAX_MANUAL_ANGLE, average(angles, base.angle)))
-        : base.angle;
+    if (mode === "manual") {
+        for (const field of NUMERIC_FIELDS[key]) {
+            const fallback = Number(base[field]);
+            const collected = manual.map((entry) =>
+                Number((entry[key] as unknown as Record<string, unknown>)[field]),
+            );
+            const computed = average(collected, fallback);
+            values[field] = INTEGER_FIELDS.has(`${key}.${field}`) ? Math.round(computed) : computed;
+        }
+
+        for (const field of STRING_FIELDS[key] ?? []) {
+            values[field] = modeValue(
+                manual.map((entry) => String((entry[key] as unknown as Record<string, unknown>)[field])),
+                String(base[field]),
+            );
+        }
+    }
+
+    const presetName =
+        mode === "manual" && (named.length === 0 || manual.some((entry) => entry[key].preset === "custom"))
+            ? "custom"
+            : preset;
 
     return {
         ...base,
+        ...values,
+        mode,
+        preset: presetName,
+        enabled: mode !== "off",
+    } as ReprocessOptions[K];
+}
+
+function barycentricOptions(options: ReprocessOptions[]): ReprocessOptions {
+    const base = options[0];
+    const angles = options
+        .filter((entry) => entry.tiltMode === "manual" || entry.angle !== 0)
+        .map((entry) => entry.angle);
+    const tiltMode: TiltMode = angles.length > 0
+        ? "manual"
+        : modeValue(
+              options.map((entry) => entry.tiltMode),
+              base.tiltMode,
+          );
+    const angle = angles.length > 0
+        ? Math.max(-MAX_MANUAL_ANGLE, Math.min(MAX_MANUAL_ANGLE, average(angles, base.angle)))
+        : base.angle;
+    const tiltPreset = angles.length > 0
+        ? "custom"
+        : modeValue(
+              options.map((entry) => entry.tiltPreset),
+              DEFAULT_PRESETS.tilt,
+          );
+
+    const merged = {} as ReprocessOptions;
+
+    for (const key of CORRECTION_KEYS) {
+        Object.assign(merged, { [key]: correctionOptions(key, options) });
+    }
+
+    return {
+        ...base,
+        ...merged,
         tiltMode,
+        tiltPreset,
         angle,
-        cropMode: modeValue<CropMode>(
+        cropMode: angles.length > 0 ? base.cropMode : modeValue<CropMode>(
             options.map((entry) => entry.cropMode),
             base.cropMode,
         ),
-        exposure: {
-            enabled: majorityEnabled(options.map((entry) => entry.exposure.enabled)),
-            exposure: average(exposure.map((entry) => entry.exposure), base.exposure.exposure),
-            gamma: average(exposure.map((entry) => entry.gamma), base.exposure.gamma),
-        },
-        whiteBalance: {
-            enabled: majorityEnabled(options.map((entry) => entry.whiteBalance.enabled)),
-            method: modeValue(
-                whiteBalance.map((entry) => entry.method),
-                base.whiteBalance.method,
-            ),
-            strength: average(whiteBalance.map((entry) => entry.strength), base.whiteBalance.strength),
-            temperature: average(whiteBalance.map((entry) => entry.temperature), base.whiteBalance.temperature),
-            tint: average(whiteBalance.map((entry) => entry.tint), base.whiteBalance.tint),
-        },
-        contrast: {
-            enabled: majorityEnabled(options.map((entry) => entry.contrast.enabled)),
-            method: modeValue(
-                contrast.map((entry) => entry.method),
-                base.contrast.method,
-            ),
-            strength: average(contrast.map((entry) => entry.strength), base.contrast.strength),
-            low_percentile: average(contrast.map((entry) => entry.low_percentile), base.contrast.low_percentile),
-            high_percentile: average(contrast.map((entry) => entry.high_percentile), base.contrast.high_percentile),
-        },
-        localContrast: {
-            enabled: majorityEnabled(options.map((entry) => entry.localContrast.enabled)),
-            clip_limit: average(localContrast.map((entry) => entry.clip_limit), base.localContrast.clip_limit),
-            tile_grid: roundedInteger(localContrast.map((entry) => entry.tile_grid), base.localContrast.tile_grid),
-            strength: average(localContrast.map((entry) => entry.strength), base.localContrast.strength),
-        },
-        vibrance: {
-            enabled: majorityEnabled(options.map((entry) => entry.vibrance.enabled)),
-            strength: average(vibrance.map((entry) => entry.strength), base.vibrance.strength),
-        },
-        noiseReduction: {
-            enabled: majorityEnabled(options.map((entry) => entry.noiseReduction.enabled)),
-            method: modeValue(
-                noiseReduction.map((entry) => entry.method),
-                base.noiseReduction.method,
-            ),
-            radius: roundedInteger(noiseReduction.map((entry) => entry.radius), base.noiseReduction.radius),
-            sigma_color: average(noiseReduction.map((entry) => entry.sigma_color), base.noiseReduction.sigma_color),
-            sigma_space: average(noiseReduction.map((entry) => entry.sigma_space), base.noiseReduction.sigma_space),
-            strength: average(noiseReduction.map((entry) => entry.strength), base.noiseReduction.strength),
-        },
-        sharpening: {
-            enabled: majorityEnabled(options.map((entry) => entry.sharpening.enabled)),
-            radius: average(sharpening.map((entry) => entry.radius), base.sharpening.radius),
-            amount: average(sharpening.map((entry) => entry.amount), base.sharpening.amount),
-            threshold: average(sharpening.map((entry) => entry.threshold), base.sharpening.threshold),
-        },
         rescan: true,
     };
 }
@@ -162,7 +189,7 @@ function barycentricOptions(options: ReprocessOptions[]): ReprocessOptions {
 /**
  * Builds the options shared by a multi-edit selection. Local edits win over the
  * saved recipe: reference mode copies one photo, barycentric mode averages the
- * selection's numeric settings and picks the most common methods and modes.
+ * selection's manual settings and votes on its modes/presets.
  */
 export function normalizeReprocessOptions(
     photos: NormalizablePhoto[],

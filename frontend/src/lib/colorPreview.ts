@@ -1,4 +1,4 @@
-import type { CorrectionSettings } from "./reprocess";
+import { effectiveCorrection, type CorrectionSettings } from "./reprocess";
 
 /** RGBA pixels, compatible with the browser's `ImageData`. */
 export interface PixelData {
@@ -267,32 +267,42 @@ function applySharpening(pixels: PixelData, options: CorrectionSettings): void {
  * every slider change; the saved file is always re-encoded by the backend.
  */
 export function applyColorPreview(pixels: PixelData, options: CorrectionSettings): PixelData {
-    if (options.exposure.enabled) {
-        applyExposure(pixels, options);
+    const settings: CorrectionSettings = {
+        exposure: effectiveCorrection("exposure", options.exposure),
+        whiteBalance: effectiveCorrection("whiteBalance", options.whiteBalance),
+        contrast: effectiveCorrection("contrast", options.contrast),
+        localContrast: effectiveCorrection("localContrast", options.localContrast),
+        vibrance: effectiveCorrection("vibrance", options.vibrance),
+        noiseReduction: effectiveCorrection("noiseReduction", options.noiseReduction),
+        sharpening: effectiveCorrection("sharpening", options.sharpening),
+    };
+
+    if (settings.exposure.enabled) {
+        applyExposure(pixels, settings);
     }
 
-    if (options.whiteBalance.enabled) {
-        applyWhiteBalance(pixels, options);
+    if (settings.whiteBalance.enabled) {
+        applyWhiteBalance(pixels, settings);
     }
 
-    if (options.contrast.enabled) {
-        applyContrast(pixels, options);
+    if (settings.contrast.enabled) {
+        applyContrast(pixels, settings);
     }
 
-    if (options.localContrast.enabled) {
-        applyLocalContrast(pixels, options);
+    if (settings.localContrast.enabled) {
+        applyLocalContrast(pixels, settings);
     }
 
-    if (options.vibrance.enabled) {
-        applyVibrance(pixels, options);
+    if (settings.vibrance.enabled) {
+        applyVibrance(pixels, settings);
     }
 
-    if (options.noiseReduction.enabled) {
-        applyNoiseReduction(pixels, options);
+    if (settings.noiseReduction.enabled) {
+        applyNoiseReduction(pixels, settings);
     }
 
-    if (options.sharpening.enabled) {
-        applySharpening(pixels, options);
+    if (settings.sharpening.enabled) {
+        applySharpening(pixels, settings);
     }
 
     return pixels;

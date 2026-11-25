@@ -1795,6 +1795,10 @@ export interface components {
         ReprocessContrast: {
             /** Enabled */
             enabled?: boolean | null;
+            /** Mode */
+            mode?: string | null;
+            /** Preset */
+            preset?: string | null;
             /** Method */
             method?: string | null;
             /** Strength */
@@ -1808,6 +1812,10 @@ export interface components {
         ReprocessExposure: {
             /** Enabled */
             enabled?: boolean | null;
+            /** Mode */
+            mode?: string | null;
+            /** Preset */
+            preset?: string | null;
             /** Exposure */
             exposure?: number | null;
             /** Gamma */
@@ -1817,6 +1825,10 @@ export interface components {
         ReprocessLocalContrast: {
             /** Enabled */
             enabled?: boolean | null;
+            /** Mode */
+            mode?: string | null;
+            /** Preset */
+            preset?: string | null;
             /** Clip Limit */
             clip_limit?: number | null;
             /** Tile Grid */
@@ -1828,6 +1840,10 @@ export interface components {
         ReprocessNoiseReduction: {
             /** Enabled */
             enabled?: boolean | null;
+            /** Mode */
+            mode?: string | null;
+            /** Preset */
+            preset?: string | null;
             /** Method */
             method?: string | null;
             /** Radius */
@@ -1866,6 +1882,10 @@ export interface components {
         ReprocessSharpening: {
             /** Enabled */
             enabled?: boolean | null;
+            /** Mode */
+            mode?: string | null;
+            /** Preset */
+            preset?: string | null;
             /** Radius */
             radius?: number | null;
             /** Amount */
@@ -1875,11 +1895,10 @@ export interface components {
         };
         /** ReprocessTilt */
         ReprocessTilt: {
-            /**
-             * Mode
-             * @default auto
-             */
-            mode: string;
+            /** Mode */
+            mode?: string | null;
+            /** Preset */
+            preset?: string | null;
             /** Angle */
             angle?: number | null;
             /** Crop Mode */
@@ -1889,6 +1908,10 @@ export interface components {
         ReprocessVibrance: {
             /** Enabled */
             enabled?: boolean | null;
+            /** Mode */
+            mode?: string | null;
+            /** Preset */
+            preset?: string | null;
             /** Strength */
             strength?: number | null;
         };
@@ -1896,6 +1919,10 @@ export interface components {
         ReprocessWhiteBalance: {
             /** Enabled */
             enabled?: boolean | null;
+            /** Mode */
+            mode?: string | null;
+            /** Preset */
+            preset?: string | null;
             /** Method */
             method?: string | null;
             /** Strength */

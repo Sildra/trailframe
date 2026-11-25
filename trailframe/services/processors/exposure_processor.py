@@ -41,6 +41,8 @@ class ExposureOverride:
     """Per-photo override of the exposure step."""
 
     enabled: bool | None = None
+    mode: str | None = None
+    preset: str | None = None
     exposure: float | None = None
     gamma: float | None = None
 

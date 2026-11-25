@@ -13,7 +13,7 @@ The Gallery is the main view of your library.
 - Uploaded photos are archived in the photos folder, then the creation pipeline generates the copies used for display and analysis. The copies go through a chain of processing steps: tilt correction, crop, and rescale.
 - A tilted horizon is straightened in the processed copies when the estimate is confident enough; the crop then trims the empty borders. The archived original is never modified.
 - The photo panel lists each processing step with its details. Hover the Tilt step to see the supporting lines faintly, the strongest detected horizon in red and the corrected target in green. Detection prefers lines near the middle of the frame, so edges at the border are less likely to skew the angle.
-- **Adjust processing** in the photo panel re-encodes the copies from the original: pick the output sizes and the main one, choose an automatic, off or manual horizon, and optionally re-run the analysis.
+- **Adjust processing** in the photo panel re-encodes the copies from the original: pick the output sizes and the main one, set each correction to Off, Automatic or Manual, and optionally re-run the analysis. Automatic and Manual offer named presets; Automatic locks the effective settings, while Manual seeds editable ones and switches to Custom when you change a value.
 - Filter by date range, group, location, tags, and favorites.
 - Open a photo to see its metadata: camera, lens, exposure, location, and the activities it belongs to.
 - Mark photos as favorites to find them again quickly.
